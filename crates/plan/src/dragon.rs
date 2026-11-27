@@ -400,6 +400,13 @@ impl Breath {
     pub fn reach(&self) -> f64 {
         self.radius + BREATH_MARGIN
     }
+
+    /// The reach it grows to before it is gone: `CLOUD_MAX` (a fireball's cloud grows from 3 to
+    /// 7 over its 600 ticks: `DragonFireball.onHit`, `setRadiusPerTick((7 - 3) / 600)`) and the
+    /// margin (wall 47: bots waited at an edge that grew over them).
+    pub fn end_reach(&self) -> f64 {
+        self.radius.max(CLOUD_MAX) + BREATH_MARGIN
+    }
 }
 
 /// The dragon's breath clouds and fireballs the server shows, with their radii (a cloud's from
@@ -438,6 +445,8 @@ pub const BREATH_OVER: f64 = 1.5;
 pub const BREATH_UNDER: f64 = 1.0;
 /// Columns round the feet the cell out of a breath is looked for in.
 pub const OUT_SEARCH: i32 = 9;
+/// Columns each way a cell clear of a cloud's end reach is looked for (wall 47).
+pub const OUT_SEARCH_END: i32 = 12;
 /// Blocks ahead of the feet along a walk's heading tested for a breath (`breath_ahead`).
 pub const AHEAD: f64 = 1.5;
 /// Ticks between the notes of a walk held at a breath's edge.
@@ -469,6 +478,13 @@ pub fn out_of_breath(w: &World, feet: [f64; 3]) -> Option<[i32; 3]> {
 /// at 6.4 off a reach of 6.5, the walk to its own cell done each tick).
 pub const OUT_SLACK: f64 = 1.0;
 
+/// Is `p` clear of every breath's end reach on the plane, with `OUT_SLACK` more (wall 47)?
+pub fn clear_of_end(breaths: &[Breath], p: [f64; 3]) -> bool {
+    !breaths
+        .iter()
+        .any(|b| flat(b.pos, p) <= b.end_reach() + OUT_SLACK)
+}
+
 /// Is a body with its feet at `p` well clear of every breath (`breath_on` with `OUT_SLACK` more)?
 pub fn clear_of_breath(breaths: &[Breath], p: [f64; 3]) -> bool {
     !breaths.iter().any(|b| {
@@ -489,10 +505,12 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
     let fc = cell_of(feet);
     let mut cells = crate::path::Cells::new(w);
     let mut best: Option<(f64, [i32; 3])> = None;
-    for x in (fc[0] - OUT_SEARCH)..=(fc[0] + OUT_SEARCH) {
-        for z in (fc[2] - OUT_SEARCH)..=(fc[2] + OUT_SEARCH) {
+    // Out to `OUT_SEARCH_END`: a cell clear of a cloud's end reach (7 and the margins) can lie
+    // past the 9 the edge needed (wall 47).
+    for x in (fc[0] - OUT_SEARCH_END)..=(fc[0] + OUT_SEARCH_END) {
+        for z in (fc[2] - OUT_SEARCH_END)..=(fc[2] + OUT_SEARCH_END) {
             let d0 = flat(feet, mid([x, 0, z]));
-            if d0 > f64::from(OUT_SEARCH) || best.is_some_and(|(bd, _)| d0 > bd) {
+            if d0 > f64::from(OUT_SEARCH_END) || best.is_some_and(|(bd, _)| d0 > bd) {
                 continue;
             }
             let Some(y) = ((fc[1] - 3)..=(fc[1] + 2))
@@ -505,7 +523,7 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
             let p = mid(c);
             if (x == fc[0] && z == fc[2])
                 || refused.contains(&c)
-                || !clear_of_breath(&clouds, p)
+                || !clear_of_end(&clouds, p)
                 || v.is_some_and(|v| before_head(&v, p) || !way_clear(&v, feet, p))
             {
                 continue;
@@ -939,8 +957,8 @@ pub fn dodge_cell_within(
             && r.waypoints.iter().all(|p| {
                 // A cloud already on the start is walked out of; any other is kept off the way.
                 !clouds.iter().any(|b| {
-                    flat(b.pos, mid(from)) > b.reach()
-                        && flat(b.pos, mid([p.0, p.1, p.2])) <= b.reach()
+                    flat(b.pos, mid(from)) > b.end_reach()
+                        && flat(b.pos, mid([p.0, p.1, p.2])) <= b.end_reach()
                 })
             })
     };
@@ -984,7 +1002,7 @@ pub fn dodge_cell_within(
                     && (-EDGE_CLEAR..=EDGE_CLEAR).all(|ex| {
                         (-EDGE_CLEAR..=EDGE_CLEAR).all(|ez| ground(x + ex, c[1], z + ez))
                     })
-                    && clear_of_breath(&clouds, mid(c))
+                    && clear_of_end(&clouds, mid(c))
                     && walked(c))
                 .then_some(c)
             })
@@ -2921,7 +2939,7 @@ impl Plan {
             .breath_walk
             .as_ref()
             .map(|wk| [wk.target.0, wk.target.1, wk.target.2])
-            .filter(|c| clear_of_breath(&clouds, mid(*c)) && *c != cell_of(feet));
+            .filter(|c| clear_of_end(&clouds, mid(*c)) && *c != cell_of(feet));
         let target = match held {
             Some(c) => c,
             None => {
@@ -3738,9 +3756,10 @@ impl Plan {
         // A leg whose end a cloud now reaches is given up (wall 46: race 46063334187 lane 9 paced
         // into a cloud, three 6.0 blows).
         let clouds = clouds_only(w);
-        let done = self.dragon.pace_to.is_none_or(|c| {
-            fc == c || flat(feet, mid(c)) < 1.0 || !clear_of_breath(&clouds, mid(c))
-        });
+        let done = self
+            .dragon
+            .pace_to
+            .is_none_or(|c| fc == c || flat(feet, mid(c)) < 1.0 || !clear_of_end(&clouds, mid(c)));
         if done {
             self.dragon.pace_walk = None;
             let Some((_, v)) = view(w) else {
@@ -4121,25 +4140,60 @@ impl Plan {
             feet[1],
             feet[2] + r.cos() * AHEAD,
         ];
-        let Some(b) = breath_on(&clouds, ahead) else {
+        // A cloud's end reach, not its edge (wall 47: frontier race 46063334187 lanes 1, 2 and 8
+        // waited at an edge that grew over them, 5.0 to 7.0): at its height, the point ahead or
+        // the feet within it.
+        let level = |b: &Breath| {
+            feet[1] <= b.pos[1] + BREATH_OVER
+                && feet[1] + physics::HEIGHT + BREATH_UNDER >= b.pos[1]
+        };
+        let Some(b) = clouds
+            .iter()
+            .filter(|b| {
+                level(b)
+                    && (flat(b.pos, ahead) <= b.end_reach()
+                        || flat(b.pos, feet) <= b.end_reach() + OUT_SLACK)
+            })
+            .min_by(|a, b| flat(a.pos, feet).total_cmp(&flat(b.pos, feet)))
+            .copied()
+        else {
             return c;
         };
         let tick = w.ticks;
         self.dragon.breath_waits += 1;
+        let inside = flat(b.pos, feet) <= b.end_reach() + OUT_SLACK;
         if tick >= self.dragon.breath_waited_at + AHEAD_NOTE_TICKS || self.dragon.breath_waits == 1
         {
             self.dragon.breath_waited_at = tick;
             self.note(
                 tick,
-                "walk waits at a breath's edge".to_owned(),
+                if inside {
+                    "walk backs off a breath's growth".to_owned()
+                } else {
+                    "walk held clear of a breath's end reach".to_owned()
+                },
                 format!(
-                    "a breath {:.1} ahead (radius {:.1}) at {:?}; task {}; {} ticks waited in the run",
-                    flat(b.pos, ahead),
+                    "a breath {:.1} off (radius {:.1}, to grow to {:.1}) at {:?}; task {}; {} ticks in the run",
+                    flat(b.pos, feet),
                     b.radius,
+                    b.end_reach(),
                     cell_of(feet),
                     self.task.name(),
                     self.dragon.breath_waits
                 ),
+            );
+        }
+        if inside {
+            // Straight away from its middle, out past where it will grow to.
+            let away = [feet[0] - b.pos[0], feet[2] - b.pos[2]];
+            let d = away[0].hypot(away[1]).max(1e-6);
+            return toward(
+                feet,
+                [
+                    feet[0] + away[0] / d * 3.0,
+                    feet[1],
+                    feet[2] + away[1] / d * 3.0,
+                ],
             );
         }
         Controls {
