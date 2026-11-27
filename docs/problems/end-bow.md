@@ -34,9 +34,9 @@ So the bow wants: 3 string, feathers and flint (one each per 4 arrows), and stic
 - **The shot** (`plan::bow`): see the brain note `end-bow`. Asked first at E3's two crystal hand-offs (`end_spikes`, and `open_task` before the end stone stock); `bow_step` ahead of `spikes_step`.
 - **Not built**: the carved pumpkin (the snapshot holds 1 iron ingot, shears want 2).
 
-## Parity e07 (run 46041683496, 3ea46ea, real server, Normal, full iron)
-- **e07-bow-24: an arrow from the ground destroyed the crystal 25 off.** The bot on a stone floor at (1688.5, 65, 26.5), the crystal on bedrock 24 east and 7 up (1712.5, 72, 26.5). Aimed by `plan::bow::aim`, `use_item` at script tick 20 (t 74), released 24 ticks later; the crystal was removed at t 114 and its blast went off there. Health stayed 20.0: the blast does nothing at 25.
-- e07-bow-40 is not evidence yet: its arena was 12 from the 24 row's, so its bot aimed at that crystal (nearer, 27.5 off) and was itself hit by an arrow (3.1, cause the player, direct an arrow) at its t 92. The rows now stand 120 apart.
+## Parity e07, first run (46041683496, 3ea46ea): no evidence
+- Both rows' bots kept the look 0, 0 from start to end (the trace's `look 0.0 0.0`): `plan::bow::aim` refused every flight from under the crystal (wall 1), so the script sent no aim and the bow was drawn and let go facing south. The 24 row's arrow went 12 south into the 40 row's bot (3.1, `arrow`, cause the player). The 24 row's crystal was removed at its t 114, near the script's end, by no arrow of its own: not read as a hit.
+- The arenas were 12 apart; now 120.
 
 ## Walls
-(none yet)
+1. **Every flight from under the crystal read Wide** (CI 46043363843, the unit test `a_crystal_is_shot_from_the_ground_drawn_full_and_released_on_the_aim`; parity 46041683496). `aim` gave up a flight once a segment's end was 4 under the crystal, which a shot from the ground is from its first segment. Fix 8838a9d: wide only once past the crystal across (the flat distance plus the box's width).
