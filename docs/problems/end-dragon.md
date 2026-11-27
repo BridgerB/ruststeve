@@ -407,3 +407,13 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix (`Plan::meal_cut`, in lib's always rows, fenced E5):** a meal in hand is cut, its use let go and noted ("eat cut: …"), when the dragon comes near or a cloud does, or after `MEAL_CAP_TICKS` (100; a meal is 32 and the answer's wait 60).
 - **Dev race 46050674145 (9a7b543), final: 0/2.** Lane 0's 28 strikes took the dragon to 182, 181 and 169 on perches, and each time it was back at 200 before the next. With the far crystals standing it heals in flight: its holding pattern passes within 40 on an axis of them. A perch fought with any crystal standing gains nothing over a run. Lane 1 took both crystals, then, low after clouds, died to a dragon blow at the takeoff.
 - **Wall 45: no perch fought while a crystal stands.** With any crystal standing, the dragon heals in flight too. Its holding pattern passes inside the far crystals' box, so in dev race 46050674145 lane 0, 28 strikes left every perch refilled to 200. `fight_with_crystals` is off (`FIGHT_WITH_CRYSTALS` false); the heal ledger stays.
+
+### Wall 46 (frontier race 46063334187, 5caa8c9, from `island`): five of ten dead by 13,460
+- **Lane 7, endermen angered by the dragon:** after a charge at 13,160 four were angry at once; "struck with the sword over the danger line", and it lost to them.
+  - **Fix:** only a single angry enderman is fought.
+  - With `ENDER_WATER_MOST` (2) or more angry within 16, or any hurt by something not the bot in the last 400 ticks, a water bucket is poured at the feet and the bot stands in the source. Endermen take damage from water, teleport, and will not path into it. It is taken back once none is angry within 16 (`Plan::ender_water_step`; "end: water poured at …", "… taken back at …").
+- **Lane 9, a pace into a cloud:** a pace leg whose end a cloud now reaches is given up and chosen again.
+- **Lane 4, no recovery:** it walked through clouds at 1.7 health.
+  - **Fix (`Plan::recover_step`, a row after the always rows):** under 10 health until back over 16, the task in hand is cut (a meal, an escape or a defence kept), no pillar work, strike or mining.
+  - The bot keeps away from clouds within reach + 3 and the dragon within 24, else stands. Up a pillar it is E4's way down.
+- **Lane 5 (E4's):** knocked off a pillar at (42, 91, 19) at 1,680. "spikes: climb on through (the dragon 63 off in phase 0, not holding over 64 off …)": an exception went on climbing inside 64.
