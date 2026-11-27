@@ -319,25 +319,28 @@ pub fn fire_near(w: &World, c: Cell, range: f64) -> Option<(EntityKind, [f64; 3]
         .map(|e| (e.kind, e.pos))
 }
 
-/// A strafe or a fireball in flight this near keeps the bunker sealed (the coordinator, wall 14).
+/// A fireball in flight this near keeps the bunker sealed (the coordinator, wall 14).
 pub const STRAFE_RANGE: f64 = 64.0;
 /// The dragon's strafe phase (`EnderDragonPhase.STRAFE_PLAYER`, 1).
 pub const STRAFE_PHASE: i32 = 1;
 
-/// The dragon strafing within `STRAFE_RANGE` of the bot, or a dragon fireball in flight within it:
-/// its kind and place (frontier race 45931225605 lane 1: the fireball aimed at the bot came into
-/// its open bunker, the cloud 0.0 off it).
+/// A dragon fireball in flight within `STRAFE_RANGE` of the bot: its kind and place (frontier
+/// race 45931225605 lane 1: the fireball aimed at the bot came into its open bunker, the cloud
+/// 0.0 off it). Not the strafe alone: a strafe ends only once the dragon has seen its target
+/// within 64 for 5 ticks and fired (`DragonStrafePlayerPhase`, probe 45938702513), so a bot
+/// sealed for a whole strafe holds it for good.
 pub fn strafe_threat(w: &World) -> Option<(EntityKind, [f64; 3])> {
     let body = w.body?;
     w.entities
         .values()
-        .filter(|e| !e.dead && dist(e.pos, body.pos) <= STRAFE_RANGE)
-        .find(|e| {
-            e.kind == EntityKind::DragonFireball
-                || (e.kind == EntityKind::EnderDragon
-                    && matches!(e.metadata.get(&DRAGON_PHASE_INDEX), Some(MetaValue::Int(p)) if *p == STRAFE_PHASE))
-        })
+        .filter(|e| !e.dead && e.kind == EntityKind::DragonFireball)
+        .find(|e| dist(e.pos, body.pos) <= STRAFE_RANGE)
         .map(|e| (e.kind, e.pos))
+}
+
+/// The dragon is strafing (any distance): a hold for a cloud alone is capped.
+pub fn strafing(w: &World) -> bool {
+    dragon(w).is_some_and(|(_, phase)| phase == Some(STRAFE_PHASE))
 }
 
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
@@ -569,6 +572,9 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// When the wait for fire by the stair began.
+    #[serde(default)]
+    pub fire_since: Option<u64>,
     /// A wait for a fireball or cloud by the stair in hand, and waits begun.
     #[serde(default)]
     pub fire_waiting: bool,
@@ -2007,11 +2013,33 @@ impl Plan {
     /// bunker is not left (race 45910659261 lane 1: a fireball on the stair, its cloud reached
     /// the bot under the end stone at 6 a second, 20 to dead in 4 s). Noted once a wait.
     fn fire_at_stair(&mut self, w: &World, top: Cell, tick: u64) -> bool {
-        let threat = fire_near(w, top, STAIR_CLEAR).or_else(|| strafe_threat(w));
+        let flying = strafe_threat(w);
+        let threat = flying.or_else(|| fire_near(w, top, STAIR_CLEAR));
         let Some((kind, at)) = threat else {
             self.end.fire_waiting = false;
+            self.end.fire_since = None;
             return false;
         };
+        // A cloud alone by the stair during a strafe: held at most `STRAFE_HIDE_TICKS` (E5's),
+        // then out so the dragon sees the bot and the strafe can end.
+        let since = *self.end.fire_since.get_or_insert(tick);
+        if flying.is_none()
+            && strafing(w)
+            && tick.saturating_sub(since) >= crate::dragon::STRAFE_HIDE_TICKS
+        {
+            if self.end.fire_waiting {
+                self.end.fire_waiting = false;
+                self.note(
+                    tick,
+                    "end: the bunker opens though a cloud is by its stair".to_owned(),
+                    format!(
+                        "held {} ticks under a strafe with no fireball in flight; to be seen",
+                        crate::dragon::STRAFE_HIDE_TICKS
+                    ),
+                );
+            }
+            return false;
+        }
         if !self.end.fire_waiting {
             self.end.fire_waiting = true;
             self.end.fire_waits += 1;
