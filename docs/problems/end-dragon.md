@@ -356,3 +356,38 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Reverted for a cloud already on the body with no walk out:** in the bunker, or when the walk out fails and no wall is to be dug, a notch down where the feet are (as before wall 36). In water: pressed straight on.
   - Still out: a notch for a charge, and cover from a strafe.
   - And none of E5's steps sends the bot into the bunker while a crystal is alive (`Plan::bunker_now`; lane 7 died walking into it under a cloud).
+
+## Part 2
+
+### Wall 39: the fight waited for every crystal (race 45994686575)
+- Three bots got to 1 crystal left, but the dragon was at 200 throughout: lane 5 saw 37 perches with no strike, because the fight began only with no crystal standing. Lane 0 was knocked off mid-meal (`fell.assist`, "eat cooked_porkchop").
+- **The heal, from the jar** (`EnderDragon.checkCrystals`, javap probe 46039100437):
+  - 1 tick in 10 the dragon takes as `nearestCrystal` the nearest end crystal in its bounding box grown by 32 (`getBoundingBox().inflate(32.0)`).
+  - While it has one, it heals 1 every 10 ticks (`tickCount % 10 == 0`, up to its max).
+  - The box is 16 by 8 by 16, so the reach is per axis: 40 on x and z, from 32 under its feet to 40 over them.
+  - From the perch, 8 of the 10 spikes are in it (config/end.toml); only (42, 0) and (-42, -1) are past 40 on an axis.
+  - So a crystal can heal the perched dragon, at up to 2 a second.
+- **Fix:**
+  - The perch is fought with crystals standing when 2 or fewer are left, or when none can heal it at the perch (`fight_with_crystals`, `heals_from`).
+  - `perch_fight_step` begins the fight when the dragon sits or lands, cutting the task in hand, never up a pillar or a spike ("dragon: the perch fought with N crystals standing").
+  - The fight hands back to the crystals when the perch is over ("dragon: the perch fight over, back to the crystals").
+  - Every heal is in the ledger ("dragon healed", with the total, the crystals standing and the nearest's distance), at most every 200 ticks.
+  - A meal in the End only with the dragon in its holding pattern more than 40 off; a meal in hand is cut when it comes (`dragon_holds_meal`).
+- **Dev race 46040826241 (6c6d484, dev-end-two-crystals, 2 lanes), lane 1 read mid-run:**
+  - The keep tags held: crystals #86 (42.5, 83, 0.5) and #98 (12.5, 77, 39.5) stood, and #97 was seen only at tick 40.
+  - Perches were fought (1,280, 2,480, 3,860). Four head strikes took the dragon to 190.8, and #98, in heal reach of the perch, healed it back to 200 by 4,480 ("dragon healed 20.2 in all").
+  - **Fix:** the perch is fought only with no standing crystal in heal reach of it. The count alone is not enough.
+
+### Wall 40 (race 46038776204, 117843e): no dodge from where the bot stood
+- **Lanes 1, 3 and 4** fell from a charge 80 to 160 ticks after "sitting-scanning → charging", with no dodge cell: on a pillar, or in E3's surface pit.
+  - **Fix (`Plan::charge_ready_step`):** from the landing approach to the end of the perch, a bot not fighting it gets onto ground it can dodge a charge from.
+    - The check is a dodge cell from where it stands, every 20 ticks.
+    - Off a short drop beside; on a pillar's top, dug down a block at a time; in a pit, risen a block at a jump (at most 6), or the wall toward the open dug for a block.
+    - Up a crystal's pillar or spike it is E4's. Noted "charge: no dodge from … with the dragon coming down".
+- **Lane 8:** "fireball: no dodge cell from [34, 55, 53] (ticks 58)": risen out of a one-deep pit, still under the aim, no new choice. Then a meal was begun in the cloud.
+  - **Fix:** the dodge cell is chosen again after a rise and every `DODGE_RETRY` (10) ticks while none is had. No meal starts or goes on with a cloud on the feet or within reach (`dragon_holds_meal`).
+- **Wall 41: the charge dodge was inside the wings' sweep** (race 46038776204 lane 6). At (24, 60, 3), 24 from the fountain: sitting-scanning at 36,620, charging at 36,720, "charge: dodge to [23, 62, 9] (ticks 25)" (6 cells), and at 36,740 knocked to (93, 99, 40), off the island.
+  - The wing parts ride about 4.5 out from the body, 4 across, and knock what is within their boxes grown by 4: about 10.5 each side of its line.
+  - **Fix:** charges and the body's knock are dodged 12 to 16 off (`CHARGE_SPAN`, routes up to 32 steps).
+  - While the dragon scans, a bot not fighting it within 48 of the fountain is already pacing sideways in legs of 12 to 16, since walking 12 takes about 55 ticks and the charge about 20.
+  - Out of pits from the landing approach (wall 40).

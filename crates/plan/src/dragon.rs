@@ -659,10 +659,17 @@ pub const DODGE_AIM: f64 = 6.0;
 /// twice the farthest cell is no dodge: the fireball flies about 20 to 40 ticks).
 pub const DODGE_NODES: u32 = 800;
 pub const DODGE_STEPS: usize = 16;
+/// Blocks off sideways a charge or the body's knock is dodged to (wall 41, race 46038776204 lane
+/// 6: a 6-cell step on a charge's line, knocked 70 off the island). The wing parts ride about 4.5
+/// out from the body, 4 across, and knock what is in their boxes grown by 4 (`EnderDragon`): about
+/// 10.5 each side of its line, and a margin.
+pub const CHARGE_SPAN: (i32, i32) = (12, 16);
 /// Heights off the feet a dodge cell is looked for at, nearest first: up to 4 (from the bunker's
 /// stair, 3 under the ground: frontier race 45964846590, "no dodge cell from [13, 59, 0]").
 /// Blocks a bot with no dodge cell rises out of a pit or a shaft at most.
 pub const DODGE_RISES: i32 = 6;
+/// Ticks between choices of a dodge cell while none is had.
+pub const DODGE_RETRY: u64 = 10;
 pub const DODGE_YS: [i32; 8] = [0, 1, -1, 2, -2, 3, 4, -3];
 /// Blocks a tick a fireball flies, for the note's ticks to its hit (dev race 45940964839: about
 /// 40 ticks over 30 to 40 blocks).
@@ -681,6 +688,67 @@ pub const FOUNTAIN_CLEAR: f64 = 5.0;
 pub const IMMINENT: i32 = i32::MIN;
 /// The key of a dodge from a charge (`charging_at`).
 pub const CHARGE: i32 = i32::MIN + 1;
+/// The crystal's heal (`EnderDragon.checkCrystals`, javap probe 46039100437): 1 in 10 ticks the
+/// dragon takes the nearest end crystal in its box grown by `HEAL_RANGE` (32) on every axis as
+/// `nearestCrystal`, and while it has one it heals 1 every 10 ticks. Its box is 16 by 8 by 16
+/// (`HEAL_BOX_HALF` 8 across, `HEAL_BOX_HEIGHT` 8 up), so the reach is per axis: 40 on x and z,
+/// from 32 under its feet to 40 over them. From the perch 8 of the 10 spikes are inside it
+/// (config/end.toml: only (42, 0) and (-42, -1) are past 40 on an axis). The perch point it sits at
+/// (the fountain's axis, about 67 up: E1), the crystals standing at most that a perch is fought
+/// with whatever their heal, and ticks between the heal's notes.
+pub const HEAL_RANGE: f64 = 32.0;
+pub const HEAL_BOX_HALF: f64 = 8.0;
+pub const HEAL_BOX_HEIGHT: f64 = 8.0;
+pub const PERCH_POINT: [f64; 3] = [0.5, 67.0, 0.5];
+pub const CRYSTALS_FIGHT_MAX: usize = 2;
+pub const HEAL_NOTE_TICKS: u64 = 200;
+/// Blocks on the plane the holding dragon keeps from a bot that eats (wall 39).
+pub const MEAL_CLEAR: f64 = 40.0;
+/// Ticks between the checks of a dodge cell from where the bot stands as the dragon comes down.
+pub const READY_CHECK_TICKS: u64 = 20;
+/// Blocks from the fountain within which a bot not fighting paces while the dragon scans (the
+/// charge looks for a player near it).
+pub const SCAN_PACE_NEAR: f64 = 48.0;
+
+/// The nearest standing crystal's distance from `p`, if any is shown.
+pub fn nearest_crystal(w: &World, p: [f64; 3]) -> Option<f64> {
+    w.entities
+        .values()
+        .filter(|e| e.kind == EntityKind::EndCrystal && !e.dead)
+        .map(|e| dist3(e.pos, p))
+        .min_by(f64::total_cmp)
+}
+
+/// Can a crystal at `c` heal a dragon whose feet are at `d` (inside its box grown by
+/// `HEAL_RANGE`)?
+pub fn heals_from(d: [f64; 3], c: [f64; 3]) -> bool {
+    let reach = HEAL_BOX_HALF + HEAL_RANGE;
+    (c[0] - d[0]).abs() <= reach
+        && (c[2] - d[2]).abs() <= reach
+        && c[1] >= d[1] - HEAL_RANGE
+        && c[1] <= d[1] + HEAL_BOX_HEIGHT + HEAL_RANGE
+}
+
+/// Crystals standing with the perch fought all the same: 1 to `CRYSTALS_FIGHT_MAX` shown, or any
+/// number none of which can heal the dragon at `PERCH_POINT` (`heals_from`). The count and the
+/// nearest's distance from the perch, else `None` (none standing, or more with a heal in reach).
+pub fn fight_with_crystals(w: &World) -> Option<(usize, f64)> {
+    let n = crate::end::crystals_alive(w);
+    if n == 0 {
+        return None;
+    }
+    let near = nearest_crystal(w, PERCH_POINT)?;
+    let heal = w
+        .entities
+        .values()
+        .filter(|e| e.kind == EntityKind::EndCrystal && !e.dead)
+        .any(|e| heals_from(PERCH_POINT, e.pos));
+    // A crystal in heal reach undoes the strikes (race 46040826241 lane 1: four head strikes to
+    // 190.8, healed back to 200 in 260 ticks by (12, 39)): fought only with none in reach.
+    let _ = CRYSTALS_FIGHT_MAX;
+    (!heal).then_some((n, near))
+}
+
 /// The key of a walk out of the body's knockback (`knock_risk`).
 pub const KNOCK: i32 = i32::MIN + 2;
 /// Blocks on the plane from the dragon's body the bot keeps while it lands or takes off (its wings
@@ -805,6 +873,21 @@ pub fn dodge_cell(
     banned: &[(i32, i32)],
     prefer: Option<f64>,
 ) -> Option<[i32; 3]> {
+    dodge_cell_within(w, from, dir, dragon, banned, prefer, (DODGE_MIN, DODGE_MAX))
+}
+
+/// `dodge_cell` with the blocks off sideways `span` (least, most): a charge's and the body's knock
+/// want `CHARGE_SPAN` (wall 41).
+pub fn dodge_cell_within(
+    w: &World,
+    from: [i32; 3],
+    dir: [f64; 2],
+    dragon: Option<[f64; 3]>,
+    banned: &[(i32, i32)],
+    prefer: Option<f64>,
+    span: (i32, i32),
+) -> Option<[i32; 3]> {
+    let steps = DODGE_STEPS.max(usize::try_from(span.1 * 2).unwrap_or(DODGE_STEPS));
     let perp = [-dir[1], dir[0]];
     let (cx, cz) = (f64::from(from[0]) + 0.5, f64::from(from[2]) + 0.5);
     let away = dragon.is_some_and(|d| (d[0] - cx) * perp[0] + (d[2] - cz) * perp[1] > 0.0);
@@ -846,7 +929,7 @@ pub fn dodge_cell(
             DODGE_NODES,
         );
         matches!(r.status, crate::path::Status::Found)
-            && r.waypoints.len() <= DODGE_STEPS
+            && r.waypoints.len() <= steps
             && r.waypoints.iter().all(|p| {
                 // A cloud already on the start is walked out of; any other is kept off the way.
                 !clouds.iter().any(|b| {
@@ -868,7 +951,7 @@ pub fn dodge_cell(
         })
         .collect();
     dirs.iter().find_map(|d| {
-        (DODGE_MIN..=DODGE_MAX).find_map(|k| {
+        (span.0..=span.1).find_map(|k| {
             let k = f64::from(k);
             let (x, z) = (
                 (cx + d[0] * k).floor() as i32,
@@ -1963,6 +2046,26 @@ pub struct DragonState {
     /// The wall dug for a block or a way when no dodge cell was had and no block held.
     #[serde(default)]
     pub dodge_wall: Option<[i32; 3]>,
+    /// Health the dragon got back (a crystal's heal) in the run, and the last note of it; the
+    /// perch fights begun with crystals standing.
+    #[serde(default)]
+    pub healed: f32,
+    #[serde(default)]
+    pub heal_noted_at: Option<u64>,
+    #[serde(default)]
+    pub crystal_fights: u32,
+    /// The dodge's last choice (`DODGE_RETRY`); the charge-ready check's tick, its outcome and the
+    /// cell last noted.
+    #[serde(default)]
+    pub dodge_at: u64,
+    #[serde(default)]
+    pub ready_checked_at: Option<u64>,
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default)]
+    pub ready_noted: Option<[i32; 3]>,
+    #[serde(default)]
+    pub ready_rise_from: Option<i32>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2011,7 +2114,7 @@ impl Plan {
     /// The dragon's record, every tick (the one call site in `step_inner`): its phases and perch,
     /// its death, and the credits answered with a respawn. `Some` holds every other row while the
     /// credits wait for the overworld.
-    pub(crate) fn dragon_watch(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn dragon_watch(&mut self, w: &World, tick: u64) -> Option<Controls> {
         let now = w.session.server_ticks;
         if in_end(w) {
             if !w.bosses.is_empty() {
@@ -2045,6 +2148,32 @@ impl Plan {
                         format!("health {:.1}; the count starts again", v.health),
                     );
                     self.dragon.sat_damage = 0.0;
+                }
+                // Healed (a crystal within HEAL_RANGE of it): counted, noted at most every
+                // HEAL_NOTE_TICKS with the crystals standing and the nearest's distance.
+                if let Some(h) = self.dragon.seen_health
+                    && v.health > h + 0.01
+                {
+                    self.dragon.healed += v.health - h;
+                    if self
+                        .dragon
+                        .heal_noted_at
+                        .is_none_or(|t| tick >= t + HEAL_NOTE_TICKS)
+                    {
+                        self.dragon.heal_noted_at = Some(tick);
+                        let near = nearest_crystal(w, v.pos);
+                        self.note(
+                            tick,
+                            "dragon healed".to_owned(),
+                            format!(
+                                "{:.1} in all; health {:.1}; {} crystals standing, the nearest {} off",
+                                self.dragon.healed,
+                                v.health,
+                                crate::end::crystals_alive(w),
+                                near.map_or_else(|| "none".to_owned(), |d| format!("{d:.0}"))
+                            ),
+                        );
+                    }
                 }
                 self.dragon.seen_health = Some(v.health);
                 self.dragon.perched_ticks = if over_fountain(&v) {
@@ -2138,9 +2267,9 @@ impl Plan {
         if !in_end(w) || w.won || w.body.is_none() {
             return None;
         }
-        if w.entities
-            .values()
-            .any(|e| e.kind == EntityKind::EndCrystal && !e.dead)
+        // Crystals standing: the fight only on a perch they cannot heal (`fight_with_crystals`).
+        if crate::end::crystals_alive(w) > 0
+            && (fight_with_crystals(w).is_none() || !view(w).is_some_and(|(_, v)| grounded(&v)))
         {
             return None;
         }
@@ -2160,6 +2289,23 @@ impl Plan {
 
     /// One tick of the fight (`Task::Dragon`'s step).
     pub(crate) fn dragon_step(&mut self, w: &World, tick: u64) -> Controls {
+        // Crystals standing and the perch over (or a crystal now able to heal it): back to the
+        // crystals (wall 39).
+        let standing = crate::end::crystals_alive(w);
+        if standing > 0
+            && (fight_with_crystals(w).is_none() || !view(w).is_some_and(|(_, v)| grounded(&v)))
+        {
+            self.task = Task::Idle;
+            self.note(
+                tick,
+                "dragon: the perch fight over, back to the crystals".to_owned(),
+                format!(
+                    "{standing} crystals standing; {} strikes so far",
+                    self.dragon.strikes
+                ),
+            );
+            return Controls::default();
+        }
         let rules = self.table.as_ref().map(|t| t.survival.clone());
         let danger = rules.as_ref().map_or(8.0, |r| r.danger_health);
         let food = rules
@@ -2188,7 +2334,7 @@ impl Plan {
             stand: self.dragon.stand,
             bunker,
             dead: self.dragon.dead,
-            food: food.is_some(),
+            food: food.is_some() && !self.dragon_holds_meal(w),
             way: self.dragon.way,
             way_done: self.dragon.way_done,
             sat_damage: self.dragon.sat_damage,
@@ -2884,8 +3030,11 @@ impl Plan {
             self.dragon.unseen_since = None;
             self.dragon.unseen_noted = false;
             self.dragon.unseen_rise_from = None;
-            self.dragon.pace_to = None;
-            self.dragon.pace_walk = None;
+            // The scan's pace (`charge_ready_step`) keeps its leg.
+            if !view(w).is_some_and(|(_, v)| v.phase() == Some(Phase::SittingScanning)) {
+                self.dragon.pace_to = None;
+                self.dragon.pace_walk = None;
+            }
             if self.dragon.charging {
                 // Stayed in until no cloud lies within reach.
                 if breathed(&breaths(w), body.pos, 0.0) {
@@ -2906,7 +3055,11 @@ impl Plan {
                 );
                 self.notch_leave(w);
             }
-            return self.notch_exit_step(w, tick);
+            if let Some(c) = self.notch_exit_step(w, tick) {
+                return Some(c);
+            }
+            // The dragon coming down: onto ground a charge can be dodged from (wall 40).
+            return self.charge_ready_step(w, tick);
         };
         // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
         if self.spikes_up_high(w) {
@@ -3224,7 +3377,13 @@ impl Plan {
             yaw: f64::from(w.player.yaw),
             ..Controls::default()
         };
-        Some(Some(self.pace_step(w, tick, body, stand)))
+        Some(Some(self.pace_step(
+            w,
+            tick,
+            body,
+            stand,
+            (DODGE_MIN, DODGE_MAX),
+        )))
     }
 
     /// One tick of the answer to a dragon fireball in flight aimed near the bot: a walk on open
@@ -3308,6 +3467,7 @@ impl Plan {
                 return None;
             }
             self.dragon.dodge_id = Some(id);
+            self.dragon.dodge_at = tick;
             self.dragon.dodge_walk = None;
             // From water no walk plans: pressed straight on from the first tick.
             self.dragon.dodge_straight = in_water(w, cell_of(feet));
@@ -3322,7 +3482,20 @@ impl Plan {
             });
             self.dragon.pace_to = None;
             self.dragon.pace_walk = None;
-            let to = dodge_cell(w, from, dir, view(w).map(|(_, v)| v.pos), &banned, prefer);
+            let span = if matches!(id, CHARGE | KNOCK) {
+                CHARGE_SPAN
+            } else {
+                (DODGE_MIN, DODGE_MAX)
+            };
+            let to = dodge_cell_within(
+                w,
+                from,
+                dir,
+                view(w).map(|(_, v)| v.pos),
+                &banned,
+                prefer,
+                span,
+            );
             self.dragon.dodge_to = to;
             let eta = (along / FIREBALL_SPEED).ceil();
             match to {
@@ -3366,6 +3539,40 @@ impl Plan {
             yaw: f64::from(w.player.yaw),
             ..Controls::default()
         };
+        // No cell yet: chosen again after a rise and every `DODGE_RETRY` ticks (race 46038776204
+        // lane 8: risen out of a one-deep pit, still under the aim, no new choice).
+        if self.dragon.dodge_to.is_none()
+            && let Some(from) = self.dragon.dodge_from
+            && (cell_of(feet)[1] > from[1] || tick >= self.dragon.dodge_at + DODGE_RETRY)
+        {
+            self.dragon.dodge_at = tick;
+            let banned = self.bunker_columns();
+            let span = if matches!(self.dragon.dodge_id, Some(CHARGE | KNOCK)) {
+                CHARGE_SPAN
+            } else {
+                (DODGE_MIN, DODGE_MAX)
+            };
+            if let Some(c) = dodge_cell_within(
+                w,
+                cell_of(feet),
+                dir,
+                view(w).map(|(_, v)| v.pos),
+                &banned,
+                None,
+                span,
+            ) {
+                self.dragon.dodge_to = Some(c);
+                self.dragon.dodges += 1;
+                self.note(
+                    tick,
+                    format!("fireball: dodge to {c:?}"),
+                    format!(
+                        "chosen again from {:?} after the rise or a wait",
+                        cell_of(feet)
+                    ),
+                );
+            }
+        }
         let Some(c) = self.dragon.dodge_to else {
             // No way out on foot under the open sky (a pit, the bunker's shaft with its stair shut:
             // frontier race 45969992660 lane 2): up a block at a jump, at most `DODGE_RISES`.
@@ -3470,6 +3677,7 @@ impl Plan {
         tick: u64,
         body: physics::Body,
         stand: Controls,
+        span: (i32, i32),
     ) -> Controls {
         let feet = body.pos;
         let fc = cell_of(feet);
@@ -3493,13 +3701,14 @@ impl Plan {
                 1.0
             };
             let banned = self.bunker_columns();
-            let Some(to) = dodge_cell(
+            let Some(to) = dodge_cell_within(
                 w,
                 fc,
                 [bx / len, bz / len],
                 Some(v.pos),
                 &banned,
                 Some(self.dragon.pace_side),
+                span,
             ) else {
                 self.dragon.pace_to = None;
                 return self.strafe_stood(tick, fc, stand);
@@ -4128,10 +4337,169 @@ impl Plan {
     /// Is a meal by the always-row to wait: the dragon on or over its perch with the feet within
     /// its reach of the fountain (clojurecraft: a bot ate at 14.2 in the head's reach and died in
     /// the next second). The fight eats in its lulls.
-    pub(crate) fn dragon_holds_meal(&self, w: &World) -> bool {
-        in_end(w)
-            && view(w).is_some_and(|(_, v)| grounded(&v))
-            && w.body
-                .is_some_and(|b| from_fountain(b.pos) < STEP_OUT_RADIUS + BITE_OUT)
+    pub fn dragon_holds_meal(&self, w: &World) -> bool {
+        // In the End a meal only with the dragon in its holding pattern more than `MEAL_CLEAR`
+        // off (race 45994686575 lane 0: knocked off mid-meal, `fell.assist`).
+        if !in_end(w) {
+            return false;
+        }
+        let Some(feet) = w.body.map(|b| b.pos) else {
+            return false;
+        };
+        // Nor with a cloud on the feet or within reach (race 46038776204 lane 8: a meal begun in
+        // the cloud, dead in 60 ticks).
+        if breathed(&breaths(w), feet, OUT_SLACK) {
+            return true;
+        }
+        view(w).is_some_and(|(_, v)| {
+            v.phase() != Some(Phase::HoldingPattern) || flat(v.pos, feet) <= MEAL_CLEAR
+        })
+    }
+
+    /// From the landing approach to the end of the perch, a bot not fighting it gets onto ground it
+    /// can dodge a charge from (`dodge_cell` from where it stands, checked every
+    /// `READY_CHECK_TICKS`): a short drop off a step or a low pillar, else a rise out of a pit (a
+    /// block at a jump) or the wall toward the open dug for a block. Up a crystal's pillar or spike
+    /// it is E4's. The charge comes 80 to 160 ticks after the scan begins (race 46038776204 lanes
+    /// 1, 3 and 4 fell from it with no dodge cell, on a pillar or in a surface pit). `None` when
+    /// ready or nothing is to be done.
+    pub fn charge_ready_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) || matches!(self.task, Task::Dragon(_)) || self.spikes_up_high(w) {
+            return None;
+        }
+        let (_, v) = view(w)?;
+        let coming = matches!(
+            v.phase(),
+            Some(
+                Phase::LandingApproach
+                    | Phase::Landing
+                    | Phase::SittingScanning
+                    | Phase::SittingAttacking
+                    | Phase::SittingFlaming
+            )
+        );
+        if !coming {
+            self.dragon.ready_checked_at = None;
+            self.dragon.ready_rise_from = None;
+            return None;
+        }
+        let body = w.body?;
+        let feet = body.pos;
+        let fc = cell_of(feet);
+        if self
+            .dragon
+            .ready_checked_at
+            .is_none_or(|t| tick >= t + READY_CHECK_TICKS)
+        {
+            self.dragon.ready_checked_at = Some(tick);
+            let to = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+            let d = to[0].hypot(to[1]).max(1e-6);
+            let banned = self.bunker_columns();
+            self.dragon.ready = dodge_cell_within(
+                w,
+                fc,
+                [to[0] / d, to[1] / d],
+                Some(v.pos),
+                &banned,
+                None,
+                CHARGE_SPAN,
+            )
+            .is_some();
+            if !self.dragon.ready && self.dragon.ready_noted != Some(fc) {
+                self.dragon.ready_noted = Some(fc);
+                self.note(
+                    tick,
+                    format!("charge: no dodge from {fc:?} with the dragon coming down"),
+                    "onto ground a charge can be dodged from".to_owned(),
+                );
+            }
+        }
+        if self.dragon.ready {
+            // Scanning for a charge: already on the move sideways in legs the charge's sweep
+            // cannot follow (wall 41: walking 12 takes about 55 ticks, the charge about 20).
+            // Only with nothing in hand (wall 37's rule; the end loop: the scan's pace took E3's
+            // walks back to the bunker site, every one NoPath).
+            // And only while crystals stand and the perch is not fought: else the idle bot's
+            // next choice is the fight itself, which the pace would hold off.
+            if v.phase() == Some(Phase::SittingScanning)
+                && matches!(self.task, Task::Idle)
+                && from_fountain(feet) <= SCAN_PACE_NEAR
+                && crate::end::crystals_alive(w) > 0
+                && fight_with_crystals(w).is_none()
+            {
+                let stand = Controls {
+                    yaw: f64::from(w.player.yaw),
+                    ..Controls::default()
+                };
+                return Some(self.pace_step(w, tick, body, stand, CHARGE_SPAN));
+            }
+            return None;
+        }
+        // A short drop beside (a step, a low pillar): off it.
+        let mut cells = crate::path::Cells::new(w);
+        if let Some(c) = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .find_map(|(dx, dz)| {
+                (1..=3).find_map(|dy| {
+                    let c = (fc[0] + dx, fc[1] - dy, fc[2] + dz);
+                    (cells.clear((c.0, fc[1], c.2))
+                        && cells.clear((c.0, fc[1] + 1, c.2))
+                        && cells.standable(c))
+                    .then_some([c.0, c.1, c.2])
+                })
+            })
+        {
+            return Some(toward(feet, mid(c)));
+        }
+        if !world::stage::open_sky(w) {
+            return None;
+        }
+        // A pillar's top (air beside the block under the feet on every side): dug down a block at
+        // a time, never risen higher.
+        let air = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+        };
+        if [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .all(|(dx, dz)| air([fc[0] + dx, fc[1] - 1, fc[2] + dz]))
+        {
+            return self.charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]]);
+        }
+        // A pit: up a block at a jump, or the wall toward the open dug for a block.
+        if crate::spikes::pillar_item(w).is_none() {
+            let side = [feet[0] + 6.0, feet[1], feet[2]];
+            let n = wall_toward(w, feet, cell_of(side))?;
+            return self.charge_dig_step(w, tick, n);
+        }
+        let from = *self.dragon.ready_rise_from.get_or_insert(fc[1]);
+        (fc[1] < from + DODGE_RISES).then(|| self.rise_step(w, tick, body))
+    }
+
+    /// The fight on a perch with crystals standing: begun when the dragon sits or lands with
+    /// `fight_with_crystals` (2 or fewer standing, or none that can heal it there) and the
+    /// bot is not up a pillar or a spike, cutting the task in hand (wall 39; race 45994686575: three
+    /// bots at 1 crystal left, the dragon at 200 through 37 perches in lane 5). `None` always: the
+    /// task runs on.
+    pub fn perch_fight_step(&mut self, w: &World, tick: u64) {
+        if !in_end(w) || matches!(self.task, Task::Dragon(_)) || self.spikes_up_high(w) {
+            return;
+        }
+        let Some((n, near)) = fight_with_crystals(w) else {
+            return;
+        };
+        if !view(w).is_some_and(|(_, v)| grounded(&v)) {
+            return;
+        }
+        let cut = self.task.name();
+        self.dragon.crystal_fights += 1;
+        self.note(
+            tick,
+            format!("dragon: the perch fought with {n} crystals standing"),
+            format!(
+                "the nearest {near:.0} from the perch; cut {cut}; {} perch fights",
+                self.dragon.crystal_fights
+            ),
+        );
+        self.task = Task::Dragon(Box::new(Fight::new(tick)));
     }
 }
