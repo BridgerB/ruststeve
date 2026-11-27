@@ -1402,16 +1402,18 @@ fn a_strafe_is_met_standing_in_sight() {
     assert!(dragon::strafing_at(&w, feet).is_some());
     let mut p = Plan::new(Aim::Race);
     p.bunker = Some([60, FLOOR - 4, 60]);
-    let c = p.charge_step(&w, 0).expect("stood");
-    assert!(!c.forward && c.sneak);
+    assert!(p.charge_step(&w, 0).is_some());
     assert!(p.take_acts().is_empty(), "nothing dug");
+    // Paced in sight, sideways to the dragon's bearing (frontier race 45947478869: stood, the
+    // fireball's cloud was put on the bot).
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "strafe: stood in sight at [12, 64, 0]"),
+            .any(|e| e.what == "strafe: paced in sight from [12, 64, 0] to [12, 64, 6]"),
         "{:?}",
         p.events_since(0)
     );
+    assert!(p.dragon.pace_walk.is_some());
     assert!(!p.dragon.charging);
     // The strafe over with a cloud within reach of a bot in its notch: stayed in.
     let mut after = end_at([12.5, 62.0, 0.5]);
@@ -1720,5 +1722,36 @@ fn unseen_in_a_strafe_the_bot_rises_into_the_dragons_sight() {
             .any(|e| e.what.ends_with("at [12, 61, 0], no sky")),
         "{:?}",
         q.events_since(0)
+    );
+}
+
+#[test]
+fn a_fireball_on_a_pace_leg_is_dodged_on_the_way_the_bot_walks_and_never_by_the_fountain() {
+    let feet = [12.5, 64.0, 0.5];
+    // The dragon on +z would send a standing bot to -z; on a leg to +z it goes on to +z.
+    let w = fireball_world(
+        feet,
+        [-30.5, 80.0, 20.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    p.dragon.pace_to = Some([12, 64, 6]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert_eq!(
+        dodged_to(&p).as_deref(),
+        Some("fireball: dodge to [12, 64, 6]")
+    );
+    assert!(p.dragon.pace_to.is_none(), "the leg given up for the dodge");
+    // Never within 5 of the fountain's axis: the other side.
+    let by = [6.5, 64.0, 0.5];
+    let w = fireball_world(by, [40.5, 80.0, 0.5], [6.5, 74.0, -20.5], [0.0, -0.3, 1.0]);
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(q.charge_step(&w, 0).is_some());
+    assert_eq!(
+        dodged_to(&q).as_deref(),
+        Some("fireball: dodge to [12, 64, 0]")
     );
 }

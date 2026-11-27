@@ -281,3 +281,15 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
     - Every hold from one enderman is capped at `ENDER_HOLD_CAP` (600), then the choice is made again ("end: the hold from enderman N capped").
 - **Wall 30: out of the dragon's sight under the sky, the strafe held** (frontier race 45943073264 on 1a54bdf, lane 1). The bot "stood by" at (13, 52, 0), ten under the surface, and the strafe held from tick 480 past 24,040. Lane 2: from 180 to 9,760.
   - **Fix:** in a strafe, with no line from the dragon to the bot (`cover::seen_body`) for `STRAFE_UNSEEN_TICKS` (100) under the open sky, the bot rises a block at a jump until seen, at most `STRAFE_RISES` (10). With no sky it is noted once, for the End's rows to take it out ("strafe: unseen N ticks at …, no sky").
+
+### Frontier race 45947478869 (723e4d8, from `island`, 3 lanes, cap 36,000): 0/3, all dead of breath in the crystals stage
+- The dragon was at 200 in every lane. Dodges fired 3, 2 and 2 times; breath deaths 3.
+- **Wall 31: the dodge began too late.**
+  - Lane 0 saw its fireball 20 ticks out. Walking, it covered about 4 blocks, inside the 4-block snap, and its dodge cell was on the fountain's rim.
+  - Lane 2 saw one 6 ticks out.
+  - Lane 1's dodge walk failed `NoPath` at once and the bot stood. Lane 1 was also up E4's pillar once ("no dodge cell").
+  - **Fix (keep moving):** a fireball aims at where the bot is when it fires, with no lead. So in a strafe the bot paces in sight, a leg of 6 to 10 sideways to the dragon's bearing and back (`Plan::pace_step`, "strafe: paced in sight from … to …").
+  - A fireball seen on a leg is dodged on the side the leg already goes (no turn back).
+  - Dodge and pace cells keep `FOUNTAIN_CLEAR` (5) from the fountain's axis.
+  - A failed dodge walk presses straight on toward its cell instead of standing.
+  - Sprint (about ×1.3) needs physics, protocol, the bot loop and the sim; it is left to its own issue, pending these races.
