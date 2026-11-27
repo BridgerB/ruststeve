@@ -2429,6 +2429,19 @@ impl Plan {
         if self.spikes_up_high(w) {
             return None;
         }
+        // E3's bunker in the making answers a strafe itself: no bunker yet (its dig waits for
+        // the dragon) or its shaft being dug, roofed as it goes (E3's test
+        // a_flying_dragon_near_holds_the_bunker_shaft).
+        if strafe.is_some()
+            && (self.bunker.is_none()
+                || self
+                    .end
+                    .work
+                    .as_ref()
+                    .is_some_and(|wk| wk.kind == crate::end::WorkKind::Build))
+        {
+            return None;
+        }
         let bunker = self.bunker.filter(|b| {
             flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
                 && (body.pos[1] - f64::from(b[1])).abs() <= 5.0

@@ -1270,6 +1270,8 @@ fn a_strafe_is_sheltered_from_before_the_fireball() {
     with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
     assert!(dragon::strafing_at(&w, feet).is_some());
     let mut p = Plan::new(Aim::Race);
+    // A bunker made, far off (with none yet, E3's own dig waits for the dragon).
+    p.bunker = Some([60, FLOOR - 4, 60]);
     assert!(p.charge_step(&w, 0).is_some());
     assert!(
         p.events_since(0)
