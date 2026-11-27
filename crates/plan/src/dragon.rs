@@ -1458,6 +1458,9 @@ pub struct DragonState {
     pub breath_notch: bool,
     #[serde(default)]
     pub ender_notch: bool,
+    /// The notch's dig failed: crouched where the feet are, no dig tried again.
+    #[serde(default)]
+    pub notch_failed: bool,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -2353,6 +2356,10 @@ impl Plan {
         if self.dragon.notch_from.is_none() {
             self.dragon.notch_from = Some(fc);
             self.dragon.roof_tries = 0;
+            self.dragon.notch_failed = false;
+        }
+        if self.dragon.notch_failed {
+            return crouch;
         }
         let from = self.dragon.notch_from.unwrap_or(fc);
         if fc[1] > from[1] - 2 && body.on_ground && notch_diggable(w, fc) {
@@ -2509,6 +2516,10 @@ impl Plan {
                     "crouched where the feet are".to_owned(),
                 );
                 self.dragon.notch_step = None;
+                // Never the same failed dig again each tick (race 45913263506 lane 2: a wall cell
+                // in water, "failed: Gone" 289 times while a fireball's cloud burned it).
+                self.dragon.breath_wall = None;
+                self.dragon.notch_failed = true;
             }
             self.dragon.charge_dig = None;
         }
