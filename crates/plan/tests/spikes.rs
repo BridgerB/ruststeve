@@ -2392,3 +2392,45 @@ fn the_crystals_that_heal_the_perch_are_taken_first() {
     // nearest.
     assert_eq!(order, vec![83, 82, 81]);
 }
+
+#[test]
+fn blocks_wanted_is_the_number_the_pillar_checks_compare_against() {
+    // Frontier race 46055289196: E3's stock stopped at its own 22 to 40, the pillar wanted 35 to
+    // 41, and "too few blocks" repeated 60 times with nothing mined. One source for both.
+    let wanted_in = |p: &Plan, what: &str| -> Option<i32> {
+        p.events
+            .iter()
+            .find(|e| e.what == what)
+            .and_then(|e| e.why.split(", ").nth(1))
+            .and_then(|s| s.split(' ').next())
+            .and_then(|n| n.parse().ok())
+    };
+    // The walk to the foot.
+    let mut w = world(2, [14.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 3));
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), None);
+    let noted = wanted_in(&p, "spikes: no walk to the foot: too few blocks");
+    assert!(noted.is_some(), "{:?}", notes(&p));
+    assert_eq!(spikes::blocks_wanted(&p, &w), noted);
+    // The climb at the foot.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 3));
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), None);
+    let noted = wanted_in(&p, "spikes: no climb: too few blocks");
+    assert!(noted.is_some(), "{:?}", notes(&p));
+    assert_eq!(spikes::blocks_wanted(&p, &w), noted);
+    // Enough held: the same number, and the climb.
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 64));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes_task(&w, 100);
+    assert!(spikes::blocks_wanted(&p, &w).is_some_and(|n| n <= 64));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: pillar up from"))
+    );
+}

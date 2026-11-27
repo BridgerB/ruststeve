@@ -835,6 +835,54 @@ pub fn on_spike(w: &World, feet: Cell) -> bool {
     (1..=3).all(|d| kind(w, (feet.0, feet.1 - d, feet.2)) == Some(BlockKind::Obsidian))
 }
 
+/// A crystal (its id and place) with the spike it stands on and the approach worked to it.
+pub type Chosen = ((i32, [f64; 3]), (Spike, Approach));
+
+/// The crystal worked next and its spike and approach: the crystals in their order
+/// (`crystals_in_order`), the first with an approach not refused at `tick`, a column whose
+/// landing water is poured first. The one choice `next` and `blocks_wanted` both read.
+pub fn chosen_approach(w: &World, st: &SpikeState, pos: [f64; 3], tick: u64) -> Option<Chosen> {
+    let approach_to = |cpos: [f64; 3]| {
+        let spike = spike_for(w, &st.geography, cpos)?;
+        // A column whose landing water is poured goes first (race 45927433568 lane 0: poured at
+        // one pillar's foot, the next choice was another axis, and the bucket was lost to it).
+        let refused = |a: &Axis| {
+            st.refused
+                .iter()
+                .any(|(x, z, r, until)| [*x, *z] == spike.centre && r == a && tick < *until)
+        };
+        let landed = st.landings.iter().find_map(|(col, _)| {
+            Axis::ALL
+                .iter()
+                .filter(|a| !refused(a))
+                .filter_map(|a| approach_along(w, &spike, *a))
+                .find(|a| a.plan.column == *col)
+        });
+        landed
+            .or_else(|| best_approach(w, &spike, pos, &st.refused, tick))
+            .map(|a| (spike, a))
+    };
+    crystals_in_order(w, pos)
+        .into_iter()
+        .find_map(|c| approach_to(c.1).map(|sa| (c, sa)))
+}
+
+/// The blocks a pillar wants held before its walk and its climb begin: from its foot to its
+/// stand, plus `PILLAR_SPARE` (the stand's two wall blocks and two for a lost click).
+pub fn pillar_wants(a: &Approach) -> i32 {
+    a.plan.stand.1 - a.foot.1 + PILLAR_SPARE
+}
+
+/// The blocks the crystals want held for the pillar they work next: exactly what "no walk to
+/// the foot: too few blocks" and "no climb: too few blocks" compare against, so the stock
+/// (E3) stops at the same number (frontier race 46055289196: the stock stopped at its own 22 to
+/// 40 while the pillar wanted 35 to 41, and nothing mined). `None` with no crystal to work or no
+/// body. Counted against `pillar_blocks`.
+pub fn blocks_wanted(plan: &crate::Plan, w: &World) -> Option<i32> {
+    let body = w.body?;
+    chosen_approach(w, &plan.spikes, body.pos, plan.spikes.now).map(|(_, (_, a))| pillar_wants(&a))
+}
+
 /// The crystals' next step from where the world says the bot is (clojurecraft's
 /// `toward-crystals`), before the rules: the rules (`Plan::spikes_task`) may hold it back.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -944,6 +992,9 @@ pub struct SpikeState {
     /// held after (E9's read of race 46038776204 lane 7: "the water taken back" with water_bucket
     /// 2 -> 1 the same tick).
     pub take_back_from: Option<i32>,
+    /// The tick the crystals' task last ran at: the refusals `blocks_wanted` reads are those
+    /// active then.
+    pub now: u64,
     /// Water the bot poured and left (a clutch's or a landing's not taken back): an empty bucket
     /// refills from it first.
     pub left_water: Vec<Cell>,
@@ -1009,6 +1060,7 @@ impl Default for SpikeState {
             dig_out_turn: false,
             stair_walk_fails: None,
             take_back_from: None,
+            now: 0,
             left_water: Vec::new(),
         }
     }
@@ -1088,29 +1140,7 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     // (race 45949063425 lane 1: four approaches of one spike refused in turn, and back to it,
     // none of the nine others tried).
     let order = crystals_in_order(w, body.pos);
-    let approach_to = |pos: [f64; 3]| {
-        let spike = spike_for(w, &st.geography, pos)?;
-        // A column whose landing water is poured goes first (race 45927433568 lane 0: poured at
-        // one pillar's foot, the next choice was another axis, and the bucket was lost to it).
-        let refused = |a: &Axis| {
-            st.refused
-                .iter()
-                .any(|(x, z, r, until)| [*x, *z] == spike.centre && r == a && tick < *until)
-        };
-        let landed = st.landings.iter().find_map(|(col, _)| {
-            Axis::ALL
-                .iter()
-                .filter(|a| !refused(a))
-                .filter_map(|a| approach_along(w, &spike, *a))
-                .find(|a| a.plan.column == *col)
-        });
-        landed
-            .or_else(|| best_approach(w, &spike, body.pos, &st.refused, tick))
-            .map(|a| (spike, a))
-    };
-    let chosen = order
-        .iter()
-        .find_map(|c| approach_to(c.1).map(|sa| (*c, sa)));
+    let chosen = chosen_approach(w, st, body.pos, tick);
     let crystal = chosen.map(|(c, _)| c).or_else(|| order.first().copied());
     let approach = chosen.map(|(_, sa)| sa);
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
@@ -1791,6 +1821,7 @@ impl Plan {
     /// none is left and the feet are down). `Some(Task::Idle)` while the driver
     /// (`spikes_step`) runs a climb, a block, a strike or a hold.
     pub fn spikes_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        self.spikes.now = tick;
         self.spikes_gone(w, tick);
         if self.spikes.doing.is_some() {
             self.retry_at = tick + 1;
@@ -2144,18 +2175,15 @@ impl Plan {
                 // No walk to a pillar's foot without the blocks for its pillar (frontier race
                 // 45969992660 lane 1: each time E3's restock paused, the walk took the bot back
                 // out to the foot, 25 from its bunker, to refuse the climb there).
-                if let Some((x, z, axis)) = approach
-                    && let Some(spike) = crystals_by_distance(w, body.pos)
-                        .into_iter()
-                        .filter_map(|(_, pos)| spike_for(w, &self.spikes.geography, pos))
-                        .find(|sp| sp.centre == [x, z])
+                // The one count `blocks_wanted` gives (E3's stock stops at it).
+                if approach.is_some()
+                    && let Some((_, (_, a))) = chosen_approach(w, &self.spikes, body.pos, tick)
+                    && to == a.foot
+                    && to.1 < a.plan.stand.1
                 {
-                    let top = stand(&spike, axis).stand.1;
-                    let need = top - to.1 + PILLAR_SPARE;
+                    let need = pillar_wants(&a);
                     let held = pillar_blocks(w);
-                    // Only a walk to a foot on the ground: the walk on the pillar's top to the
-                    // stand is never refused.
-                    if to.1 < top && held < need {
+                    if held < need {
                         self.spikes_note(
                             tick,
                             "spikes: no walk to the foot: too few blocks".to_owned(),
@@ -2222,7 +2250,9 @@ impl Plan {
                 // each dig down gave back, 104 times to the cap, and its standing pillar record
                 // kept E3's stock (paused for a strafe) from ever resuming. Handed back, so the
                 // stock runs again.
-                let need = top - feet.1 + PILLAR_SPARE;
+                let need = chosen_approach(w, &self.spikes, body.pos, tick)
+                    .filter(|(_, (_, a))| a.plan.column == column)
+                    .map_or(top - feet.1 + PILLAR_SPARE, |(_, (_, a))| pillar_wants(&a));
                 let held = pillar_blocks(w);
                 if !climbing && held < need {
                     self.spikes_note(
