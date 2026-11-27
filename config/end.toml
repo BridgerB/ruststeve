@@ -122,6 +122,11 @@ rim_radius = 3.5
 # Stage `crystals`: the feet within this of the fountain (every spike then within 102, inside
 # the entity tracking distance of 112: view distance 8 less one chunk, ChunkMap.TrackedEntity).
 near = 60.0
+# Stages `crystals_5` and `crystals_1` (issue 20 part 2, Bridger 2026-11-27): checkpoints at
+# this many crystals left alive or fewer, counted under `near` with every spike's column loaded
+# (race 45994686575: three bots reached 1 left, one 2 left, and none was saved).
+left_5 = 5
+left_1 = 1
 # The entity tracking distance that `near` keeps every spike inside (view distance 8 less one
 # chunk, ChunkMap.TrackedEntity; the race server's server.properties).
 tracking = 112.0
