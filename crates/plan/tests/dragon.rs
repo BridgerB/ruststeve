@@ -1301,3 +1301,27 @@ fn a_strafe_is_sheltered_from_before_the_fireball() {
     with_dragon(&mut far, [-80.5, 80.0, 0.5], 1, 90.0);
     assert!(dragon::strafing_at(&far, feet).is_none());
 }
+
+#[test]
+fn the_low_stand_for_the_takeoff_strike_is_dug_through_the_flame() {
+    // Race 45931228063 lane 2: the takeoff count at 44, "no head stand open" every turn, the
+    // dragon at 156 for 9,000 ticks.
+    let mut w = end_at([-8.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, 67.0, 0.5], 5, 90.0);
+    let a = Ask {
+        sat_damage: 45.0,
+        ..ask()
+    };
+    let v = dragon::view(&w).unwrap().1;
+    let c = dragon::low_prep_cell(&w, &v, [-8.5, 64.0, 0.5]).expect("a cell behind it");
+    assert!(
+        dragon::ahead(&v, feet_of(c)).0 <= 0.0,
+        "away from the head: {c:?}"
+    );
+    assert_eq!(decide(&w, &a), Want::Dig([-9, FLOOR - 1, 0]));
+    // Not the crossing strike: out of the flame's way as before.
+    assert!(matches!(
+        decide(&w, &ask()),
+        Want::Go(_, "out of the flame's way") | Want::Hold("out of the flame's way")
+    ));
+}

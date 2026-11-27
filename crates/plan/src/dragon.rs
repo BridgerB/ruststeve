@@ -783,6 +783,40 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
 /// Server ticks after a blow a takeoff counts as the blow's: the server resets its count then.
 pub const TAKEOFF_AFTER_BLOW: u64 = 20;
 
+/// The cell a low stand is made in through the flame: a ground cell `HEAD_OUT + HEAD_HALF +
+/// HEAD_STAND_OFF` from the body on a bearing at least a right angle off the head's, out of the
+/// flame's reach and every breath's, under the wings' sweep or one dig of end stone from it; the
+/// nearest the feet.
+pub fn low_prep_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i32; 3]> {
+    let clouds = breaths(w);
+    let h = head_point(v);
+    let out = HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF;
+    let fy = feet[1].floor() as i32;
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for k in 0..ESCAPE_WAYS {
+        let a = f64::from(k) * std::f64::consts::TAU / f64::from(ESCAPE_WAYS);
+        let x = (v.pos[0] + out * a.cos()).floor() as i32;
+        let z = (v.pos[2] + out * a.sin()).floor() as i32;
+        let Some(c) = ground(w, x, z, fy) else {
+            continue;
+        };
+        let p = mid(c);
+        if ahead(v, p).0 > 0.0
+            || flat(p, h) < FLAME_CLEAR
+            || breath_on(&clouds, p).is_some()
+            || !(under_wings(v, f64::from(c[1]))
+                || (under_wings(v, f64::from(c[1] - 1)) && lowerable(w, v, &clouds, c)))
+        {
+            continue;
+        }
+        let d = flat(feet, p);
+        if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+            best = Some((d, c));
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
 /// Would the next strike make the dragon take off (`PERCH_TAKEOFF`)?
 pub fn crossing(sat_damage: f32) -> bool {
     sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF
@@ -1270,6 +1304,22 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         Some(_) | None => false,
     };
     if sat && flame {
+        // The strike that makes it take off wants a stand under the wings, and one dig in the
+        // turn's window is too slow (race 45931228063 lane 2: the count at 44, "no head stand
+        // open" every turn, the dragon at 156 for 9,000 ticks). It is dug through the flame: a
+        // notch 9 out from the body on the side away from the head, out of the flame's reach;
+        // the scanning turn brings the head to it.
+        if crossing(ask.sat_damage)
+            && let Some(c) = low_prep_cell(w, &v, feet)
+        {
+            if flat(feet, mid(c)) > STAND_NEAR {
+                return Want::Go(c, "to a low stand, through the flame");
+            }
+            if body.on_ground && !under_wings(&v, feet[1]) && lowerable(w, &v, &clouds, feet_cell) {
+                return Want::Dig([feet_cell[0], feet_cell[1] - 1, feet_cell[2]]);
+            }
+            return Want::Hold("in the low stand, the flame burning");
+        }
         return match flame_clear_cell(w, &v, feet) {
             Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of the flame's way"),
             Some(_) => Want::Hold("out of the flame's way"),

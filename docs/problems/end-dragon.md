@@ -226,5 +226,8 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 - It stays until the phase has left the strafe and no cloud lies within reach.
 - Notes: "strafe: shelter before the fireball (the bunker at … | a notch)".
 
+**Wall 24: the strike that makes it take off never came** (dev race 45931228063 lane 2). The count stood at 44, so every strike was the crossing one and wanted a stand under the wings. One dig in the scanning and attacking window (about 60 ticks) was too slow: "no head stand open" every turn, and the dragon sat at 156 for 9,000 ticks.
+- **Fix:** the low stand is dug through the flame. It is a notch 9 out from the body, on a bearing at least a right angle off the head, out of the flame's reach (`low_prep_cell`). The scanning turn then brings the head to it.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
