@@ -1631,3 +1631,29 @@ fn a_pillar_wanting_more_than_the_stock_held_reopens_it() {
         notes(&p)
     );
 }
+
+#[test]
+fn the_walk_for_surface_end_stone_stays_out_of_the_fountains_forty() {
+    // Race 46063334187 lanes 3 and 6: "out to mine" and a walk back inside 40 took turns 25 times,
+    // 0 mined. The bot at (41, 64, 0), the blocks round its feet dug out (holes one deep).
+    let mut w = world(4, 0..=7, [41.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    for c in [(40, 63, 0), (42, 63, 0), (41, 63, 1), (41, 63, -1)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    assert_eq!(plan::end::surface_cell(&w, (41, 64, 0)), None);
+    let g = plan::end::mine_ground(&w, (41, 64, 0), &[]).unwrap_or_else(|| panic!("no ground"));
+    let d = ((f64::from(g.0) + 0.5).powi(2) + (f64::from(g.2) + 0.5 - 0.5).powi(2)).sqrt();
+    assert!(d >= plan::end::MINE_FROM_FOUNTAIN, "{g:?} {d}");
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(
+        noted(&p, &format!("end: walk for surface end stone to {g:?}")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: out to mine at"), "{:?}", notes(&p));
+}

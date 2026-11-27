@@ -430,6 +430,44 @@ pub fn wanted_in(text: &str) -> Option<i32> {
     digits.parse().ok()
 }
 
+/// Ground walked to for mining, kept so the next walk goes elsewhere.
+pub const MINE_TRIED_KEPT: usize = 16;
+/// How far round the feet the next mining ground is looked for.
+pub const MINE_LOOK: i32 = 12;
+
+/// The next ground to mine from: a cell standing on exposed surface end stone, `MINE_FROM_FOUNTAIN`
+/// or more from the fountain, with a block to dig beside it (`surface_cell`), not one of `tried`,
+/// nearest the feet first, within `MINE_LOOK`.
+pub fn mine_ground(w: &World, feet: Cell, tried: &[Cell]) -> Option<Cell> {
+    let mut best: Option<(i32, Cell)> = None;
+    for dx in -MINE_LOOK..=MINE_LOOK {
+        for dz in -MINE_LOOK..=MINE_LOOK {
+            let d2 = dx * dx + dz * dz;
+            if d2 < 4 || best.is_some_and(|(b, _)| d2 >= b) {
+                continue;
+            }
+            let (x, z) = (feet.0 + dx, feet.2 + dz);
+            let at = [f64::from(x) + 0.5, 0.0, f64::from(z) + 0.5];
+            if flat_to_fountain(at) < MINE_FROM_FOUNTAIN {
+                continue;
+            }
+            let Some(top) = surface_y(w, x, z, feet.1 + 8) else {
+                continue;
+            };
+            let cell = (x, top + 1, z);
+            if kind(w, (x, top, z)) != Some(BlockKind::EndStone)
+                || tried.contains(&cell)
+                || !path::Cells::new(w).standable(cell)
+                || surface_cell(w, cell).is_none()
+            {
+                continue;
+            }
+            best = Some((d2, cell));
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -736,6 +774,9 @@ pub struct EndState {
     pub drown_dig: Option<Dig>,
     #[serde(default)]
     pub drown_guards: u32,
+    /// Mining ground walked to, the newest last.
+    #[serde(default)]
+    pub mine_tried: Vec<Cell>,
     /// The hold for the dragon noted.
     #[serde(default)]
     pub dragon_held_noted: bool,
@@ -1581,7 +1622,7 @@ impl Plan {
         }
         // None in reach: the next ground is the mining's level again.
         self.end.surface_y = None;
-        // None in reach: a few cells on toward the fountain, the island's middle.
+        // None in reach: on to the next ground outside the fountain's 40.
         self.end.surface_walks += 1;
         if self.end.surface_walks > SURFACE_WALKS {
             self.end.handed_back = false;
@@ -1592,15 +1633,18 @@ impl Plan {
             );
             return None;
         }
-        let body = w.body?;
-        let d = flat_to_fountain(body.pos).max(1.0);
-        let step = SURFACE_STEP.min(d - BUNKER_MIN).max(1.0);
-        #[allow(clippy::cast_possible_truncation)]
-        let target = (
-            (body.pos[0] - (body.pos[0] - FOUNTAIN[0]) / d * step).floor() as i32,
-            feet.1,
-            (body.pos[2] - (body.pos[2] - FOUNTAIN[1]) / d * step).floor() as i32,
-        );
+        // The next ground: exposed end stone at `MINE_FROM_FOUNTAIN` or more from the fountain,
+        // nearest first (race 46063334187 lanes 3 and 6: a walk toward the fountain to inside 40,
+        // then "out to mine" again, 25 times, 0 mined in 2,900 ticks).
+        let Some(target) = mine_ground(w, feet, &self.end.mine_tried) else {
+            self.end.surface_walks = SURFACE_WALKS + 1;
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return None;
+        };
+        self.end.mine_tried.push(target);
+        if self.end.mine_tried.len() > MINE_TRIED_KEPT {
+            self.end.mine_tried.remove(0);
+        }
         let mut walk = Walk::new(
             target,
             Goal::Near {
