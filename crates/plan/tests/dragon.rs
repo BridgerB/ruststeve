@@ -1577,3 +1577,56 @@ fn an_open_bunker_is_no_shelter_from_a_strafe_or_a_breath() {
         r.events_since(0)
     );
 }
+
+#[test]
+fn idle_in_the_end_with_no_note_for_600_ticks_is_noted_and_handed_back() {
+    // Dev race 45940964839 lane 1: idle in the bunker 13,000 ticks with no note at all.
+    let w = end_at([12.5, 64.0, 0.5]);
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.charging = true;
+    p.dragon.notch_roof = Some([12, 66, 0]);
+    let idle = |p: &Plan| {
+        p.events_since(0)
+            .iter()
+            .filter(|e| e.what.starts_with("end: idle"))
+            .count()
+    };
+    p.end_idle_watch(&w, 100);
+    p.end_idle_watch(&w, 100 + dragon::IDLE_NOTE_TICKS - 1);
+    assert_eq!(idle(&p), 0);
+    p.end_idle_watch(&w, 100 + dragon::IDLE_NOTE_TICKS);
+    assert_eq!(idle(&p), 1, "{:?}", p.events_since(0));
+    let e = p.events_since(0).last().unwrap();
+    assert_eq!(e.what, "end: idle 600 ticks at [12, 64, 0]");
+    assert!(e.why.starts_with("task idle, rows held none"), "{}", e.why);
+    assert!(
+        !p.dragon.charging && p.dragon.notch_roof.is_none(),
+        "E5's holds dropped"
+    );
+    // Its own note starts the count again: not again until another 600.
+    p.end_idle_watch(&w, 100 + 2 * dragon::IDLE_NOTE_TICKS - 1);
+    assert_eq!(idle(&p), 1);
+    p.end_idle_watch(&w, 100 + 2 * dragon::IDLE_NOTE_TICKS);
+    assert_eq!(idle(&p), 2);
+}
+
+#[test]
+fn a_notch_beside_is_never_dug_in_the_bunker_or_its_stair() {
+    // Dev race 45940964839 lanes 0 and 1: the notch beside was the bunker's own floor.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    let mut p = Plan::new(Aim::Race);
+    // The bunker four down under (13, 64, 0), its stair along -z from it.
+    p.bunker = Some([13, FLOOR - 4, 0]);
+    p.end.door = Some((0, -1));
+    assert!(p.bunker_columns().contains(&(13, 0)));
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: a notch dug beside at [11, 64, 0], stood by in sight"),
+        "{:?}",
+        p.events_since(0)
+    );
+}

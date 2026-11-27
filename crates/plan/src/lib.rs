@@ -1628,6 +1628,9 @@ impl Plan {
         if let Some(c) = self.dragon_watch(w, tick) {
             return c;
         }
+        // The backstop (coordinator, wall 27): idle in the End with no note for 600 ticks, noted
+        // and handed back to the planner.
+        self.end_idle_watch(w, tick);
         // >>> E2 (issue 20d, docs/problems/end-portal.md wall 11): a dimension change ends the task
         // in hand and the traps' belief from the old dimension (race 45887747475 lane 1: an
         // overworld lava escape carried into the End walked the bot off the platform).
@@ -1692,26 +1695,26 @@ impl Plan {
         // 45890149072 lane 0: struck off its pillar while an enderman's pocket held the planner,
         // the clutch never ran, a fall of 22).
         if let Some(c) = self.spikes_clutch(w, tick) {
-            return c;
+            return self.held("spikes_clutch", c);
         }
         // <<< E4
         // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
         // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
         if let Some(c) = self.charge_step(w, tick) {
-            return c;
+            return self.held("charge_step", c);
         }
         if let Some(c) = self.breath_step(w, tick) {
-            return c;
+            return self.held("breath_step", c);
         }
         // <<< E5
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
-            return c;
+            return self.held("always", c);
         }
         // >>> pearls (P3, issue 18f): the hunt's rule table, in the warped forest
         // (docs/problems/pearls-hunt.md). `None` lets the task in hand run.
         if let Some(c) = self.pearls_step(w, tick) {
-            return c;
+            return self.held("pearls_step", c);
         }
         // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
@@ -1727,28 +1730,28 @@ impl Plan {
             && !dragon_first
             && let Some(c) = self.end_enderman_step(w, tick)
         {
-            return c;
+            return self.held("end_enderman_step", c);
         }
         // <<< E5
         if !dragon_first
             && !in_the_end
             && let Some(c) = self.ender_threat(w, tick)
         {
-            return c;
+            return self.held("ender_threat", c);
         }
         // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.
         if let Some(c) = self.arrival_step(w, tick) {
-            return c;
+            return self.held("arrival_step", c);
         }
         // <<< Q7
         // >>> E4 (issue 20f): the crystals' climb, block, strike or hold, while no task runs.
         if let Some(c) = self.spikes_step(w, tick) {
-            return c;
+            return self.held("spikes_step", c);
         }
         // <<< E4
         // >>> E3 (issue 20e): the End's bridge, bunker and stock, and its choice of task.
         if let Some(c) = self.end_step(w, tick) {
-            return c;
+            return self.held("end_step", c);
         }
         // <<< E3
         if self.finished() {

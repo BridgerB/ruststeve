@@ -637,6 +637,12 @@ pub const FIREBALL_RANGE: f64 = 64.0;
 /// coordinator's cap (10 s), well over the 5 ticks in sight the fireball's charge needs.
 pub const STRAFE_HIDE_TICKS: u64 = 200;
 
+/// Ticks idle in the End with no note before the planner is handed back (the coordinator's
+/// backstop; dev race 45940964839 lane 1 sat 13,000 ticks idle in the bunker with no note).
+pub const IDLE_NOTE_TICKS: u64 = 600;
+/// Rows named in the backstop's note at most.
+pub const ROWS_KEPT: usize = 8;
+
 /// Blocks the strafing dragon fires within (`DragonStrafePlayerPhase`; E4's `THREAT_NEAR`).
 pub const STRAFE_RANGE: f64 = 64.0;
 
@@ -1625,6 +1631,15 @@ pub struct DragonState {
     pub hidden_since: Option<u64>,
     #[serde(default)]
     pub strafe_seen_noted: bool,
+    /// The rows of `step_inner` whose controls were sent since the idle wait began, and in the End
+    /// the tick and the note count when the bot was last idle with no new note
+    /// (`Plan::end_idle_watch`).
+    #[serde(default)]
+    pub rows: Vec<String>,
+    #[serde(default)]
+    pub idle_since: Option<(u64, u64)>,
+    #[serde(default)]
+    pub idle_backstops: u32,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2631,6 +2646,70 @@ impl Plan {
         Some(c)
     }
 
+    /// The row `row` of `step_inner` sent controls `c`: kept for the idle backstop's note.
+    pub(crate) fn held(&mut self, row: &str, c: Controls) -> Controls {
+        if self.dragon.rows.len() < ROWS_KEPT && !self.dragon.rows.iter().any(|r| r == row) {
+            self.dragon.rows.push(row.to_owned());
+        }
+        c
+    }
+
+    /// The backstop: in the End, idle with no note for `IDLE_NOTE_TICKS`, noted with the rows that
+    /// held it and handed back to the planner (E5's holds dropped, the choice made again now).
+    pub fn end_idle_watch(&mut self, w: &World, tick: u64) {
+        if !in_end(w) || !matches!(self.task, Task::Idle) {
+            self.dragon.idle_since = None;
+            self.dragon.rows.clear();
+            return;
+        }
+        let count = self.event_count;
+        let Some((since, _)) = self.dragon.idle_since.filter(|(_, n)| *n == count) else {
+            self.dragon.idle_since = Some((tick, count));
+            self.dragon.rows.clear();
+            return;
+        };
+        if tick < since + IDLE_NOTE_TICKS {
+            return;
+        }
+        self.dragon.idle_backstops += 1;
+        let d = &mut self.dragon;
+        d.charging = false;
+        d.charge_walk = None;
+        d.charge_dig = None;
+        d.notch_from = None;
+        d.notch_step = None;
+        d.notch_roof = None;
+        d.notch_side = None;
+        d.notch_rise_to = None;
+        d.notch_failed = false;
+        d.strafe_notch = None;
+        d.hidden_since = None;
+        d.breath_walk = None;
+        d.breath_wall = None;
+        self.retry_at = tick;
+        let rows = if self.dragon.rows.is_empty() {
+            "none".to_owned()
+        } else {
+            self.dragon.rows.join(", ")
+        };
+        self.note(
+            tick,
+            format!(
+                "end: idle {} ticks at {}",
+                tick - since,
+                w.body
+                    .map_or_else(|| "no body".to_owned(), |b| format!("{:?}", cell_of(b.pos)))
+            ),
+            format!(
+                "task {}, rows held {rows}; {} backstops; handed back to the planner",
+                self.task.name(),
+                self.dragon.idle_backstops
+            ),
+        );
+        self.dragon.idle_since = Some((tick, self.event_count));
+        self.dragon.rows.clear();
+    }
+
     /// One tick of a strafe met in sight (no charge): `threat` is a fireball in flight or a cloud
     /// within reach. Hidden in its notch the bot stays `STRAFE_HIDE_TICKS`, then rises out; in the
     /// open with no threat it digs a notch two deep beside the feet and stands by it, seen; with a
@@ -2700,9 +2779,14 @@ impl Plan {
         if self.dragon.notch_failed && !threat {
             return Some(Some(self.strafe_stood(tick, fc, stand)));
         }
-        let ready = |n: [i32; 3]| air([n[0], n[1] - 1, n[2]]) && air([n[0], n[1] - 2, n[2]]);
         if threat {
-            let n = self.dragon.strafe_notch.filter(|n| ready(*n))?;
+            // Half dug will do: in it, the second block is dug under the feet (dev race
+            // 45940964839 lane 2: seen, the strafe fired in 40 ticks with one block dug, and the
+            // old shelter's dig at the feet came too late).
+            let n = self
+                .dragon
+                .strafe_notch
+                .filter(|n| air([n[0], n[1] - 1, n[2]]))?;
             if fc[0] == n[0] && fc[2] == n[2] {
                 if self.dragon.notch_from != Some(n) {
                     self.dragon.notch_from = Some(n);
@@ -2739,11 +2823,15 @@ impl Plan {
             if !body.on_ground {
                 return Some(Some(stand));
             }
+            // Never in the bunker's column (its cell and roof) or its stair's: the notch dug its
+            // floor and E3 sealed it over the bot (dev race 45940964839 lanes 0 and 1).
+            let banned = self.bunker_columns();
             let Some(n) = [(1, 0), (-1, 0), (0, 1), (0, -1)]
                 .iter()
                 .find_map(|(dx, dz)| {
                     let n = [fc[0] + dx, fc[1], fc[2] + dz];
-                    (air(n)
+                    (!banned.contains(&(n[0], n[2]))
+                        && air(n)
                         && air([n[0], n[1] + 1, n[2]])
                         && notch_diggable(w, n)
                         && notch_diggable(w, [n[0], n[1] - 1, n[2]]))
@@ -2775,6 +2863,20 @@ impl Plan {
             );
         }
         Some(Some(stand))
+    }
+
+    /// The columns on the plane of the bunker (its cell and roof) and its stair's cells; none with
+    /// no bunker.
+    pub fn bunker_columns(&self) -> Vec<(i32, i32)> {
+        let Some(b) = self.bunker else {
+            return Vec::new();
+        };
+        let mut cols = vec![(b[0], b[2])];
+        if let Some(door) = self.end.door {
+            let (_, _, cells) = crate::end::bunker_cells((b[0], b[1], b[2]), door);
+            cols.extend(cells.iter().map(|c| (c.0, c.2)));
+        }
+        cols
     }
 
     /// Stood where the feet are in a strafe with no notch beside to be had, noted once a strafe.
