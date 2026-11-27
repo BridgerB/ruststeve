@@ -2725,9 +2725,11 @@ impl Plan {
                 tick,
                 match (bunker, strafe.is_some()) {
                     (Some(b), true) => {
-                        format!("strafe: shelter before the fireball (the bunker at {b:?})")
+                        format!("strafe: shelter from a cloud within reach (the bunker at {b:?})")
                     }
-                    (None, true) => "strafe: shelter before the fireball (a notch)".to_owned(),
+                    (None, true) => {
+                        "strafe: shelter from a cloud within reach (a notch)".to_owned()
+                    }
                     (Some(b), false) => format!("charge: hold in the bunker at {b:?}"),
                     (None, false) => "charge: hold crouched where the feet are".to_owned(),
                 },
