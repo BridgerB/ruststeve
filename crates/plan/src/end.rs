@@ -604,6 +604,9 @@ pub struct EndState {
     pub strafe_paused: bool,
     #[serde(default)]
     pub strafe_pauses: u32,
+    /// The first stock run's wait for a lull, noted.
+    #[serde(default)]
+    pub lull_wait_noted: bool,
     /// Seals failed in a row.
     #[serde(default)]
     pub seal_fails: u32,
@@ -893,7 +896,7 @@ impl Plan {
         // 45947478869, three bots about 10,000 ticks in the stock's tunnels, "strafe: unseen …
         // no sky"). With `STOCK_ENOUGH` held the stock is over; with less it waits for the next
         // lull.
-        if !self.end.stock_over && strafing(w) {
+        if !self.end.stock_over && (strafing(w) || strafe_near(w)) {
             let stone = craft::count(w, ItemKind::EndStone);
             if stone >= STOCK_ENOUGH {
                 self.end.stock_over = true;
@@ -923,6 +926,19 @@ impl Plan {
             );
         }
         if !self.end.stock_over && !self.end.strafe_paused {
+            // The first run waits for a lull, as a resume does.
+            if self.end.stock_runs == 0 && !lull(w) {
+                if !self.end.lull_wait_noted {
+                    self.end.lull_wait_noted = true;
+                    self.note(
+                        tick,
+                        "end: stock waits for a lull".to_owned(),
+                        "the dragon within 64 or not holding".to_owned(),
+                    );
+                }
+                self.retry_at = tick + crate::RETRY_TICKS * 2;
+                return None;
+            }
             return self.stock_step(w, b, door, feet, inside, sealed, tick);
         }
         // The bunker opened to hand over: up its stair before any hand-off is asked (the
@@ -1510,7 +1526,7 @@ impl Plan {
         if !self.end.stock_over
             && self.end.stock_out.is_some()
             && matches!(self.task, Task::Stairs(_))
-            && strafing(w)
+            && (strafing(w) || strafe_near(w))
         {
             self.task = Task::Idle;
             // The run's end kept where it was cut, as a run that ended there.
