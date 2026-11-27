@@ -1315,10 +1315,17 @@ fn no_climb_begins_without_a_water_bucket_in_the_hotbar() {
         p.spikes.landings.is_empty(),
         "no landing water from the clutch's one bucket"
     );
-    // Two, one in the hotbar: the landing water first, the clutch's still in hand.
+    // Two, one in the hotbar: the climb, and the landing water from the first block up (wall
+    // 25), the clutch's still in hand.
     w.inventory.slots.insert(12, (ItemKind::WaterBucket, 1));
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
+    assert!(p.spikes.landings.is_empty());
+    p.spikes.doing = None;
+    set(&mut w, (8, 64, 5), BlockKind::EndStone);
+    at(&mut w, [8.5, 65.0, 5.5]);
+    p.spikes_task(&w, 120);
     assert!(matches!(p.spikes.doing, Some(spikes::Doing::Bucket { .. })));
     assert_eq!(p.spikes.landings.len(), 1);
 }
