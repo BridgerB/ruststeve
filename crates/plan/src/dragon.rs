@@ -701,6 +701,8 @@ pub const HEAL_BOX_HALF: f64 = 8.0;
 pub const HEAL_BOX_HEIGHT: f64 = 8.0;
 pub const PERCH_POINT: [f64; 3] = [0.5, 67.0, 0.5];
 pub const CRYSTALS_FIGHT_MAX: usize = 2;
+/// Whether a perch is fought with any crystal standing: off (wall 45, the heal in flight).
+pub const FIGHT_WITH_CRYSTALS: bool = false;
 pub const HEAL_NOTE_TICKS: u64 = 200;
 /// Blocks on the plane the holding dragon keeps from a bot that eats (wall 39).
 pub const MEAL_CLEAR: f64 = 40.0;
@@ -747,8 +749,10 @@ pub fn fight_with_crystals(w: &World) -> Option<(usize, f64)> {
         .any(|e| heals_from(PERCH_POINT, e.pos));
     // A crystal in heal reach undoes the strikes (race 46040826241 lane 1: four head strikes to
     // 190.8, healed back to 200 in 260 ticks by (12, 39)): fought only with none in reach.
-    let _ = CRYSTALS_FIGHT_MAX;
-    (!heal).then_some((n, near))
+    // Off (wall 45): with any crystal standing the dragon heals in flight too, its holding
+    // pattern within 40 of the far ones (dev race 46050674145 lane 0: 28 strikes, every perch
+    // refilled to 200). The rule stays behind `FIGHT_WITH_CRYSTALS`.
+    (FIGHT_WITH_CRYSTALS && n <= CRYSTALS_FIGHT_MAX && !heal).then_some((n, near))
 }
 
 /// The key of a walk out of the body's knockback (`knock_risk`).
