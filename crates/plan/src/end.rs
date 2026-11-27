@@ -722,6 +722,27 @@ impl Plan {
         let (_, roof, door_cells) = bunker_cells(b, door);
         let inside = feet == b;
         let sealed = !open(w, roof) && !open(w, door_cells[0]);
+        // Down a notch under the bunker (E5's breath rule digs one; race 45918666403 lane 2: the
+        // bot dug to (14, 56, 0) under its bunker at (14, 58, 0) and every way out from there was
+        // refused to the cap): back up into the bunker once no fire is by its stair.
+        if feet.0 == b.0
+            && feet.2 == b.2
+            && feet.1 < b.1
+            && feet.1 >= b.1 - 3
+            && body.on_ground
+            && fire_near(w, door_cells[6], STAIR_CLEAR).is_none()
+        {
+            let rises = b.1 - feet.1;
+            self.note(
+                tick,
+                format!("end: up out of the notch to the bunker from {feet:?}"),
+                format!("{rises} up into {b:?}"),
+            );
+            let mut ops = vec![Op::Centre];
+            ops.extend((0..rises).map(|_| Op::Rise));
+            self.end.work = Some(Work::new(WorkKind::Pillar, ops, tick));
+            return None;
+        }
         // Up a pillar or a spike, or a pillar of E4's still standing: the crystals' task brings
         // the bot down first, crystals left or not (E6's closed loop: the last crystal gone, the
         // bot stayed 18 up and asked for walks to the bunker 24 times).
@@ -863,6 +884,8 @@ impl Plan {
             // Out from under the end stone first: from the tunnel back to the bunker, then its
             // roof and stair dug; the task is chosen again once the sky is over the head.
             let shut = !open(w, roof) || !open(w, door_cells[0]);
+            // Opened only part way (an open cut short): open again, skipping the cells dug.
+            let opened = open(w, roof) && door_cells.iter().all(|c| open(w, *c));
             if !world::stage::open_sky(w) && !inside && !open(w, door_cells[0]) {
                 let mut probe = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
                 if found(&mut probe, w, tick) || self.end.out_runs >= OUT_RUNS {
@@ -884,7 +907,7 @@ impl Plan {
                 st.dry = true;
                 return Some(Task::Stairs(Box::new(st)));
             }
-            if inside && shut {
+            if inside && (shut || (!opened && !self.end.exit_up)) {
                 // Out of the bunker first, the task chosen again once the door is open.
                 self.note(
                     tick,
@@ -1378,6 +1401,24 @@ impl Plan {
             }
             self.retry_at = tick;
             return Some(hold);
+        }
+        // An open with fire coming by the stair: cut, the bunker sealed again (race 45918666403
+        // lane 2: a fireball on the half-dug stair).
+        if let (Some(work), Some([x, y, z]), Some(door)) =
+            (&self.end.work, self.bunker, self.end.door)
+            && work.kind == WorkKind::Open
+        {
+            let b = (x, y, z);
+            let (_, _, door_cells) = bunker_cells(b, door);
+            if fire_near(w, door_cells[6], STAIR_CLEAR).is_some() {
+                self.end.work = None;
+                self.note(
+                    tick,
+                    "end: the open cut for fire by the stair".to_owned(),
+                    format!("the bunker {b:?} sealed again"),
+                );
+                self.begin_seal(w, b, door, tick);
+            }
         }
         if let Some(mut work) = self.end.work.take() {
             match self.work_tick(w, tick, &mut work) {
