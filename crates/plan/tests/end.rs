@@ -1657,3 +1657,40 @@ fn the_walk_for_surface_end_stone_stays_out_of_the_fountains_forty() {
     );
     assert!(!noted(&p, "end: out to mine at"), "{:?}", notes(&p));
 }
+
+#[test]
+fn a_cloud_cuts_a_surface_dig_and_a_trench_floor_is_no_ground_to_dig_under() {
+    // Race 46066925064 lane 0: mining in a pit 8 below the surface, the dig went on with a cloud
+    // on the feet until it died.
+    let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0).unwrap_or(plan::Task::Idle);
+    assert_eq!(t.name(), "dig", "{:?}", notes(&p));
+    p.task = t;
+    with_entity(&mut w, 13, EntityKind::AreaEffectCloud, [50.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&13) {
+        e.metadata.insert(8, MetaValue::Float(3.0));
+    }
+    let _ = p.end_step(&w, 0);
+    assert_eq!(p.task.name(), "idle", "{:?}", notes(&p));
+    assert!(noted(&p, "end: surface dig at"), "{:?}", notes(&p));
+    assert!(
+        p.events
+            .iter()
+            .any(|e| e.what.contains("cut for a cloud on the feet")),
+        "{:?}",
+        notes(&p)
+    );
+    // The floor of a trench 3 wide, one deep: open beside, but walls within 2: no dig one under.
+    let mut w = world(4, 0..=7, [50.5, 63.0, 0.5]);
+    for x in 49..=51 {
+        for z in -1..=1 {
+            set(&mut w, (x, 63, z), BlockKind::Air);
+        }
+    }
+    assert_eq!(plan::end::surface_cell_at(&w, (50, 63, 0), true), None);
+}

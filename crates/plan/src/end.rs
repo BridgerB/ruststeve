@@ -468,6 +468,9 @@ pub fn mine_ground(w: &World, feet: Cell, tried: &[Cell]) -> Option<Cell> {
     best.map(|(_, c)| c)
 }
 
+/// No full block at the feet's height this near: the true ground, where a dig one under may go.
+pub const PIT_LOOK: i32 = 2;
+
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -499,10 +502,14 @@ pub fn surface_cell_at(w: &World, feet: Cell, under_ok: bool) -> Option<Cell> {
         let c = (feet.0 + dx, feet.1, feet.2 + dz);
         (kind(w, c) == Some(BlockKind::EndStone) && solid(w, (c.0, c.1 - 1, c.2))).then_some(c)
     });
+    // Flat, and on the true ground: no full block at the feet's height within `PIT_LOOK` (the bottom
+    // of a wide trench looks flat too, and digging under it again made a pit 8 deep: race
+    // 46066925064 lane 0, killed by breath mining at (7, 54, -42)).
     let flat = SIDES.iter().all(|(dx, dz)| {
         let b = (feet.0 + dx, feet.1, feet.2 + dz);
         open(w, b) && open(w, (b.0, b.1 + 1, b.2))
-    });
+    }) && (-PIT_LOOK..=PIT_LOOK)
+        .all(|dx| (-PIT_LOOK..=PIT_LOOK).all(|dz| !solid(w, (feet.0 + dx, feet.1, feet.2 + dz))));
     let under = SIDES.iter().filter_map(|(dx, dz)| {
         let b = (feet.0 + dx, feet.1, feet.2 + dz);
         let c = (b.0, b.1 - 1, b.2);
@@ -774,6 +781,9 @@ pub struct EndState {
     pub drown_dig: Option<Dig>,
     #[serde(default)]
     pub drown_guards: u32,
+    /// The cell of the surface dig in hand (cut for a cloud on the feet).
+    #[serde(default)]
+    pub surface_dig: Option<Cell>,
     /// Mining ground walked to, the newest last.
     #[serde(default)]
     pub mine_tried: Vec<Cell>,
@@ -1618,6 +1628,7 @@ impl Plan {
                     self.end.surface_digs
                 ),
             );
+            self.end.surface_dig = Some(c);
             return Some(Task::Dig(Dig::new(w, c, tick)));
         }
         // None in reach: the next ground is the mining's level again.
@@ -2099,7 +2110,7 @@ impl Plan {
 
     /// One tick of E3's own steps in the End (the bridge, a work, an eat) while no task runs, or
     /// the choice of the next (`end_task`). `None` outside the End or while a task runs.
-    pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if !in_end(w) {
             return None;
         }
@@ -2115,6 +2126,22 @@ impl Plan {
                 self.note(
                     tick,
                     "end: work dropped for a cloud on the feet".to_owned(),
+                    "the breath rule walks the bot out".to_owned(),
+                );
+            }
+            // A surface dig of E3's under way: cut too (the same race: the dig went on with the
+            // cloud on the feet until the bot died).
+            let cut = if let Task::Dig(d) = &self.task {
+                (self.end.surface_dig == Some(d.target)).then_some(d.target)
+            } else {
+                None
+            };
+            if let Some(c) = cut {
+                self.task = Task::Idle;
+                self.end.surface_dig = None;
+                self.note(
+                    tick,
+                    format!("end: surface dig at {c:?} cut for a cloud on the feet"),
                     "the breath rule walks the bot out".to_owned(),
                 );
             }
