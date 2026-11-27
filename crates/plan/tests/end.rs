@@ -814,12 +814,23 @@ fn an_open_with_fire_coming_by_the_stair_is_cut_and_the_bunker_sealed() {
         0,
     ));
     p.step(&w);
+    // The fireball in flight seals the bunker (wall 14) before the fire cut (wall 13) is needed:
+    // either way the open is cut and the bunker sealed.
     assert!(
-        noted(&p, "end: the open cut for fire by the stair"),
+        noted(&p, "end: the open cut for fire by the stair")
+            || noted(&p, "end: the bunker sealed for a DragonFireball"),
         "{:?}",
         notes(&p)
     );
     assert!(noted(&p, "end: seal the bunker"), "{:?}", notes(&p));
+    assert!(
+        p.end
+            .work
+            .as_ref()
+            .is_none_or(|wk| wk.kind != plan::end::WorkKind::Open),
+        "{:?}",
+        p.end.work
+    );
 }
 
 #[test]
