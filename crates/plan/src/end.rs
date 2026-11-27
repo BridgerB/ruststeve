@@ -370,6 +370,8 @@ pub fn strafing(w: &World) -> bool {
     dragon(w).is_some_and(|(_, phase)| phase == Some(STRAFE_PHASE))
 }
 
+/// The stairs down's foot is kept only this far or more under the bunker's feet.
+pub const STOCK_FOOT_DEPTH: i32 = 3;
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -847,6 +849,34 @@ impl Plan {
             self.end.work = Some(Work::new(WorkKind::Pillar, ops, tick));
             return None;
         }
+        // The bunker open (its roof and first step dug) with a cell of its stair shut, the bot in
+        // it or on its stair: the stair dug again (race 45969992660 lane 2: the step (12, 60, 0)
+        // shut with the shaft open, no way out on foot). The open skips cells already dug.
+        let stair_shut =
+            open(w, roof) && open(w, door_cells[0]) && door_cells[..6].iter().any(|c| !open(w, *c));
+        if stair_shut
+            && (inside || self.at_bunker(w))
+            && !self
+                .end
+                .work
+                .as_ref()
+                .is_some_and(|wk| wk.kind == WorkKind::Open)
+        {
+            self.note(
+                tick,
+                "end: the bunker's stair dug again".to_owned(),
+                format!("a cell of the stair shut, the roof and door open; from {feet:?}"),
+            );
+            self.end.work = Some(Work::new(
+                WorkKind::Open,
+                std::iter::once(roof)
+                    .chain(door_cells)
+                    .map(Op::Dig)
+                    .collect(),
+                tick,
+            ));
+            return None;
+        }
         // Up a pillar or a spike, or a pillar of E4's still standing: the crystals' task brings
         // the bot down first, crystals left or not (E6's closed loop: the last crystal gone, the
         // bot stayed 18 up and asked for walks to the bunker 24 times).
@@ -1200,7 +1230,7 @@ impl Plan {
         // A run just ended: its end kept, then home.
         if let Some(run) = self.end.stock_out.take() {
             match run {
-                StockRun::Down => self.end.stock_foot = Some(feet),
+                StockRun::Down => self.keep_foot(feet, tick),
                 StockRun::Arm(i) => {
                     if let Some(a) = self.end.arms.get_mut(usize::from(i)) {
                         a.1 = Some(feet);
@@ -1287,8 +1317,10 @@ impl Plan {
         // The arms from the foot: on along the stairs' heading and to both sides, never back
         // under the stairs.
         if self.end.arms.is_empty() {
-            let side = (-d0.1, d0.0);
-            self.end.arms = vec![(d0, None), (side, None), ((-side.0, -side.1), None)];
+            // On along the stairs and away from the door; never toward the door's stair (race
+            // 45969992660 lane 2: an arm run toward it from a foot left at the bunker).
+            let away = (-door.0, -door.1);
+            self.end.arms = vec![(d0, None), (away, None)];
         }
         let n = u8::try_from(self.end.arms.len()).unwrap_or(1).max(1);
         let i = u8::try_from(self.end.stock_runs % u32::from(n)).unwrap_or(0);
@@ -1311,6 +1343,24 @@ impl Plan {
             format!("arm {i}, run {} next", self.end.stock_runs + 1),
         );
         Some(Task::Explore(walk))
+    }
+
+    /// The stairs down's end kept as the foot only when it is `STOCK_FOOT_DEPTH` or more under the
+    /// bunker's feet; a run cut short (a strafe at its first cell, race 45969992660 lane 2: the
+    /// foot left at the bunker, the arms run along its stair) is begun again.
+    fn keep_foot(&mut self, feet: Cell, tick: u64) {
+        let deep = self
+            .bunker
+            .is_some_and(|[_, y, _]| feet.1 <= y - STOCK_FOOT_DEPTH);
+        if deep {
+            self.end.stock_foot = Some(feet);
+        } else {
+            self.note(
+                tick,
+                format!("end: the stairs down cut short at {feet:?}"),
+                format!("under {STOCK_FOOT_DEPTH} below the bunker: begun again"),
+            );
+        }
     }
 
     /// Where arm `i`'s next run begins: its tip, or the stairs' foot.
@@ -1683,7 +1733,7 @@ impl Plan {
             if let (Some(run), Some(body)) = (self.end.stock_out.take(), w.body) {
                 let feet = path::stand_cell(w, body.pos);
                 match run {
-                    StockRun::Down => self.end.stock_foot = Some(feet),
+                    StockRun::Down => self.keep_foot(feet, tick),
                     StockRun::Arm(i) => {
                         if let Some(a) = self.end.arms.get_mut(usize::from(i)) {
                             a.1 = Some(feet);

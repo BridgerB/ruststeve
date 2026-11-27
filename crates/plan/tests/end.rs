@@ -390,7 +390,14 @@ fn every_stock_run_begins_and_ends_at_the_bunker() {
         "{:?}",
         notes(&p)
     );
-    assert_eq!(p.end.stock_foot, Some((12, 60, 1)));
+    // One under the bunker is no foot (the arms would run beside its stair): the stairs down are
+    // begun again.
+    assert_eq!(p.end.stock_foot, None);
+    assert!(
+        noted(&p, "end: the stairs down cut short at (12, 60, 1)"),
+        "{:?}",
+        notes(&p)
+    );
     // Home again: counted, and the next run is walked out to from the bunker.
     p.task = plan::Task::Idle;
     w.body = Some(physics::Body {
@@ -405,11 +412,8 @@ fn every_stock_run_begins_and_ends_at_the_bunker() {
         notes(&p)
     );
     assert_eq!(p.end.stock_back, 1);
-    assert!(
-        noted(&p, "end: stock walk to (12, 60, 1)"),
-        "{:?}",
-        notes(&p)
-    );
+    assert!(noted(&p, "end: stock run 2 toward"), "{:?}", notes(&p));
+    assert_eq!(p.end.stock_out, Some(plan::end::StockRun::Down));
 }
 
 #[test]
@@ -1182,4 +1186,65 @@ fn home_again_the_walks_back_count_again() {
     p.end.home_walks = plan::end::HOME_WALKS;
     let _ = p.end_task(&w, 0);
     assert_eq!(p.end.home_walks, 0);
+}
+
+#[test]
+fn an_open_bunker_with_a_shut_stair_step_digs_it_again() {
+    // Race 45969992660 lane 2: the step (12, 60, 0) shut with the shaft open. The bunker at
+    // (12, 60, 0), door west: its roof (12, 62, 0) and first step (11, 61, 0) dug, the second step
+    // (10, 62, 0) shut.
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+        (11, 63, 0),
+        (10, 63, 0),
+        (9, 63, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    let _ = p.end_task(&w, 0);
+    assert!(
+        noted(&p, "end: the bunker's stair dug again"),
+        "{:?}",
+        notes(&p)
+    );
+    let ops = p
+        .end
+        .work
+        .as_ref()
+        .map(|wk| wk.ops.clone())
+        .unwrap_or_default();
+    assert!(ops.contains(&plan::end::Op::Dig((10, 62, 0))), "{ops:?}");
+}
+
+#[test]
+fn the_stock_arms_never_run_toward_the_bunkers_stair() {
+    use plan::end::stock_dir;
+    let door = (-1, 0);
+    let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+    set(&mut w, (12, 61, 0), BlockKind::Air);
+    set(&mut w, (12, 62, 0), BlockKind::Air);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some(door);
+    p.end.stock_foot = Some((12, 55, -6));
+    p.end.stock_runs = 1;
+    let _ = p.end_task(&w, 0);
+    assert!(!p.end.arms.is_empty(), "{:?}", notes(&p));
+    assert!(
+        p.end.arms.iter().all(|(d, _)| *d != door),
+        "{:?}",
+        p.end.arms
+    );
+    assert!(p.end.arms.iter().any(|(d, _)| *d == stock_dir(door, 0)));
 }
