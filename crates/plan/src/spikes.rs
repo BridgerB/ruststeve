@@ -373,7 +373,7 @@ pub fn source(w: &World, c: Cell) -> bool {
 /// no source is there (E5's read of frontier race 45954274931: bots that stood in clutch water
 /// spread over the ground found no start for a walk or a dodge, NoPath to their deaths).
 pub fn clutch_water(w: &World, feet: Cell) -> Option<Cell> {
-    [0, -1]
+    let near = [0, -1]
         .into_iter()
         .flat_map(|dy| {
             let c = (feet.0, feet.1 + dy, feet.2);
@@ -382,7 +382,58 @@ pub fn clutch_water(w: &World, feet: Cell) -> Option<Cell> {
                 (c.0 + dx, c.1, c.2 + dz)
             }))
         })
-        .find(|c| source(w, *c))
+        .find(|c| source(w, *c));
+    // Further out: within `CLUTCH_WATER_REACH` on the plane, from 2 under the feet to them, the
+    // nearest (race 46059621531 lane 2: poured on an edge's column, landed on a higher one, "the
+    // water gone, not taken back; 0 water buckets held").
+    near.or_else(|| {
+        let r = CLUTCH_WATER_REACH;
+        let mut cells: Vec<Cell> = (-r..=r)
+            .flat_map(|dx| (-r..=r).flat_map(move |dz| (-2..=0).map(move |dy| (dx, dy, dz))))
+            .map(|(dx, dy, dz)| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
+            .filter(|c| source(w, *c))
+            .collect();
+        cells.sort_by_key(|c| {
+            (
+                (c.0 - feet.0).abs() + (c.1 - feet.1).abs() + (c.2 - feet.2).abs(),
+                *c,
+            )
+        });
+        cells.into_iter().next()
+    })
+}
+
+/// Blocks on the plane round the landed feet the clutch's water is looked for in.
+pub const CLUTCH_WATER_REACH: i32 = 2;
+
+/// Off a spike's top with no pillar down: the nearest cell of its top, at the feet's height,
+/// with a side whose fall lands on ground (not the void), and that side's cell. `None` with none
+/// within `SPIKE_SEARCH`.
+pub fn spike_edge(w: &World, feet: Cell) -> Option<(Cell, Cell)> {
+    let r = SPIKE_SEARCH;
+    let mut found: Vec<(i32, Cell, Cell)> = Vec::new();
+    for dx in -r..=r {
+        for dz in -r..=r {
+            let s = (feet.0 + dx, feet.1, feet.2 + dz);
+            if !(on_spike(w, s) && passable(kind(w, s)) && passable(kind(w, (s.0, s.1 + 1, s.2)))) {
+                continue;
+            }
+            for a in Axis::ALL {
+                let (ax, az) = a.step();
+                let o = (s.0 + ax, s.1, s.2 + az);
+                let lands = (o.1 - GROUND_SEARCH..o.1).any(|y| full(kind(w, (o.0, y, o.2))));
+                if passable(kind(w, o))
+                    && passable(kind(w, (o.0, o.1 + 1, o.2)))
+                    && open(kind(w, (o.0, o.1 - 1, o.2)))
+                    && lands
+                {
+                    found.push((dx.abs() + dz.abs(), s, o));
+                }
+            }
+        }
+    }
+    found.sort_by_key(|(d, s, o)| (*d, *s, *o));
+    found.into_iter().next().map(|(_, s, o)| (s, o))
 }
 
 /// A cell a body passes through: open, or water (a waterfall's pour on a pillar's top).
@@ -2164,6 +2215,69 @@ impl Plan {
                 None
             }
             Next::Wait(why) => {
+                // Up a spike's top with no pillar down: never a wait there (race 46059621531, the
+                // crystals_5 resume: 7 of 10 waited "stranded" until a fireball's cloud came):
+                // to its edge over ground and off it onto the clutch.
+                if body.on_ground && on_spike(w, feet) {
+                    if let Some(k) = knock_risk(d.as_ref()) {
+                        self.spikes_note(
+                            tick,
+                            "spikes: hold from the knock-off".to_owned(),
+                            format!("{k}; on the spike's top at {feet:?}"),
+                        );
+                        return Some(self.spikes_hold(tick));
+                    }
+                    let clutch =
+                        w.inventory.slots.iter().any(|(sl, (k, _))| {
+                            (36..=44).contains(sl) && *k == ItemKind::WaterBucket
+                        });
+                    match (clutch, spike_edge(w, feet)) {
+                        (true, Some((s, o))) if s == feet => {
+                            self.spikes.clutch_drops += 1;
+                            self.note(
+                                tick,
+                                format!("spikes: off the spike's top onto the clutch at {feet:?}"),
+                                format!("{why}; off to {o:?}, ground under it"),
+                            );
+                            self.spikes.doing = Some(Doing::Step {
+                                to: o,
+                                sneak: false,
+                                until: tick + STEP_TICKS,
+                            });
+                            self.retry_at = tick + 1;
+                            return Some(Task::Idle);
+                        }
+                        (true, Some((s, _))) => {
+                            let mut walk = Walk::new(s, Goal::Block { pos: s }, Arrive::Goal, tick);
+                            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                                self.spikes_note(
+                                    tick,
+                                    format!("spikes: to the spike's edge at {s:?}"),
+                                    format!("{why}; from {feet:?}, to step off onto the clutch"),
+                                );
+                                return Some(Task::Explore(walk));
+                            }
+                            self.expanded += walk.expanded;
+                        }
+                        (false, _) | (true, None) => {}
+                    }
+                    self.spikes_note(
+                        tick,
+                        "spikes: stranded on the spike's top".to_owned(),
+                        format!(
+                            "{why} at {feet:?}; {}",
+                            if clutch {
+                                "no edge over ground"
+                            } else {
+                                "no water bucket in the hotbar"
+                            }
+                        ),
+                    );
+                    if !clutch {
+                        self.spikes_bucket_swap(w, tick);
+                    }
+                    return Some(self.spikes_hold(tick));
+                }
                 self.spikes_note(
                     tick,
                     "spikes: wait".to_owned(),

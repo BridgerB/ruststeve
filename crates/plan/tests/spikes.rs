@@ -2434,3 +2434,61 @@ fn blocks_wanted_is_the_number_the_pillar_checks_compare_against() {
             .any(|n| n.starts_with("spikes: pillar up from"))
     );
 }
+
+#[test]
+fn stranded_on_a_spikes_top_the_bot_comes_down_onto_the_clutch() {
+    // Race 46059621531 (the crystals_5 resume): on the spike's top with no pillar record, 7 of
+    // 10 waited "stranded" until a fireball's cloud came.
+    // At the top's edge over ground: off it.
+    let mut w = world(2, [10.5, 70.0, 8.5]);
+    water(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: off the spike's top onto the clutch at (10, 70, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(
+        p.spikes.doing,
+        Some(spikes::Doing::Step {
+            to: (11, 70, 8),
+            sneak: false,
+            ..
+        })
+    ));
+    // Inside the top: walked to its edge first.
+    let mut w = world(2, [9.5, 70.0, 8.5]);
+    water(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Explore(_))),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: to the spike's edge at")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!notes(&p).iter().any(|n| n == "spikes: wait"));
+}
+
+#[test]
+fn the_clutchs_water_is_found_a_little_further_out() {
+    // Race 46059621531 lane 2: poured on an edge's column, landed on a higher one; "the water
+    // gone, not taken back; 0 water buckets held".
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    set(&mut w, (22, 63, 21), BlockKind::Water);
+    assert_eq!(spikes::clutch_water(&w, (20, 64, 20)), Some((22, 63, 21)));
+    set(&mut w, (21, 64, 20), BlockKind::Water);
+    assert_eq!(
+        spikes::clutch_water(&w, (20, 64, 20)),
+        Some((21, 64, 20)),
+        "the nearest first"
+    );
+}

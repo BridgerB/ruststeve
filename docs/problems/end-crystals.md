@@ -581,3 +581,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Its climbs began at 2,820 (landing approach, 72 off), 3,080 (landing, 90 off) and 3,260 (landing, 42 off). Each is refused now: a climb begins only with the dragon holding over 64 off.
   - After the strike at 3,400 it dug down. Today the clutch descent runs first (`spikes_water` comes before the hurt rule), and at 3,480 (a charge 17 off) the knock rule holds it.
   - What killed it was "eat in the shaft" on the open pillar at y 81: an Eat task that ran 2,360 ticks, from 3,560 to 5,920, through two perch-and-charge cycles. Today the hurt rule eats only when no water way down exists. An Eat lasting 2,360 ticks is a fault of its own, in the shared eat task.
+
+### Wall 42: stranded on a spike's top, waiting (race 46059621531, the crystals_5 resume; fixed)
+- **What happened:**
+  - The resume put the bot on the spike's top at (-33.4, 79, 27.6) with no pillar record.
+  - It noted "spikes: wait (stranded on a spike's top with no pillar down …)" 5 to 15 times until a fireball's cloud came: 7 of 10 dead within 3,460 ticks.
+  - Lane 2's clutch, from a 4.8-block fall, poured on an edge's column (-36, 79, 24) and landed on a higher one at (-35, 80, 25). It was "the water gone, not taken back; 0 water buckets held": the source was out of the take-back's search.
+- **The fix:**
+  - Never a wait on a spike's top: the nearest cell of the top with a side whose fall lands on ground, not the void (`spike_edge`), is walked to ("to the spike's edge at"). From it the bot steps off onto the clutch ("off the spike's top onto the clutch at"). With no water bucket in the hotbar, one is swapped in and the bot is held.
+  - The knock rule holds first.
+  - The clutch's water is also looked for within 2 on the plane, from 2 under the feet up to them, the nearest first (`CLUTCH_WATER_REACH`).
+  - Unit tests `stranded_on_a_spikes_top_the_bot_comes_down_onto_the_clutch` and `the_clutchs_water_is_found_a_little_further_out`.
