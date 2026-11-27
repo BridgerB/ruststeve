@@ -670,6 +670,8 @@ pub const FOUNTAIN_CLEAR: f64 = 5.0;
 
 /// The key of a dodge begun before its fireball is seen (`fire_imminent`).
 pub const IMMINENT: i32 = i32::MIN;
+/// The key of a dodge from a charge (`charging_at`).
+pub const CHARGE: i32 = i32::MIN + 1;
 /// The cosine of the angle off the strafing dragon's facing at which its fire is taken as due:
 /// it fires within 10 degrees after 5 ticks in sight (`DragonStrafePlayerPhase`), 20 gives the
 /// turn's last ticks to the walk.
@@ -1890,6 +1892,9 @@ pub struct DragonState {
     pub pace_legs: u32,
     #[serde(default)]
     pub dodge_straight: bool,
+    /// The cell out of a breath pressed straight on toward when no walk planned (wall 36).
+    #[serde(default)]
+    pub breath_straight: Option<[i32; 3]>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2577,9 +2582,15 @@ impl Plan {
             }
             return None;
         };
-        // In a notch already: down and roofed, never a walk out sideways.
-        if self.dragon.breath_notch {
-            return Some(self.notch_dig_step(w, tick, crouch, "breath"));
+        // Never a notch under a breath (wall 36: a cloud on the body reaches it there; dev race
+        // 45964846590 lanes 4, 5, 6 dug one under the cloud and died in it): out on foot, pressed
+        // straight on when no walk plans.
+        self.dragon.breath_notch = false;
+        if let Some(t) = self.dragon.breath_straight {
+            if cell_of(feet) != t && !clear_of_breath(&clouds, feet) {
+                return Some(toward(feet, mid(t)));
+            }
+            self.dragon.breath_straight = None;
         }
         // Shelter near (the bunker within `BUNKER_NEAR`): into it, down, never out sideways
         // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
@@ -2588,22 +2599,11 @@ impl Plan {
         // And only a bunker shut, roof and door: an open one lets the fireball in (frontier race
         // 45931225605 lane 1: sheltered in it, the cloud on the bot inside it).
         if let Some(b) = self.bunker
+            && cell_of(feet) != b
             && flat(feet, mid(b)) <= BUNKER_NEAR
-            && (cell_of(feet) == b || (clear_of_breath(&clouds, mid(b)) && self.bunker_shut(w)))
+            && clear_of_breath(&clouds, mid(b))
+            && self.bunker_shut(w)
         {
-            if cell_of(feet) == b {
-                self.dragon.breath_notch = true;
-                self.note(
-                    tick,
-                    format!("breath: in the bunker at {b:?}, a notch down"),
-                    format!(
-                        "a breath {:.1} off, radius {:.1}",
-                        flat(on.pos, feet),
-                        on.radius
-                    ),
-                );
-                return Some(self.notch_dig_step(w, tick, crouch, "breath"));
-            }
             let cell: Cell = (b[0], b[1], b[2]);
             if self
                 .dragon
@@ -2717,14 +2717,17 @@ impl Plan {
                 self.dragon.breath_refused.push(target);
             }
             if let TaskStatus::Failed(e) = status {
-                // No way out on foot: down a notch where the feet are, roofed, not a dig sideways
-                // through walls (E4's race 45912100302 lane 0; frontier lane 1 on the stair).
-                self.dragon.breath_notch = true;
+                // No walk planned (water, a stair, a notch's floor): pressed straight on toward the
+                // cell out, never a notch under the cloud (wall 36).
+                self.dragon.breath_straight = Some(target);
                 self.note(
                     tick,
                     format!("walk out of the breath to {target:?} failed: {e:?}"),
-                    "a notch down where the feet are".to_owned(),
+                    "pressed straight on toward it".to_owned(),
                 );
+                if let Some(feet) = w.body.map(|b| b.pos) {
+                    return Some(toward(feet, mid(target)));
+                }
             }
         }
         if c.pitch.is_none() {
@@ -2797,8 +2800,7 @@ impl Plan {
         // the bot stood (wall 28: its cloud is put on a body within 4 of its hit, walls or not).
         // Ahead of the walk out of a cloud on the feet: the dodge cell is clear of every cloud,
         // and the walk out went the other way (dev race 45947481217 lane 2, wall 32).
-        if charge.is_none()
-            && (fireball.is_some() || fire_imminent(w, body.pos).is_some())
+        if (charge.is_some() || fireball.is_some() || fire_imminent(w, body.pos).is_some())
             && world::stage::open_sky(w)
         {
             if let Some(c) = self.fireball_dodge_step(w, tick) {
@@ -2832,9 +2834,8 @@ impl Plan {
             if let Some(c) = self.strafe_seen_step(w, tick, body, cloud) {
                 return c;
             }
-            if fireball.is_some() && !cloud {
-                return None;
-            }
+            // No cover for a cloud (wall 36): the walk out of it is `breath_step`'s.
+            return None;
         }
         if !world::stage::open_sky(w) {
             return None;
@@ -2879,7 +2880,7 @@ impl Plan {
             // No bunker near: a notch two deep where the feet are, dug at once and dropped into,
             // under the charge's head and wings (E4's race 4; race 45895541443 lane 2 crouched on
             // the surface and took 10, then 5 and 5).
-            return Some(self.notch_dig_step(w, tick, crouch, "charge"));
+            return Some(crouch);
         };
         let cell: Cell = (b[0], b[1], b[2]);
         if self
@@ -3013,7 +3014,7 @@ impl Plan {
         // Hidden in its notch.
         if self.dragon.notch_from.is_some_and(|f| fc[1] <= f[1] - 2) {
             if cloud {
-                return Some(Some(self.notch_dig_step(w, tick, crouch, "strafe")));
+                return Some(Some(crouch));
             }
             let since = *self.dragon.hidden_since.get_or_insert(tick);
             if tick < since + STRAFE_HIDE_TICKS {
@@ -3139,15 +3140,28 @@ impl Plan {
                 )
             }
             // No fireball yet, the strafing dragon facing the bot: its fire is due (wall 34).
-            None => match fire_imminent(w, feet) {
+            None => match fire_imminent(w, feet).or_else(|| {
+                // A charge: it flies at where the bot is, dodged sideways like a fireball (wall
+                // 36: no notch for it).
+                let (_, v) = view(w)?;
+                charging_at(w, feet)?;
+                let to = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+                let d = to[0].hypot(to[1]);
+                (d > 1e-6).then(|| ([to[0] / d, to[1] / d], d))
+            }) {
                 Some((dir, d)) => {
                     // At the leg's end with the fire still due: a dodge again from here.
-                    if self.dragon.dodge_id == Some(IMMINENT)
+                    if matches!(self.dragon.dodge_id, Some(IMMINENT | CHARGE))
                         && self.dragon.dodge_to.is_some_and(|c| cell_of(feet) == c)
                     {
                         self.dragon.dodge_id = None;
                     }
-                    (IMMINENT, dir, d, 0.0)
+                    let key = if charging_at(w, feet).is_some() {
+                        CHARGE
+                    } else {
+                        IMMINENT
+                    };
+                    (key, dir, d, 0.0)
                 }
                 None => {
                     self.dragon.dodge_id = None;
@@ -3183,7 +3197,10 @@ impl Plan {
                     self.dragon.dodges += 1;
                     self.note(
                         tick,
-                        format!("fireball: dodge to {c:?}"),
+                        format!(
+                            "{}: dodge to {c:?}",
+                            if id == CHARGE { "charge" } else { "fireball" }
+                        ),
                         format!(
                             "{}flight {:.2},{:.2}; ticks {eta:.0}; from {from:?}, {:.1} off its line; {} dodges",
                             if id == IMMINENT {

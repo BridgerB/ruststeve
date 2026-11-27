@@ -319,3 +319,17 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 ### Frontier race 45964846590 (25c4f49, 8 lanes), read mid-run (lanes 2, 4, 5, 7 at tick 4,820)
 - **Wall 35:** "fireball: no dodge cell from [13, 59, 0]", once each in three lanes: on the bunker's stair, 3 under the ground, where dodge cells were looked for only 2 up or down. **Fix:** heights up to 4 up and 3 down (`DODGE_YS`); the route check still decides.
 - The idle backstop fired twice ("end: idle 600 ticks at [14, 57, 0] … rows held charge_step, breath_step") and handed back.
+
+### Frontier race 45964846590 (25c4f49, 8 lanes): 8/8 dead, 7 of breath, the dragon at 200
+- **Wall 36: the notch is a trap.** Lanes 4, 5 and 6 died in or digging a notch.
+  - In each, a fireball first seen 4 to 8 ticks out found "no dodge cell" (the bot on a stair or in a pit at y 59 to 60), and its cloud was put on the bot.
+  - The walk out failed `NoPath` (or went into the bunker), and the breath answer dug a notch under the cloud while it struck every 20 ticks.
+  - The jar shows nothing a notch keeps off: a fireball's cloud goes on a body within 4 of the hit, walls or not, and the dragon's body moves without collision.
+  - **Fix:** no notch for a cloud or a charge.
+    - A charge is dodged sideways like a fireball (`CHARGE`, "charge: dodge to …").
+    - A cloud near in a strafe gets no cover; `breath_step` walks out of it.
+    - In the bunker under a breath, the bot walks out.
+    - A failed walk out presses straight on toward the cell out ("pressed straight on toward it", `breath_straight`).
+  - The enderman's notch is kept: a different cause, with no cloud in it.
+- Lanes 2 and 7 ("no dodge cell" 5 and 6 ticks out, from y 58 and a pit at y 56): c8ae2bc's heights (`DODGE_YS`) and early dodge (`fire_imminent`) answer them.
+- Lane 0 was drowning in water (E4's) when its cloud came. Lane 1 died on a `NoPath` walk out (now pressed straight on).

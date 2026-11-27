@@ -772,14 +772,17 @@ fn a_charge_is_waited_out_crouched_or_in_the_bunker() {
     let mut w = end_at(feet);
     with_dragon(&mut w, [-17.5, 64.0, 0.5], 8, 90.0);
     assert!(dragon::charging_at(&w, feet).is_some());
+    // Dodged sideways like a fireball, never a notch (wall 36).
     let mut p = Plan::new(Aim::Race);
-    let c = p.charge_step(&w, 0).expect("held");
-    assert!(c.sneak && !c.forward, "crouched still");
+    assert!(p.charge_step(&w, 0).is_some());
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "charge: hold crouched where the feet are")
+            .any(|e| e.what.starts_with("charge: dodge to")),
+        "{:?}",
+        p.events_since(0)
     );
+    assert!(p.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })));
     let mut away = end_at(feet);
     with_dragon(&mut away, [-17.5, 64.0, 0.5], 8, 270.0);
     assert!(dragon::charging_at(&away, feet).is_none(), "facing away");
@@ -791,15 +794,6 @@ fn a_charge_is_waited_out_crouched_or_in_the_bunker() {
     assert!(
         dragon::charging_at(&holding, feet).is_none(),
         "not charging"
-    );
-    // With the bunker in reach: into it.
-    let mut q = Plan::new(Aim::Race);
-    q.bunker = Some([16, FLOOR, 0]);
-    assert!(q.charge_step(&w, 0).is_some());
-    assert!(
-        q.events_since(0)
-            .iter()
-            .any(|e| e.what == format!("charge: hold in the bunker at {:?}", [16, FLOOR, 0]))
     );
 }
 
@@ -856,24 +850,27 @@ fn the_takeoff_count_starts_again_when_a_blow_sends_it_off() {
 }
 
 #[test]
-fn a_charge_with_no_bunker_near_is_met_in_a_notch_two_deep() {
+fn a_charge_is_dodged_sideways_never_met_in_a_notch() {
     // Race 45895541443 lane 2: crouched on the surface, the charge took 10 and two fly-bys 5.
+    // Dev race 45964846590: three bots died in a notch under a cloud (wall 36).
     let feet = [12.5, 64.0, 0.5];
     let mut w = end_at(feet);
     with_dragon(&mut w, [-17.5, 64.0, 0.5], 8, 90.0);
     assert!(dragon::notch_diggable(&w, [12, 64, 0]));
     let mut p = Plan::new(Aim::Race);
-    let c = p.charge_step(&w, 0).expect("held");
-    assert!(c.sneak && !c.forward);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "charge: dig a notch at [12, 63, 0]"),
-        "the block under the feet first"
+            .any(|e| e.what == "charge: dodge to [12, 64, 6]"),
+        "{:?}",
+        p.events_since(0)
     );
+    assert_eq!(p.dragon.dodge_id, Some(dragon::CHARGE));
     assert!(
-        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
-        "dug at once"
+        p.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })),
+        "no dig"
     );
     // Two down, the step out is beside it one under the surface, with air over it.
     let mut down = end_at([12.5, 62.0, 0.5]);
@@ -920,14 +917,17 @@ fn the_notch_is_roofed_a_side_block_first() {
             state: state(BlockKind::Air),
         }));
     }
-    with_dragon(&mut down, [-17.5, 64.0, 0.5], 8, 90.0);
+    // The enderman's notch (the one notch left, wall 36), an angry one 5 off.
+    add(&mut down, 70, EntityKind::Enderman, [17.5, 64.0, 0.5]);
+    data(&mut down, 70, vec![(17, MetaValue::Bool(true))]);
     down.inventory
         .slots
         .insert(36, (data::ItemKind::EndStone, 64));
     down.held = 0;
     let mut p = Plan::new(Aim::Race);
     p.dragon.notch_from = Some([12, 64, 0]);
-    assert!(p.charge_step(&down, 0).is_some());
+    p.dragon.ender_notch = true;
+    assert!(p.end_enderman_step(&down, 0).is_some());
     let acts = p.take_acts();
     assert!(
         acts.contains(&Act::UseOn {
@@ -942,7 +942,7 @@ fn the_notch_is_roofed_a_side_block_first() {
         pos: (13, 64, 0),
         state: state(BlockKind::EndStone),
     }));
-    assert!(p.charge_step(&down, 10).is_some());
+    assert!(p.end_enderman_step(&down, 10).is_some());
     assert!(p.take_acts().contains(&Act::UseOn {
         pos: world::BlockPos::new(13, 64, 0),
         face: 4
@@ -1118,29 +1118,19 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
         "{:?}",
         p.events_since(0)
     );
-    // In the bunker with the breath still on: a notch down from there.
+    // In the bunker with the breath on the body: walked out of it, never a notch (wall 36).
     let mut q = Plan::new(Aim::Race);
     q.bunker = Some([12, FLOOR, 0]);
     assert!(q.breath_step(&w, 0).is_some());
     assert!(
         q.events_since(0)
             .iter()
-            .any(|e| e.what.starts_with("breath: in the bunker at")),
+            .any(|e| e.what.starts_with("out of the breath to")),
+        "{:?}",
+        q.events_since(0)
     );
-    assert!(q.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
-    assert!(q.dragon.breath_notch);
-    // Two down under the cloud: held there, crouched, while it lies over the notch.
-    let mut down = end_at([12.5, 62.0, 0.5]);
-    for y in [62, 63] {
-        down.step(&Event::Packet(S2c::BlockUpdate {
-            pos: (12, y, 0),
-            state: state(BlockKind::Air),
-        }));
-    }
-    cloud(&mut down, 50, [12.5, 64.0, 0.5], 3.0);
-    q.dragon.notch_from = Some([12, 64, 0]);
-    let c = q.breath_step(&down, 20).expect("held in the notch");
-    assert!(c.sneak && !c.forward);
+    assert!(q.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })));
+    assert!(!q.dragon.breath_notch);
 }
 
 #[test]
@@ -1430,7 +1420,7 @@ fn a_strafe_is_met_standing_in_sight() {
     p.dragon.notch_from = Some([12, 64, 0]);
     let c = p.charge_step(&after, 60).expect("stays sheltered");
     assert!(c.sneak && !c.forward);
-    // A charge is never met in the open: hidden at once (a notch where the feet are).
+    // A charge: dodged sideways, never a notch (wall 36).
     let mut charge = end_at(feet);
     with_dragon(&mut charge, [-17.5, 64.0, 0.5], 8, 90.0);
     let mut q = Plan::new(Aim::Race);
@@ -1438,7 +1428,7 @@ fn a_strafe_is_met_standing_in_sight() {
     assert!(
         q.events_since(0)
             .iter()
-            .any(|e| e.what == "charge: dig a notch at [12, 63, 0]")
+            .any(|e| e.what.starts_with("charge: dodge to"))
     );
     // Far off: no strafe counted.
     let mut far = end_at(feet);
@@ -1918,4 +1908,42 @@ fn from_the_bunkers_stair_the_dodge_finds_the_ground_three_up() {
     assert!(p.charge_step(&w, 0).is_some());
     let to = p.dragon.dodge_to.expect("a dodge cell on the ground");
     assert_eq!(to[1], FLOOR, "{to:?}");
+}
+
+#[test]
+fn a_cloud_on_the_body_is_walked_out_of_never_a_notch_under_it() {
+    // Dev race 45964846590 lanes 4, 5, 6: the walk out failed NoPath, a notch was dug under the
+    // cloud, and the bots died in it (wall 36).
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    cloud(&mut w, 50, [12.5, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    let _ = p.breath_step(&w, 0).expect("out");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("out of the breath to"))
+    );
+    assert!(p.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })));
+    // The walk refused (water, a stair): pressed straight on toward the cell out.
+    let target = [12, 64, 6];
+    p.dragon.breath_straight = Some(target);
+    let c = p.breath_step(&w, 1).expect("pressed on");
+    assert!(c.forward && !c.sneak, "{c:?}");
+    assert!(p.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })));
+    assert!(!p.dragon.breath_notch);
+    // A strafe with a cloud near: no cover taken; the walk out is the breath's.
+    let mut s = end_at(feet);
+    with_dragon(&mut s, [-30.5, 80.0, 0.5], 1, 0.0);
+    cloud(&mut s, 50, [17.5, 64.0, 0.5], 3.0);
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    let _ = q.charge_step(&s, 0);
+    assert!(
+        !q.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: shelter") || e.what.contains("notch")),
+        "{:?}",
+        q.events_since(0)
+    );
 }
