@@ -229,7 +229,13 @@ fn a_crystal_is_shot_from_the_ground_drawn_full_and_released_on_the_aim() {
         Some(Stage::Flight { .. })
     ));
     w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![CRYSTAL] }));
-    assert!(p.bow_step(&w, 140).is_none(), "the shot over");
+    // Gone from the entities: its blast is waited for.
+    assert!(p.bow_step(&w, 135).is_some(), "the blast waited for");
+    w.step(&Event::Packet(S2c::Explode {
+        center: CRYSTAL_AT,
+        knockback: None,
+    }));
+    assert!(p.bow_step(&w, 137).is_none(), "the shot over");
     assert!(
         notes(&p)
             .iter()
@@ -333,4 +339,28 @@ fn no_bow_no_shot() {
     w.inventory.slots.remove(&37);
     let mut p = Plan::new(Aim::Race);
     assert_eq!(p.bow_task(&w, 100), None, "no arrows");
+}
+
+/// A crystal that leaves the entities after a shot with no blast at its spot (untracked: the
+/// server sends crystals again on a resume) is not a hit.
+#[test]
+fn a_crystal_untracked_after_a_shot_is_no_hit() {
+    let mut w = world(FEET);
+    let mut p = Plan::new(Aim::Race);
+    p.bow_task(&w, 100);
+    let s = p.bow.doing.as_mut().expect("a shot");
+    s.stage = Stage::Flight { since: 100 };
+    p.bow.driven_at = 100;
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![CRYSTAL] }));
+    let mut t = 101;
+    while p.bow_step(&w, t).is_some() {
+        t += 1;
+        assert!(t < 200, "never over");
+    }
+    assert_eq!(p.bow.hits, 0);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "bow: crystal 7 out of sight after the shot")
+    );
 }

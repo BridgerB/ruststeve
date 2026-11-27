@@ -326,6 +326,12 @@ pub struct Shot {
     pub aim: Aim,
     pub stage: Stage,
     pub begun: u64,
+    /// The server's tick at the release, and our tick when the crystal left the entities after
+    /// it: a hit is its blast at its spot after the release, never an untracking.
+    #[serde(default)]
+    pub released_server: u64,
+    #[serde(default)]
+    pub gone_at: Option<u64>,
 }
 
 /// The bow line's state, one field of `Plan` (`Plan::bow`).
@@ -359,6 +365,9 @@ const LOOK_WAIT: u64 = 60;
 const LOOK_NEAR: f64 = 0.25;
 /// The flight is waited for this many ticks past its predicted hit.
 const FLIGHT_SPARE: u64 = 20;
+/// Ticks a crystal gone from the entities waits for its blast's packet (parity e07: removed at
+/// t 98, the blast heard at t 100).
+const BLAST_WAIT: u64 = 10;
 /// Standing still: the horizontal speed under this a tick.
 const STILL: f64 = 0.003;
 
@@ -501,6 +510,8 @@ impl Plan {
                         aim: a,
                         stage: Stage::Hold,
                         begun: tick,
+                        released_server: 0,
+                        gone_at: None,
                     });
                     self.bow.driven_at = tick;
                     self.note(
@@ -615,6 +626,36 @@ impl Plan {
                 self.acts.push(Act::ReleaseUse);
             }
             if let Stage::Flight { since } = shot.stage {
+                // Its blast at its spot after the release is the hit (the server untracks and
+                // sends crystals again on a resume: E9's false crystals_5 at tick 40).
+                let blast = w.explosions.iter().any(|b| {
+                    b.at_tick >= shot.released_server
+                        && (0..3)
+                            .map(|i| (b.center[i] - shot.at[i]).powi(2))
+                            .sum::<f64>()
+                            <= 4.0
+                });
+                let gone = *shot.gone_at.get_or_insert(tick);
+                if !blast {
+                    if tick.saturating_sub(gone) <= BLAST_WAIT {
+                        self.bow.doing = Some(shot.clone());
+                        return Some(Controls {
+                            yaw: shot.aim.yaw,
+                            pitch: Some(shot.aim.pitch),
+                            ..Controls::default()
+                        });
+                    }
+                    self.note(
+                        tick,
+                        format!("bow: crystal {} out of sight after the shot", shot.target),
+                        format!(
+                            "no blast at {:?} within {BLAST_WAIT} ticks of its leaving: not counted",
+                            shot.at
+                        ),
+                    );
+                    self.retry_at = tick;
+                    return None;
+                }
                 self.bow.hits += 1;
                 self.note(
                     tick,
@@ -716,6 +757,7 @@ impl Plan {
                         ),
                     );
                     shot.stage = Stage::Flight { since: tick };
+                    shot.released_server = w.session.server_ticks;
                 }
             }
             Stage::Flight { since } => {
