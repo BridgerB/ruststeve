@@ -2277,7 +2277,7 @@ fn while_the_dragon_scans_the_bot_paces_wider_than_its_wings_sweep() {
     // the wings knock within about 10.5 of the body's line.
     let feet = [12.5, 64.0, 0.5];
     let mut w = end_at(feet);
-    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 5, 270.0);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 270.0);
     let mut p = Plan::new(Aim::Race);
     p.bunker = Some([60, FLOOR - 4, 60]);
     assert!(p.charge_step(&w, 0).is_some(), "paced");

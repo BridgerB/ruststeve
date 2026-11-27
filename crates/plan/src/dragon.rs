@@ -4417,7 +4417,12 @@ impl Plan {
         if self.dragon.ready {
             // Scanning for a charge: already on the move sideways in legs the charge's sweep
             // cannot follow (wall 41: walking 12 takes about 55 ticks, the charge about 20).
-            if v.phase() == Some(Phase::SittingScanning) && from_fountain(feet) <= SCAN_PACE_NEAR {
+            // Only with nothing in hand (wall 37's rule; the end loop: the scan's pace took E3's
+            // walks back to the bunker site, every one NoPath).
+            if v.phase() == Some(Phase::SittingScanning)
+                && matches!(self.task, Task::Idle)
+                && from_fountain(feet) <= SCAN_PACE_NEAR
+            {
                 let stand = Controls {
                     yaw: f64::from(w.player.yaw),
                     ..Controls::default()
