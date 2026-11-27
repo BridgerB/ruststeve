@@ -466,7 +466,8 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
             .iter()
             .any(|n| n.starts_with("spikes: pillar up from"))
     );
-    // Strafing 30 off with the bot half way up a pillar: no wait there, on up to the stand.
+    // Strafing 30 off with the bot half way up a pillar and no clutch bucket: a strafe is
+    // fireballs on the way (frontier 45947478869 lane 1), so down, not on up to the stand.
     let mut w = world(2, [8.5, 67.0, 5.5]);
     pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
     dragon(&mut w, [8.5, 67.0, 35.5], 1);
@@ -476,13 +477,14 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
         z: 5,
         base: 64,
     });
-    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(matches!(p.spikes_task(&w, 100), Some(Task::Dig(_))));
     assert!(
-        notes(&p).iter().any(|n| n == "spikes: climb on through"),
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: down from a fireball at")),
         "{:?}",
         notes(&p)
     );
-    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
     // Charging 30 off: held still in the column.
     dragon(&mut w, [8.5, 67.0, 35.5], 8);
     let mut p = Plan::new(Aim::Race);
