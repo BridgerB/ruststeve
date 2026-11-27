@@ -295,3 +295,41 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The pour a tick earlier** (the orchestrator: two sent pours did not save a bot, and the server places the water when it handles the packet, perhaps after the feet arrive):
   - The pour goes in the tick whose sent position is in reach while the one two ticks on is not, so it is one tick before the last in reach when two qualify. Only one is sent (`Clutch::sent_at`): a second use would take the water back up.
   - "clutch pour sent" now carries the tick and the predicted ticks to landing.
+
+## Fourteenth race: 45927433568 (dev-end-island, b4f48ee, development only)
+- **Lane 0:** 2 crystals.
+  - Landing water was poured at (38, 59, 0) for the (39, 0) pillar, but the next choice was the South axis, (42, 59, 3), with one bucket left: "no landing water", and the poured bucket lost.
+  - The clutch saved a fall of 19.6 (sent 2 ticks before the landing).
+  - A second clutch sent its pour 3 ticks before the landing (3.31 over, falling 1.16) at 10 health, and the bot died of the fall.
+- **Lane 1:** the refills worked at the fourth turn (2 buckets) and landing water was poured at (43, 59, 3). Later it was killed by breath in E5's notch.
+- **The give-up notes** say the bucket was held and aimed at a pool cell's middle with no fill: some cells were not sources yet.
+
+### Wall 20: the pour sent too late, and the landing water left behind (fixed)
+- **The pour:** sent in the first tick whose sent position is in reach, for the most time for the server.
+- **The approach:** an approach whose column already has its landing water goes first, so a poured bucket is not lost to another axis.
+
+### The clutch's window, measured (E6's parity e09-pour, run 45929976619; docs/problems/end-model.md "The water clutch window")
+- **The rule now:**
+  - The server judges a use from the last position it heard (the body's before this tick's move), and places water only with the eye within 4.5 of the ground there. 3.93 or less always placed it; 4.56 or more never did.
+  - So the pour goes by the current height: the feet 2.7 or less over the ground under the body (`POUR_FEET`).
+  - It is tried again every 2 ticks until the water shows under the feet, and never once it is there.
+  - A late pour is never too late: K1 saved every drop up to 60.
+- **The races fit:** race 45927433568's pour "3.31 over" was the eye at 4.93, out of reach.
+
+## Fifteenth race: 45930464018 (dev-end-island, 17f10c1, old pour timing, development only)
+- **Lane 1:** 4 crystals.
+  - Two clutch pours were sent with the feet 3.39 and 4.01 over the ground: eyes at 5.0 and 5.6, out of reach (E6's window).
+  - "missed", then a death by the fall. 7a0bb59's height rule answers this.
+
+### Wall 21: the pool's water went down the bunker's stair, and the bot drowned in its bunker (fixed)
+- **What happened** (lane 0, ticks 880 to 2,400):
+  - Both pool pours were "done" with both pool cells still Air.
+  - The body stood at x 10.8, off its stand (10, 62, 1)'s centre. The ray to the pool cell's floor middle met the top face of the stand's own floor, so the water went into the stand's cell.
+  - It ran down E3's bunker stair and flooded the roofed bunker. The bot drowned there (`death.attack.drown`).
+- **The fix:**
+  - Before a pool pour, the bot centres on its stand ("centre on the pool's stand").
+  - It aims at the far side of the pool cell's floor (0.3 past its middle, away from the stand), so the ray clears the stand's floor edge.
+- **Made structural** (the orchestrator: no misplaced pour may ever flood the shelter):
+  - The pool's stand and its four cells keep 5 columns from the bunker's column (its stair runs four out), and the stand is never higher than the ground over the bunker, so water cannot run down to it.
+  - The site search widens to 8 columns to fit.
+  - Unit test `the_pool_is_never_sited_by_the_bunker_or_its_stair`.

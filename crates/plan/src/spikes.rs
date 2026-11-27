@@ -815,7 +815,23 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     let crystal = nearest_crystal(w, body.pos);
     let approach = crystal.and_then(|(_, pos)| {
         let spike = spike_for(w, &st.geography, pos)?;
-        best_approach(w, &spike, body.pos, &st.refused, tick).map(|a| (spike, a))
+        // A column whose landing water is poured goes first (race 45927433568 lane 0: poured at
+        // one pillar's foot, the next choice was another axis, and the bucket was lost to it).
+        let refused = |a: &Axis| {
+            st.refused
+                .iter()
+                .any(|(x, z, r, until)| [*x, *z] == spike.centre && r == a && tick < *until)
+        };
+        let landed = st.landings.iter().find_map(|(col, _)| {
+            Axis::ALL
+                .iter()
+                .filter(|a| !refused(a))
+                .filter_map(|a| approach_along(w, &spike, *a))
+                .find(|a| a.plan.column == *col)
+        });
+        landed
+            .or_else(|| best_approach(w, &spike, body.pos, &st.refused, tick))
+            .map(|a| (spike, a))
     });
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
@@ -1011,14 +1027,22 @@ pub fn pour_now(feet_y: f64, vy: f64, ground: f64) -> bool {
 /// handles the packet, which may be after the feet arrive): the pour goes in the tick whose sent
 /// position is in reach while the one two ticks on is not, so the last tick in reach and the one
 /// before it both qualify, and the clutch sends at the first (`Clutch::sent_at` keeps it to one).
+///
+/// Measured (E6's parity e09-pour, run 45929976619, docs/problems/end-model.md "The water
+/// clutch window"): the server judges the use from the last position it heard, the body's
+/// before this tick's move, and places water only with the eye within 4.5 of the ground there
+/// (every use with the eye at 3.93 or less placed it, every one at 4.56 or more nothing). So the
+/// pour goes by the body's current height, the feet `POUR_FEET` or less over the ground under
+/// them, every tick until the water shows; a late pour is never too late (K1 saved every drop
+/// up to 60). `vy` and `g2` are kept for the callers and unused.
 pub fn pour_now_at(feet_y: f64, vy: f64, g1: Option<f64>, g2: Option<f64>) -> bool {
-    let p1 = feet_y + vy;
-    let v2 = (vy - physics::GRAVITY) * physics::VERTICAL_DRAG;
-    let p2 = p1 + v2;
-    let p3 = p2 + (v2 - physics::GRAVITY) * physics::VERTICAL_DRAG;
-    let in_reach = |p: f64, g: f64| p > g && p + physics::EYE_HEIGHT - g <= POUR_REACH;
-    g1.is_some_and(|g| in_reach(p1, g)) && !g2.is_some_and(|g| in_reach(p3, g))
+    let _ = (vy, g2);
+    g1.is_some_and(|g| feet_y > g && feet_y - g <= POUR_FEET)
 }
+
+/// Feet over the ground at or under which the clutch pours: the measured reach, eye 4.5 less
+/// the eye's 1.62, is 2.88; less a margin.
+pub const POUR_FEET: f64 = 2.7;
 
 /// Ticks until feet at `feet_y` falling at `vy` reach `ground` (for the ledger).
 pub fn ticks_to_land(feet_y: f64, vy: f64, ground: f64) -> u32 {
@@ -1033,7 +1057,7 @@ pub fn ticks_to_land(feet_y: f64, vy: f64, ground: f64) -> u32 {
 /// Ticks after landing the water is tried to be taken back, and the most a clutch lasts.
 pub const CLUTCH_TAKE_TICKS: u64 = 40;
 /// Ticks after a pour before another is sent (the bucket's change seen by then).
-pub const POUR_RESEND: u64 = 6;
+pub const POUR_RESEND: u64 = 2;
 pub const CLUTCH_TICKS: u64 = 200;
 
 /// The dig of the pillar's cell under the feet, its drop not waited for: it falls into the cell
@@ -1195,11 +1219,19 @@ pub fn landing_cell(w: &World, column: (i32, i32), base: i32, top: i32) -> Optio
 }
 
 /// Columns round the feet a pool's site is looked for in.
-pub const POOL_SITE: i32 = 3;
+pub const POOL_SITE: i32 = 8;
+/// Columns (on the plane, either axis) a pool's stand and cells keep from the bunker's column:
+/// its stair runs four out from it (E3: three down and a step), so no misplaced pour runs into
+/// the shelter (race 45930464018 lane 0 drowned in a bunker its pool's water had run into).
+pub const POOL_KEEP: i32 = 5;
 
 /// The nearest standable cell within `POOL_SITE` of the feet (a floor under it, room over it)
 /// with a pool's two cells beside it, and those cells.
-pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 4])> {
+pub fn pool_site(w: &World, feet: Cell, bunker: Option<[i32; 3]>) -> Option<(Cell, [Cell; 4])> {
+    // Never near the bunker and its stair, nor uphill of it (water runs down to it).
+    let surface = bunker.and_then(|b| ground(w, b[0], b[2], b[1] + 12));
+    let clear =
+        |c: Cell| bunker.is_none_or(|b| (c.0 - b[0]).abs().max((c.2 - b[2]).abs()) >= POOL_KEEP);
     let mut best: Option<(i32, Cell, [Cell; 4])> = None;
     for dx in -POOL_SITE..=POOL_SITE {
         for dz in -POOL_SITE..=POOL_SITE {
@@ -1211,7 +1243,10 @@ pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 4])> {
                 if !stands {
                     continue;
                 }
-                if let Some(cells) = pool_cells(w, c) {
+                if !clear(c) || surface.is_some_and(|sy| c.1 > sy) {
+                    continue;
+                }
+                if let Some(cells) = pool_cells(w, c).filter(|sq| sq.iter().all(|q| clear(*q))) {
                     let d = dx.abs() + dz.abs() + dy.abs();
                     if best.is_none_or(|(b, _, _)| d < b) {
                         best = Some((d, c, cells));
@@ -1998,17 +2033,14 @@ impl Plan {
                 } else if crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
                     && c.sent_at
                         .is_none_or(|t| tick.saturating_sub(t) >= POUR_RESEND)
-                    && {
-                        // The ground under where the body will be this tick and the next.
-                        let v = body.vel;
-                        let p1 = [body.pos[0] + v[0], body.pos[1] + v[1], body.pos[2] + v[2]];
-                        let p2 = [
-                            p1[0] + v[0] * physics::AIR_INERTIA,
-                            p1[1],
-                            p1[2] + v[2] * physics::AIR_INERTIA,
-                        ];
-                        pour_now_at(body.pos[1], v[1], ground_under(w, p1), ground_under(w, p2))
-                    }
+                    // Again every tick until the water shows under the feet (E6: retry until
+                    // it shows), never once it is there: a use of the emptied bucket would take
+                    // it back up.
+                    && ground.is_some_and(|g| {
+                        let f = path::feet_cell(body.pos);
+                        kind(w, (f.0, g as i32, f.2)) != Some(BlockKind::Water)
+                    })
+                    && pour_now_at(body.pos[1], body.vel[1], ground, None)
                     && self.acts.is_empty()
                 {
                     let land = ground.map(|g| ticks_to_land(body.pos[1], body.vel[1], g));
@@ -2209,7 +2241,7 @@ impl Plan {
                         format!("{water} water buckets held, two wanted, at {feet:?}"),
                     );
                 } else {
-                    match pool_site(w, feet) {
+                    match pool_site(w, feet, self.bunker) {
                         Some((stand, sq)) if stand == feet => {
                             self.spikes.pool_square = Some(sq);
                             self.spikes.pool = Some([sq[0], sq[3]]);
@@ -2258,13 +2290,43 @@ impl Plan {
                 }
                 for c in [c0, c1] {
                     if open(kind(w, c)) && water > 0 {
+                        // Centred on the stand first, and aimed at the far side of the cell's
+                        // floor: race 45930464018 lane 0 stood at x 10.8 off its stand's centre,
+                        // the ray met the stand's own floor, the water went in the stand's cell
+                        // and down the bunker's stair, and the bot drowned in its bunker.
+                        let stand = self.spikes.pool_stand.unwrap_or(feet);
+                        let off = (f64::from(stand.0) + 0.5 - body.pos[0])
+                            .abs()
+                            .max((f64::from(stand.2) + 0.5 - body.pos[2]).abs());
+                        if off > STEP_NEAR {
+                            self.spikes_note(
+                                tick,
+                                format!("spikes: centre on the pool's stand at {stand:?}"),
+                                format!("{off:.2} off before the pour"),
+                            );
+                            self.spikes.doing = Some(Doing::Step {
+                                to: stand,
+                                sneak: true,
+                                until: tick + STEP_TICKS,
+                            });
+                            self.retry_at = tick + 1;
+                            return Some(Task::Idle);
+                        }
+                        let (sx, sz) = (
+                            f64::from((c.0 - stand.0).signum()),
+                            f64::from((c.2 - stand.2).signum()),
+                        );
                         self.spikes_note(
                             tick,
                             format!("spikes: water pool poured at {c:?}"),
                             format!("{water} water buckets held"),
                         );
                         self.spikes.doing = Some(Doing::Bucket {
-                            look: [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5],
+                            look: [
+                                f64::from(c.0) + 0.5 + 0.3 * sx,
+                                f64::from(c.1),
+                                f64::from(c.2) + 0.5 + 0.3 * sz,
+                            ],
                             item: ItemKind::WaterBucket,
                             want: ItemKind::Bucket,
                             count: empty + 1,

@@ -756,7 +756,7 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     assert_eq!(
         p.take_acts(),
         vec![Act::UseItem],
-        "a tick before the last in reach (the server places it on handling the packet)"
+        "the first tick in reach (the server places it on handling the packet)"
     );
     fall(&mut w, 65.0);
     p.spikes_clutch(&w, 103);
@@ -874,18 +874,14 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
         y += v;
         v = (v - 0.08) * 0.98;
     }
-    // At terminal speed a tick falls 3.9, more than the 2.78 the reach spans over the ground
-    // (4.4 less the eye's 1.62), so a fall's phase can skip it: this one's does not. The last tick
-    // in reach and the one before it qualify; the clutch sends at the first.
-    assert!((1..=2).contains(&pours.len()), "{pours:?}");
-    let (py, pv) = pours[0];
-    let sent = py + pv;
-    assert!(sent > ground, "the feet still over the ground: {sent}");
-    assert!(
-        sent + 1.62 - ground <= spikes::POUR_REACH,
-        "the eye in reach: {}",
-        sent + 1.62 - ground
-    );
+    // E6's parity e09-pour (run 45929976619): the server judges the use from the body's position
+    // before this tick's move, and places water with the eye within 4.5 of the ground there. So
+    // the pour goes by the current height, the feet `POUR_FEET` (2.7) or less over the ground.
+    // At terminal speed a tick falls 3.9, more than that band, so a fall's phase can skip it:
+    // this one's does not.
+    assert!(!pours.is_empty(), "{pours:?}");
+    let (py, _) = pours[0];
+    assert!(py > ground && py - ground <= spikes::POUR_FEET, "{py}");
     // Every start from rest 5 to 60 over the ground: under 2.78 a tick (about 100 blocks of
     // fall), a tick always lands in reach, and exactly one pour goes.
     for h in 5..=60 {
@@ -898,7 +894,7 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
             y += v;
             v = (v - 0.08) * 0.98;
         }
-        assert!((1..=2).contains(&n), "a fall from {h}: {n}");
+        assert!(n >= 1, "a fall from {h}: {n}");
     }
 }
 
@@ -1121,12 +1117,11 @@ fn a_body_flung_sideways_pours_on_the_column_it_will_land_on() {
     // Race 45903987747: both bots knocked off sideways near the island's edge, the column under
     // the fall's start not the one landed on.
     let g = 54.0;
-    // Over the void now, the next tick over ground in reach, the one after past it: pour.
-    assert!(spikes::pour_now_at(g + 3.0, -1.5, Some(g), None));
-    // In reach this tick under one column and the next tick too under another: wait.
+    // By the current height over the ground under the body (E6's parity e09-pour): in reach,
+    // the pour; over it, none yet; no ground under the body, none.
+    assert!(spikes::pour_now_at(g + 2.5, -1.5, Some(g), None));
     assert!(!spikes::pour_now_at(g + 3.0, -0.5, Some(g), Some(g)));
-    // No ground under this tick's position: no pour.
-    assert!(!spikes::pour_now_at(g + 3.0, -1.5, None, Some(g)));
+    assert!(!spikes::pour_now_at(g + 2.5, -1.5, None, Some(g)));
 }
 
 #[test]
@@ -1200,7 +1195,8 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
     w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
     let mut p = Plan::new(Aim::Race);
-    p.bunker = Some([20, 64, 20]);
+    // The bunker 6 off: the pool keeps 5 from it (`POOL_KEEP`).
+    p.bunker = Some([14, 64, 20]);
     let dug = |t: Option<Task>| match t {
         Some(Task::Dig(d)) => d.target,
         t => panic!("{t:?}"),
@@ -1336,8 +1332,8 @@ fn the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back() {
 fn no_pool_site_says_why() {
     // Race 45912100302 made no pool and wrote nothing of why.
     let mut w = world(2, [20.5, 64.0, 20.5]);
-    for x in 15..=25 {
-        for z in 15..=25 {
+    for x in 11..=29 {
+        for z in 11..=29 {
             set(&mut w, (x, 63, z), BlockKind::Obsidian);
         }
     }
@@ -1414,4 +1410,24 @@ fn a_dig_out_climbs_to_the_ground_and_fails_when_it_gets_no_nearer() {
         "{:?}",
         notes(&p)
     );
+}
+
+#[test]
+fn the_pool_is_never_sited_by_the_bunker_or_its_stair() {
+    // Race 45930464018 lane 0: a misplaced pour ran down the bunker's stair and drowned the bot
+    // in its bunker. The pool keeps 5 columns from the bunker's column, and is never uphill of it.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    // The bunker's stair out east of it: open cells stepping up to the ground.
+    for (i, x) in (21..=24).enumerate() {
+        let y = 60 + i32::try_from(i).unwrap_or(0);
+        for dy in 0..=2 {
+            set(&mut w, (x, y + dy, 20), BlockKind::Air);
+        }
+    }
+    let bunker = [20, 60, 20];
+    let (stand, sq) = spikes::pool_site(&w, (20, 64, 20), Some(bunker)).unwrap();
+    let keep = |c: (i32, i32, i32)| (c.0 - bunker[0]).abs().max((c.2 - bunker[2]).abs());
+    assert!(keep(stand) >= spikes::POOL_KEEP, "{stand:?}");
+    assert!(sq.iter().all(|c| keep(*c) >= spikes::POOL_KEEP), "{sq:?}");
+    assert!(stand.1 <= 64, "not uphill of the bunker: {stand:?}");
 }

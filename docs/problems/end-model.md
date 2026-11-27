@@ -55,3 +55,21 @@ These run the planner itself (`Aim::Race`, config/goals.toml) on the synthetic E
 - The island in the tests is 20 deep: with 3 deep, the bunker's third dig opened onto the void and the bot fell. The real island is tens deep near the fountain, so this is a test layout fix, not a bot wall.
 - **The dragon** (E5's `dragon.rs`, the sim's scripted `end::Dragon`): perched on the pillar facing north. The bot digs its bunker, opens it, goes behind the dragon and to the head stand, and strikes until the dragon is dead; each quarter of its health sends it off for 400 ticks. Then the bot walks into the exit portal, gets `win_game` and sends the respawn. It passes (probe 45877283204), with the health never under the danger line and no model violation.
 - **Wall 3, the fountain one too high** (sim, fixed in ae32015): the model laid the bowl's floor one over the island's top, so the perched dragon's head was out of every head stand's reach. The bot held at the stand behind for 16,000 ticks with 0 strikes (probe 45876437928). The jar lays the floor flush (end.toml `[fountain]`), and so does the model now.
+
+## The water clutch window (rows e09-pour, parity 45929976619 on c0ea051)
+Setup: 35 rows on a real server, walking off an end stone pillar onto end stone, looking straight down, in full iron at Normal. Each row makes one use of the water bucket only. K is how many ticks before the bot's own predicted landing the use is sent (1: the tick whose move lands); "reach" is the first tick the eye is within 4.5 of the ground; "drop" has no bucket. "eye" is the eye's height over the ground at the position the use was sent from, which is the body's position before that tick's move (a tick's acts go out before its move packet).
+
+| drop | reach | K 1 | K 2 | K 3 | K 4 | K 5 | no bucket |
+|---|---|---|---|---|---|---|---|
+| 8 | water, 0 lost (eye 3.93) | water, 0 (2.06) | water, 0 (3.03) | water, 0 (3.93) | dry, hurt to 18.3 (4.78) | dry, 17.0 (5.56) | 18.3 |
+| 15 | water, 0 (3.37) | water, 0 (2.07) | water, 0 (3.37) | dry, 10.0 (4.62) | dry, 11.2 (5.81) | dry, 10.0 (6.95) | 10.0 |
+| 25 | water, 0 (3.19) | water, 0 (3.19) | dry, dead (4.79) | dry, dead (6.34) | dry, dead (7.85) | dry, dead (9.30) | dead |
+| 40 | water, 0 (3.78) | water, 0 (1.79) | water, 0 (3.78) | dry, dead (5.72) | dry, dead (7.63) | dry, dead (9.50) | dead |
+| 60 | water, 0 (2.26) | water, 0 (2.26) | dry, dead (4.56) | dry, dead (6.84) | dry, dead (9.08) | dry, dead (11.29) | dead |
+
+- **Water was placed exactly when the eye was within the bucket's 4.5 of the ground at the position the use was sent from.** Every use with the eye at 3.93 or less placed water; every use at 4.56 or more placed none. That holds whatever the drop and whatever K.
+- **The server judged the reach from the last move it had heard, not from the predicted one.** e09-pour-15-3 was sent with the eye at 4.62, and its tick's move would have brought it to 3.37: no water. The same holds for 25-2 (4.79 then 3.19) and 60-2 (4.56 then 2.25). An early pour misses because the server measures the reach from where the body was.
+- **A late pour is not too late.** K 1, sent on the tick whose move lands, placed water and took 0 damage at every drop, 60 included (falling 2.34 a tick). The use is processed before that move, so the feet land in the water.
+- **So the right rule is height, not ticks:** pour while the eye over the ground at the current body position is 4.5 or less, which with the eye at 1.62 means the feet 2.88 or less over the ground. Keep a margin, and pour every tick until the water shows. "Reach" (the first tick in reach) took 0 at every drop. A count of ticks before the landing goes out of reach as the fall speeds up: K 2 failed at 25 and 60 and K 3 at every drop from 15 up.
+- **The race's death fits.** Race 14 / 45927433568 lane 0 poured 3.31 over the ground, with the eye at 4.93, out of reach; nothing was placed.
+- Not explained: e09-pour-8-4 shows water in a watched cell at t 123, long after its landing at t 45, with the bucket still full at the end of the row.

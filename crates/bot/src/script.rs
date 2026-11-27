@@ -358,7 +358,7 @@ fn eye_to(eye: [f64; 3], at: [f64; 3], half: f64, h: f64) -> f64 {
 
 /// The top of the first block under the feet with a collision box, within 64: what a fall
 /// lands on (a fluid has none).
-fn ground_under(w: &World, feet: [f64; 3]) -> Option<f64> {
+pub fn ground_under(w: &World, feet: [f64; 3]) -> Option<f64> {
     let (x, z) = (feet[0].floor() as i32, feet[2].floor() as i32);
     let top = (feet[1] - 0.01).floor() as i32;
     (0..64).map(|d| top - d).find_map(|y| {
@@ -448,6 +448,28 @@ pub enum Script {
     /// bucket), falling, every tick from when the feet are `above` or less over the ground under
     /// them until it is poured.
     Clutch { yaw: f64, walk: u64, above: f64 },
+    /// Issue 20's e09 sweep (`pour:<yaw>:<walk>:<before>`): e06's walk off a pillar looking
+    /// down, then one use of the held water bucket only: on the tick whose prediction (the
+    /// body's own fall, gravity and drag, from its position and velocity) lands `before` ticks
+    /// on (1: the very move that lands), or with `before` 0 on the first tick the eye is within
+    /// the bucket's 4.5 reach of the ground under it. No second try: the row says whether that
+    /// one use placed water and what the fall cost.
+    Pour { yaw: f64, walk: u64, before: u64 },
+}
+
+/// Reach of a use along the look (`Player.blockInteractionRange`: 4.5).
+const USE_REACH: f64 = 4.5;
+
+/// Ticks until the body's fall lands on `ground`: its moves are its velocity, then gravity and
+/// drag (physics' `step` in air); 1 when the next move lands. `None` past 200 ticks or rising
+/// off the ground.
+pub fn ticks_to_land(pos_y: f64, vel_y: f64, ground: f64) -> Option<u64> {
+    let (mut y, mut v) = (pos_y, vel_y);
+    (1..=200).find(|_| {
+        y += v;
+        v = (v - physics::GRAVITY) * physics::VERTICAL_DRAG;
+        y <= ground
+    })
 }
 
 /// The face of a block `dx dy dz` from the feet cell that looks back at the feet (0 down, 1 up,
@@ -559,7 +581,7 @@ impl Script {
                 ..Controls::default()
             },
             Script::Crystal { .. } | Script::Dragon { .. } => Controls::default(),
-            Script::Clutch { yaw, walk, .. } => Controls {
+            Script::Clutch { yaw, walk, .. } | Script::Pour { yaw, walk, .. } => Controls {
                 forward: tick < walk,
                 yaw,
                 pitch: Some(90.0),
@@ -627,6 +649,28 @@ impl Script {
                     Some(g) if falling && body.pos[1] - g <= above => vec![Act::UseItem],
                     _ => Vec::new(),
                 }
+            }
+            Script::Pour { walk, before, .. } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                let held = w.inventory.slots.get(&(36 + i16::from(w.held)));
+                let full = held.is_some_and(|(k, _)| *k == data::ItemKind::WaterBucket);
+                let Some(g) = ground_under(w, body.pos) else {
+                    return Vec::new();
+                };
+                if body.on_ground || tick < walk || !full {
+                    return Vec::new();
+                }
+                let pour = if before == 0 {
+                    // The move just made was the velocity before this tick's gravity and drag.
+                    let last = body.vel[1] / physics::VERTICAL_DRAG + physics::GRAVITY;
+                    let eye = body.pos[1] + physics::EYE_HEIGHT - g;
+                    eye <= USE_REACH && eye - last > USE_REACH
+                } else {
+                    ticks_to_land(body.pos[1], body.vel[1], g) == Some(before)
+                };
+                if pour { vec![Act::UseItem] } else { Vec::new() }
             }
             Script::Break { finish, dx, dy, dz } => {
                 let Some(body) = w.body else {
@@ -833,6 +877,7 @@ impl Script {
             Script::Crystal { every } => format!("crystal:{every}"),
             Script::Dragon { every, part } => format!("dragon:{every}:{part}"),
             Script::Clutch { yaw, walk, above } => format!("clutch:{yaw}:{walk}:{above}"),
+            Script::Pour { yaw, walk, before } => format!("pour:{yaw}:{walk}:{before}"),
         }
     }
 
@@ -917,6 +962,17 @@ impl Script {
                 part: part.parse().ok()?,
             });
         }
+        if let Some(rest) = s.strip_prefix("pour:") {
+            let v: Vec<&str> = rest.split(':').collect();
+            let [yaw, walk, before] = v.as_slice() else {
+                return None;
+            };
+            return Some(Script::Pour {
+                yaw: yaw.parse().ok()?,
+                walk: walk.parse().ok()?,
+                before: before.parse().ok()?,
+            });
+        }
         if let Some(rest) = s.strip_prefix("clutch:") {
             let v: Vec<&str> = rest.split(':').collect();
             let [yaw, walk, above] = v.as_slice() else {
@@ -993,9 +1049,24 @@ mod tests {
                 walk: 6,
                 above: 3.5,
             },
+            Script::Pour {
+                yaw: 270.0,
+                walk: 5,
+                before: 3,
+            },
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }
         assert_eq!(Script::parse("straight"), None);
+    }
+
+    #[test]
+    fn a_fall_lands_on_the_tick_its_moves_reach_the_ground() {
+        // Falling 1 a tick from 1 over the ground: the next move lands.
+        assert_eq!(super::ticks_to_land(1.0, -1.0, 0.0), Some(1));
+        // From 2: the first move to 1, the second (1.0584 with gravity and drag) past 0.
+        assert_eq!(super::ticks_to_land(2.0, -1.0, 0.0), Some(2));
+        // From rest 21 up (e06): moves of 0, 0.0784, 0.155, ...; the 26th passes the ground.
+        assert_eq!(super::ticks_to_land(21.0, 0.0, 0.0), Some(26));
     }
 }
