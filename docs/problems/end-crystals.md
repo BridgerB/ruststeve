@@ -315,3 +315,21 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - It is tried again every 2 ticks until the water shows under the feet, and never once it is there.
   - A late pour is never too late: K1 saved every drop up to 60.
 - **The races fit:** race 45927433568's pour "3.31 over" was the eye at 4.93, out of reach.
+
+## Fifteenth race: 45930464018 (dev-end-island, 17f10c1, old pour timing, development only)
+- **Lane 1:** 4 crystals.
+  - Two clutch pours were sent with the feet 3.39 and 4.01 over the ground: eyes at 5.0 and 5.6, out of reach (E6's window).
+  - "missed", then a death by the fall. 7a0bb59's height rule answers this.
+
+### Wall 21: the pool's water went down the bunker's stair, and the bot drowned in its bunker (fixed)
+- **What happened** (lane 0, ticks 880 to 2,400):
+  - Both pool pours were "done" with both pool cells still Air.
+  - The body stood at x 10.8, off its stand (10, 62, 1)'s centre. The ray to the pool cell's floor middle met the top face of the stand's own floor, so the water went into the stand's cell.
+  - It ran down E3's bunker stair and flooded the roofed bunker. The bot drowned there (`death.attack.drown`).
+- **The fix:**
+  - Before a pool pour, the bot centres on its stand ("centre on the pool's stand").
+  - It aims at the far side of the pool cell's floor (0.3 past its middle, away from the stand), so the ray clears the stand's floor edge.
+- **Made structural** (the orchestrator: no misplaced pour may ever flood the shelter):
+  - The pool's stand and its four cells keep 5 columns from the bunker's column (its stair runs four out), and the stand is never higher than the ground over the bunker, so water cannot run down to it.
+  - The site search widens to 8 columns to fit.
+  - Unit test `the_pool_is_never_sited_by_the_bunker_or_its_stair`.

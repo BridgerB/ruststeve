@@ -1195,7 +1195,8 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
     w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
     let mut p = Plan::new(Aim::Race);
-    p.bunker = Some([20, 64, 20]);
+    // The bunker 6 off: the pool keeps 5 from it (`POOL_KEEP`).
+    p.bunker = Some([14, 64, 20]);
     let dug = |t: Option<Task>| match t {
         Some(Task::Dig(d)) => d.target,
         t => panic!("{t:?}"),
@@ -1331,8 +1332,8 @@ fn the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back() {
 fn no_pool_site_says_why() {
     // Race 45912100302 made no pool and wrote nothing of why.
     let mut w = world(2, [20.5, 64.0, 20.5]);
-    for x in 15..=25 {
-        for z in 15..=25 {
+    for x in 11..=29 {
+        for z in 11..=29 {
             set(&mut w, (x, 63, z), BlockKind::Obsidian);
         }
     }
@@ -1409,4 +1410,24 @@ fn a_dig_out_climbs_to_the_ground_and_fails_when_it_gets_no_nearer() {
         "{:?}",
         notes(&p)
     );
+}
+
+#[test]
+fn the_pool_is_never_sited_by_the_bunker_or_its_stair() {
+    // Race 45930464018 lane 0: a misplaced pour ran down the bunker's stair and drowned the bot
+    // in its bunker. The pool keeps 5 columns from the bunker's column, and is never uphill of it.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    // The bunker's stair out east of it: open cells stepping up to the ground.
+    for (i, x) in (21..=24).enumerate() {
+        let y = 60 + i32::try_from(i).unwrap_or(0);
+        for dy in 0..=2 {
+            set(&mut w, (x, y + dy, 20), BlockKind::Air);
+        }
+    }
+    let bunker = [20, 60, 20];
+    let (stand, sq) = spikes::pool_site(&w, (20, 64, 20), Some(bunker)).unwrap();
+    let keep = |c: (i32, i32, i32)| (c.0 - bunker[0]).abs().max((c.2 - bunker[2]).abs());
+    assert!(keep(stand) >= spikes::POOL_KEEP, "{stand:?}");
+    assert!(sq.iter().all(|c| keep(*c) >= spikes::POOL_KEEP), "{sq:?}");
+    assert!(stand.1 <= 64, "not uphill of the bunker: {stand:?}");
 }
