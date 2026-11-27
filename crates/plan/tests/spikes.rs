@@ -2583,3 +2583,75 @@ fn the_one_exception_near_the_stand_holding_and_not_closing() {
         "strafing"
     );
 }
+
+#[test]
+fn stubs_of_its_own_on_all_four_axes_are_climbed_back_onto() {
+    // The orchestrator, after wall 43: a spike has 4 axes; stubs left standing on each must never
+    // leave it with no approach.
+    let mut w = world(2, [16.5, 64.0, 16.5]);
+    water(&mut w);
+    let sp = spikes::spike_for(&w, &[], CRYSTAL_AT).expect("the spike");
+    let mut st = SpikeState::default();
+    for a in Axis::ALL {
+        let col = spikes::stand(&sp, a).column;
+        pillar(&mut w, col, 64, 66, BlockKind::Cobblestone);
+        st.stubs.push(PillarRec {
+            x: col.0,
+            z: col.1,
+            base: 64,
+        });
+    }
+    // From the ground: a walk to a side foot beside a stub, never a refusal.
+    let (to, axis) = match spikes::next(&w, &st, 0) {
+        Next::Walk {
+            to,
+            approach: Some((8, 8, axis)),
+        } => (to, axis),
+        n => panic!("{n:?}"),
+    };
+    let col = spikes::stand(&sp, axis).column;
+    assert_eq!(to.1, 64, "the side foot on the ground");
+    assert_eq!(
+        (to.0 - col.0).abs() + (to.2 - col.1).abs(),
+        1,
+        "beside the stub {col:?}: {to:?}"
+    );
+    // At the side foot: up a side pillar to the stub's top.
+    at(&mut w, [f64::from(to.0) + 0.5, 64.0, f64::from(to.2) + 0.5]);
+    match spikes::next(&w, &st, 0) {
+        Next::Pillar { column, top, .. } => {
+            assert_eq!(column, (to.0, to.2));
+            assert_eq!(top, 67);
+        }
+        n => panic!("{n:?}"),
+    }
+    // At the side pillar's top: onto the stub.
+    pillar(&mut w, (to.0, to.2), 64, 66, BlockKind::Cobblestone);
+    at(&mut w, [f64::from(to.0) + 0.5, 67.0, f64::from(to.2) + 0.5]);
+    st.pillars.push(PillarRec {
+        x: to.0,
+        z: to.2,
+        base: 64,
+    });
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Step {
+            to: (col.0, 67, col.1),
+            sneak: false
+        }
+    );
+    // On the stub: the climb goes on there, the whole pillar's blocks wanted from its base.
+    at(
+        &mut w,
+        [f64::from(col.0) + 0.5, 67.0, f64::from(col.1) + 0.5],
+    );
+    match spikes::next(&w, &st, 0) {
+        Next::Pillar { column, .. } => assert_eq!(column, col),
+        n => panic!("{n:?}"),
+    }
+    let a = spikes::approach_along(&w, &sp, axis).expect("the approach");
+    assert_eq!(
+        spikes::pillar_wants(&st, &a),
+        spikes::stand(&sp, axis).stand.1 - 64 + spikes::PILLAR_SPARE
+    );
+}

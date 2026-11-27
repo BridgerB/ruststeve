@@ -600,3 +600,11 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The one exception, explicit: within `STAND_NEAR` (5) of the stand with the dragon holding and not closing, the climb goes on ("climb on, the stand near"; `climb_on_near_stand`).
   - A climb stopped mid-way leaves its pillar standing. That approach's foot is then the pillar's top, so the next climb takes another axis of the spike.
   - Unit tests `no_climb_on_through_the_dragon_inside_64_or_not_holding` and `the_one_exception_near_the_stand_holding_and_not_closing`.
+
+### Wall 44: stubs of its own could use up a spike's four approaches (the orchestrator, after wall 43; fixed)
+- **The risk:** a climb stopped mid-way, or a pillar left standing by a water descent, leaves a stub. Its approach's foot then reads as the stub's top, unreachable by a walk, so the approach is refused. With stops on all four axes, a spike would have no approach left.
+- **The fix:**
+  - The bot's own standing pillars are recorded as stubs (`SpikeState::stubs`, on landing by its water when the pillar still stands).
+  - A stubbed approach is resumed: the walk goes to a side foot beside the stub (`stub_side`: a column with its ground at the stub's base and open to over its top, a side pillar of its own begun there first). The bot pillars up there to the stub's top and steps onto it ("on the stub at"). The climb goes on in the stub's column, its record from the stub's base again; the side pillar is left a stub.
+  - Its blocks are counted for the whole pillar from the stub's base (`pillar_wants`), and `blocks_wanted` and both gates read the same count.
+  - Unit test `stubs_of_its_own_on_all_four_axes_are_climbed_back_onto`: all four axes stubbed, a walk to a side foot (never a refusal), the side pillar, the step onto the stub, and the climb on from there.

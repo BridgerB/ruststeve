@@ -931,8 +931,39 @@ pub fn chosen_approach(w: &World, st: &SpikeState, pos: [f64; 3], tick: u64) -> 
 
 /// The blocks a pillar wants held before its walk and its climb begin: from its foot to its
 /// stand, plus `PILLAR_SPARE` (the stand's two wall blocks and two for a lost click).
-pub fn pillar_wants(a: &Approach) -> i32 {
-    a.plan.stand.1 - a.foot.1 + PILLAR_SPARE
+pub fn pillar_wants(st: &SpikeState, a: &Approach) -> i32 {
+    // A stub of the bot's own: the whole pillar from its base (the side pillar to its top and the
+    // rest from there).
+    let base = st
+        .stubs
+        .iter()
+        .find(|r| (r.x, r.z) == a.plan.column)
+        .map_or(a.foot.1, |r| r.base);
+    a.plan.stand.1 - base + PILLAR_SPARE
+}
+
+/// The foot of the side pillar a stub of the bot's own is climbed back onto: a column beside the
+/// stub with its ground at the stub's base (or under) and open from there to over the stub's top
+/// (the orchestrator, after wall 43: a spike has 4 axes, and stubs left on each must never leave
+/// it with no approach). `None` when the approach's column is no stub of its own, or no side
+/// is open.
+pub fn stub_side(w: &World, st: &SpikeState, a: &Approach) -> Option<Cell> {
+    let rec = st.stubs.iter().find(|r| (r.x, r.z) == a.plan.column)?;
+    let top = a.foot.1;
+    // The side pillar already begun beside it first, its base the side's foot.
+    let begun = st.pillars.iter().find(|q| {
+        (q.x - rec.x).abs() + (q.z - rec.z).abs() == 1
+            && (top..=top + 1).all(|y| open(kind(w, (q.x, y, q.z))))
+    });
+    if let Some(q) = begun {
+        return Some((q.x, q.base, q.z));
+    }
+    Axis::ALL.iter().find_map(|ax| {
+        let (dx, dz) = ax.step();
+        let (x, z) = (rec.x + dx, rec.z + dz);
+        let g = ground(w, x, z, top)?;
+        (g <= rec.base + 1 && (g..=top + 1).all(|y| open(kind(w, (x, y, z))))).then_some((x, g, z))
+    })
 }
 
 /// The blocks the crystals want held for the pillar they work next: exactly what "no walk to
@@ -942,7 +973,8 @@ pub fn pillar_wants(a: &Approach) -> i32 {
 /// body. Counted against `pillar_blocks`.
 pub fn blocks_wanted(plan: &crate::Plan, w: &World) -> Option<i32> {
     let body = w.body?;
-    chosen_approach(w, &plan.spikes, body.pos, plan.spikes.now).map(|(_, (_, a))| pillar_wants(&a))
+    chosen_approach(w, &plan.spikes, body.pos, plan.spikes.now)
+        .map(|(_, (_, a))| pillar_wants(&plan.spikes, &a))
 }
 
 /// The crystals' next step from where the world says the bot is (clojurecraft's
@@ -1054,6 +1086,9 @@ pub struct SpikeState {
     /// held after (E9's read of race 46038776204 lane 7: "the water taken back" with water_bucket
     /// 2 -> 1 the same tick).
     pub take_back_from: Option<i32>,
+    /// Pillars of the bot's own left standing (come down by water, or a climb stopped): their
+    /// columns and bases, so their approach is resumed beside them, never refused for them.
+    pub stubs: Vec<PillarRec>,
     /// The tick the crystals' task last ran at: the refusals `blocks_wanted` reads are those
     /// active then.
     pub now: u64,
@@ -1123,6 +1158,7 @@ impl Default for SpikeState {
             stair_walk_fails: None,
             take_back_from: None,
             now: 0,
+            stubs: Vec::new(),
             left_water: Vec::new(),
         }
     }
@@ -1234,6 +1270,23 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                 approach: Some((spike.centre[0], spike.centre[1], p.axis)),
             };
         }
+        // A stub of its own on this approach: up a side pillar beside it to its top, then onto it.
+        if let Some(side) = stub_side(w, st, &a) {
+            if (feet.0, feet.2) == (side.0, side.2) && feet.1 < a.foot.1 {
+                return Next::Pillar {
+                    column: (side.0, side.2),
+                    top: a.foot.1,
+                    axis: p.axis,
+                    centre: spike.centre,
+                };
+            }
+            if feet == (side.0, a.foot.1, side.2) {
+                return Next::Step {
+                    to: (p.column.0, a.foot.1, p.column.1),
+                    sneak: false,
+                };
+            }
+        }
     }
     // Over a pillar's dug shaft, held up by the cell beside (the body off the column's centre):
     // into the shaft (race 45885217441 lane 0: the dig under (28, 93, 24) left the body on the
@@ -1325,7 +1378,7 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     let shut = crystal.is_some() && shut_in(w, feet);
     match (crystal, approach) {
         (Some(_), Some((spike, a))) if !shut => Next::Walk {
-            to: a.foot,
+            to: stub_side(w, st, &a).unwrap_or(a.foot),
             approach: Some((spike.centre[0], spike.centre[1], a.plan.axis)),
         },
         (Some((_, pos)), approach) => {
@@ -1947,6 +2000,12 @@ impl Plan {
             self.spikes.riding = None;
             let p = self.spikes.pillars.remove(i);
             self.spikes.pillars_down += 1;
+            // Left standing: a stub of its own, its approach resumed beside it.
+            if full(kind(w, (p.x, p.base, p.z)))
+                && !self.spikes.stubs.iter().any(|r| (r.x, r.z) == (p.x, p.z))
+            {
+                self.spikes.stubs.push(p);
+            }
             if let Some(j) = self
                 .spikes
                 .landings
@@ -2303,10 +2362,10 @@ impl Plan {
                 // The one count `blocks_wanted` gives (E3's stock stops at it).
                 if approach.is_some()
                     && let Some((_, (_, a))) = chosen_approach(w, &self.spikes, body.pos, tick)
-                    && to == a.foot
+                    && (to == a.foot || stub_side(w, &self.spikes, &a) == Some(to))
                     && to.1 < a.plan.stand.1
                 {
-                    let need = pillar_wants(&a);
+                    let need = pillar_wants(&self.spikes, &a);
                     let held = pillar_blocks(w);
                     if held < need {
                         self.spikes_note(
@@ -2376,8 +2435,13 @@ impl Plan {
                 // kept E3's stock (paused for a strafe) from ever resuming. Handed back, so the
                 // stock runs again.
                 let need = chosen_approach(w, &self.spikes, body.pos, tick)
-                    .filter(|(_, (_, a))| a.plan.column == column)
-                    .map_or(top - feet.1 + PILLAR_SPARE, |(_, (_, a))| pillar_wants(&a));
+                    .filter(|(_, (_, a))| {
+                        a.plan.column == column
+                            || stub_side(w, &self.spikes, a).is_some_and(|s| (s.0, s.2) == column)
+                    })
+                    .map_or(top - feet.1 + PILLAR_SPARE, |(_, (_, a))| {
+                        pillar_wants(&self.spikes, &a)
+                    });
                 let held = pillar_blocks(w);
                 if !climbing && held < need {
                     self.spikes_note(
@@ -2546,10 +2610,35 @@ impl Plan {
                     return Some(self.spikes_hold(tick));
                 }
                 if !self.spikes.pillars.iter().any(|p| (p.x, p.z) == column) {
+                    // Onto a stub of its own: its record again, from its base; the side pillar
+                    // that reached it is left a stub.
+                    let base = match self.spikes.stubs.iter().position(|r| (r.x, r.z) == column) {
+                        Some(i) => {
+                            let r = self.spikes.stubs.remove(i);
+                            let sides: Vec<PillarRec> = self
+                                .spikes
+                                .pillars
+                                .iter()
+                                .filter(|q| (q.x - column.0).abs() + (q.z - column.1).abs() == 1)
+                                .copied()
+                                .collect();
+                            self.spikes
+                                .pillars
+                                .retain(|q| (q.x - column.0).abs() + (q.z - column.1).abs() != 1);
+                            self.spikes.stubs.extend(sides);
+                            self.note(
+                                tick,
+                                format!("spikes: on the stub at {feet:?}"),
+                                format!("its base {}; the climb goes on from its top", r.base),
+                            );
+                            r.base
+                        }
+                        None => feet.1,
+                    };
                     self.spikes.pillars.push(PillarRec {
                         x: column.0,
                         z: column.1,
-                        base: feet.1,
+                        base,
                     });
                 }
                 self.spikes_note(
