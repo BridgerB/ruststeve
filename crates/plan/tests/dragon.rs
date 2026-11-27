@@ -1048,15 +1048,13 @@ fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
     let mut p = Plan::new(Aim::Race);
     assert!(p.end_enderman_step(&w, 0).is_some());
     assert!(
-        p.take_acts()
-            .iter()
-            .any(|a| matches!(a, Act::Attack { entity: 70 })),
-        "over the danger line, in reach: struck"
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "no bunker near: a notch down, never a fight in the open (race 45913296602 lane 1)"
     );
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "end: no pocket for enderman 70 (struck over the danger line)")
+            .any(|e| e.what == "end: no pocket for enderman 70 (a notch down, no bunker near)")
     );
     // The bunker within reach: into it.
     let mut q = Plan::new(Aim::Race);
