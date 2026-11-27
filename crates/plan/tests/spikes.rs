@@ -1203,11 +1203,13 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
         Some(Task::Dig(d)) => d.target,
         t => panic!("{t:?}"),
     };
-    assert_eq!(dug(p.spikes_task(&w, 100)), (21, 63, 20));
-    set(&mut w, (21, 63, 20), BlockKind::Air);
-    assert_eq!(dug(p.spikes_task(&w, 101)), (22, 63, 20));
-    set(&mut w, (22, 63, 20), BlockKind::Air);
-    assert_eq!(p.spikes_task(&w, 102), Some(Task::Idle));
+    // A 2 by 2 square (race 45920382795: a 2 by 1 pit is no infinite source).
+    let square = [(21, 63, 20), (22, 63, 20), (21, 63, 21), (22, 63, 21)];
+    for (i, c) in square.iter().enumerate() {
+        assert_eq!(dug(p.spikes_task(&w, 100 + i as u64)), *c);
+        set(&mut w, *c, BlockKind::Air);
+    }
+    assert_eq!(p.spikes_task(&w, 105), Some(Task::Idle));
     assert!(
         notes(&p)
             .iter()
@@ -1215,18 +1217,18 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
         "{:?}",
         notes(&p)
     );
-    // Both poured: the pool made, a bucket refilled from it.
+    // Both diagonal corners poured, the square full: the pool made, a bucket refilled.
     p.spikes.doing = None;
-    for c in [(21, 63, 20), (22, 63, 20)] {
+    for c in square {
         set(&mut w, c, BlockKind::Water);
     }
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     w.inventory.slots.insert(38, (ItemKind::Bucket, 1));
-    assert_eq!(p.spikes_task(&w, 103), Some(Task::Idle));
+    assert_eq!(p.spikes_task(&w, 106), Some(Task::Idle));
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|n| n == "spikes: water pool at (21, 63, 20) and (22, 63, 20)"),
+            .any(|n| n == "spikes: water pool at (21, 63, 20) and (22, 63, 21)"),
         "{n:?}"
     );
     assert!(
@@ -1351,4 +1353,63 @@ fn no_pool_site_says_why() {
         .map(|e| e.why.clone())
         .unwrap_or_default();
     assert!(why.contains("Obsidian"), "{why}");
+}
+
+#[test]
+fn a_dig_out_climbs_to_the_ground_and_fails_when_it_gets_no_nearer() {
+    // The frontier race 45918666403 lane 2: from a notch under its bunker the stair rose only to
+    // the foot's height under the ground, and every walk was refused for 19,560 ticks.
+    let mut w = world(2, [13.5, 57.0, 0.5]);
+    for y in 57..=63 {
+        set(&mut w, (13, y, 0), BlockKind::Air);
+    }
+    let all = Axis::ALL.map(|a| (8, 8, a, u64::MAX));
+    let st = SpikeState {
+        refused: all.to_vec(),
+        ..SpikeState::default()
+    };
+    match spikes::next(&w, &st, 0) {
+        Next::DigOut { cell, .. } => assert_eq!(cell, (12, 58, 0)),
+        n => panic!("{n:?}"),
+    }
+    // Three steps open: up them, toward the ground at 64, not the foot's height.
+    for c in [
+        (12, 58, 0),
+        (12, 59, 0),
+        (12, 60, 0),
+        (11, 59, 0),
+        (11, 60, 0),
+        (11, 61, 0),
+        (10, 60, 0),
+        (10, 61, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Walk {
+            to: (10, 60, 0),
+            approach: None
+        }
+    );
+    // No nearer in 600 ticks: the dig-out fails, says why and hands back.
+    let w = {
+        let mut w = world(2, [13.5, 57.0, 0.5]);
+        for y in 57..=63 {
+            set(&mut w, (13, y, 0), BlockKind::Air);
+        }
+        w
+    };
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.refused = all.to_vec();
+    assert!(matches!(p.spikes_task(&w, 100), Some(Task::Dig(_))));
+    p.spikes.refused = all.to_vec();
+    assert_eq!(p.spikes_task(&w, 800), None);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: dig-out: no progress at (13, 57, 0)"),
+        "{:?}",
+        notes(&p)
+    );
 }

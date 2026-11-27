@@ -669,6 +669,8 @@ pub struct SpikeState {
     /// The water pool by the bunker (two sources, an infinite one), the cell it is filled from,
     /// and the counts of waterfalls ridden down and buckets refilled.
     pub pool: Option<[Cell; 2]>,
+    /// The pool's whole 2 by 2 square (`pool` holds its two diagonal corners, poured).
+    pub pool_square: Option<[Cell; 4]>,
     pub pool_stand: Option<Cell>,
     pub pool_made: bool,
     pub waterfalls: u32,
@@ -677,6 +679,10 @@ pub struct SpikeState {
     pub dragon_seen: Option<(u64, f64)>,
     /// The pillar column a waterfall is being ridden down beside.
     pub riding: Option<(i32, i32)>,
+    /// The dig-out's start (tick, blocks from its target) for its progress invariant, and the
+    /// tick until which a failed one stays off.
+    pub dig_out_since: Option<(u64, f64)>,
+    pub dig_out_off: u64,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -718,6 +724,7 @@ impl Default for SpikeState {
             last_health: None,
             box_blow_at: None,
             pool: None,
+            pool_square: None,
             pool_stand: None,
             pool_made: false,
             waterfalls: 0,
@@ -725,6 +732,8 @@ impl Default for SpikeState {
             dragon_seen: None,
             riding: None,
             landings: Vec::new(),
+            dig_out_since: None,
+            dig_out_off: 0,
         }
     }
 }
@@ -933,10 +942,20 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             // (13, 59, 0) was refused for 12,000 ticks).
             let out = spike_for(w, &st.geography, pos)
                 .and_then(|sp| best_approach(w, &sp, body.pos, &[], tick))
-                .and_then(|a| dig_out(w, feet, a.foot).map(|c| (c, a.foot)));
+                .and_then(|a| dig_out_plan(w, feet, a.foot).map(|p| (p, a.foot)));
+            let stands = |c: Cell| {
+                full(kind(w, (c.0, c.1 - 1, c.2)))
+                    && open(kind(w, c))
+                    && open(kind(w, (c.0, c.1 + 1, c.2)))
+            };
             match out {
-                Some((cell, toward)) => Next::DigOut { cell, toward },
-                None => Next::Wait(format!(
+                Some(((Some(cell), _), toward)) => Next::DigOut { cell, toward },
+                // The stair open: up it, and the dig-out goes on from its top.
+                Some(((None, top), _)) if top != feet && stands(top) => Next::Walk {
+                    to: top,
+                    approach: None,
+                },
+                Some(_) | None => Next::Wait(format!(
                     "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
                     pos[0], pos[1], pos[2]
                 )),
@@ -1040,6 +1059,15 @@ pub fn held_by(w: &World, pos: [f64; 3], feet: Cell) -> Option<Cell> {
 /// is higher, else the way along (the feet's and the head's cells). Only a block with an open
 /// face beside the bot's own cell, never obsidian or bedrock. `None` when the way is open.
 pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
+    dig_out_plan(w, feet, target).and_then(|(cell, _)| cell)
+}
+
+/// The dig-out's next cell (`None` when the stair is open) and the stair's top step, the feet
+/// cell to walk up to once the stair is open. The stair rises to the higher of the target's
+/// height and the ground's over the feet (the frontier race 45918666403 lane 2: from a notch 2
+/// under its bunker the stair rose only to the foot's height, 59, under the ground at 62, and
+/// every walk from the feet was refused for 19,560 ticks).
+pub fn dig_out_plan(w: &World, feet: Cell, target: Cell) -> Option<(Option<Cell>, Cell)> {
     let (dx, dz) = {
         let (ax, az) = (target.0 - feet.0, target.2 - feet.2);
         if ax.abs() >= az.abs() {
@@ -1052,8 +1080,18 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
         return None;
     }
     let (x, y, z) = feet;
+    let surface = [(x, z), (x + dx, z + dz)]
+        .iter()
+        .filter_map(|(gx, gz)| ground(w, *gx, *gz, y + DIG_OUT_SKY))
+        .max()
+        .unwrap_or(y);
     // A stair of up to `DIG_OUT_STEPS` steps (each within a dig's reach), or the way along.
-    let rise = (target.1 - y).clamp(0, DIG_OUT_STEPS);
+    let rise = (target.1.max(surface) - y).clamp(0, DIG_OUT_STEPS);
+    let top = if rise > 0 {
+        (x + rise * dx, y + rise, z + rise * dz)
+    } else {
+        (x + dx, y, z + dz)
+    };
     let cells: Vec<Cell> = if rise > 0 {
         (0..rise)
             .flat_map(|k| {
@@ -1067,37 +1105,55 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
     } else {
         vec![(x + dx, y, z + dz), (x + dx, y + 1, z + dz)]
     };
-    cells.into_iter().find(|c| {
+    let cell = cells.into_iter().find(|c| {
         let k = kind(w, *c);
         !open(k) && k.is_some() && !matches!(k, Some(BlockKind::Obsidian | BlockKind::Bedrock))
-    })
+    });
+    Some((cell, top))
 }
+
+/// Cells over the feet the ground over a dig-out is looked for from.
+pub const DIG_OUT_SKY: i32 = 24;
+/// Ticks a dig-out may get no nearer its target before it fails and hands back, and the ticks
+/// it then stays off (the progress-invariant rule).
+pub const DIG_OUT_STALL: u64 = 600;
+pub const DIG_OUT_OFF: u64 = 1200;
 
 /// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
 pub const DIG_OUT_STEPS: i32 = 3;
 
-/// Two cells of end stone ground beside each other next to the feet, one under the feet's level,
-/// walled below and round by full blocks: the pool's cells (a source poured in each makes an
-/// infinite one that spills nowhere).
-pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 2]> {
+/// A 2 by 2 square of end stone ground beside the feet, one under the feet's level, walled below
+/// and round by full blocks: the pool's cells, the near corner first and the far diagonal last.
+/// Water poured in those two diagonal corners fills the other two, and every cell then has two
+/// sources beside it: an infinite source. A 2 by 1 pit is not one: race 45920382795 refilled one
+/// bucket from it and the second "gave up" (each cell had one source beside it).
+pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 4]> {
     let (x, y, z) = feet;
     Axis::ALL.iter().find_map(|a| {
         let (dx, dz) = a.step();
-        let c0 = (x + dx, y - 1, z + dz);
-        let c1 = (x + 2 * dx, y - 1, z + 2 * dz);
-        let ground = |c: Cell| {
-            kind(w, c) == Some(BlockKind::EndStone)
-                && full(kind(w, (c.0, c.1 - 1, c.2)))
-                && open(kind(w, (c.0, c.1 + 1, c.2)))
+        // Across the axis, either way.
+        let across: [(i32, i32); 2] = if dx == 0 {
+            [(1, 0), (-1, 0)]
+        } else {
+            [(0, 1), (0, -1)]
         };
-        let walled = |c: Cell| {
-            Axis::ALL.iter().all(|b| {
-                let (bx, bz) = b.step();
-                let n = (c.0 + bx, c.1, c.2 + bz);
-                n == c0 || n == c1 || full(kind(w, n))
-            })
-        };
-        (ground(c0) && ground(c1) && walled(c0) && walled(c1)).then_some([c0, c1])
+        across.iter().find_map(|(bx, bz)| {
+            let at = |i: i32, j: i32| (x + dx * (1 + i) + bx * j, y - 1, z + dz * (1 + i) + bz * j);
+            let sq = [at(0, 0), at(1, 0), at(0, 1), at(1, 1)];
+            let ground = |c: Cell| {
+                kind(w, c) == Some(BlockKind::EndStone)
+                    && full(kind(w, (c.0, c.1 - 1, c.2)))
+                    && open(kind(w, (c.0, c.1 + 1, c.2)))
+            };
+            let walled = |c: Cell| {
+                Axis::ALL.iter().all(|b| {
+                    let (ex, ez) = b.step();
+                    let n = (c.0 + ex, c.1, c.2 + ez);
+                    sq.contains(&n) || full(kind(w, n))
+                })
+            };
+            sq.iter().all(|c| ground(*c) && walled(*c)).then_some(sq)
+        })
     })
 }
 
@@ -1118,8 +1174,8 @@ pub const POOL_SITE: i32 = 3;
 
 /// The nearest standable cell within `POOL_SITE` of the feet (a floor under it, room over it)
 /// with a pool's two cells beside it, and those cells.
-pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 2])> {
-    let mut best: Option<(i32, Cell, [Cell; 2])> = None;
+pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 4])> {
+    let mut best: Option<(i32, Cell, [Cell; 4])> = None;
     for dx in -POOL_SITE..=POOL_SITE {
         for dz in -POOL_SITE..=POOL_SITE {
             for dy in -1..=1 {
@@ -1543,6 +1599,24 @@ impl Plan {
                     self.retry_at = tick + 1;
                     return Some(Task::Idle);
                 }
+                if !climbing && !self.spikes.landings.iter().any(|(c, _)| *c == column) {
+                    let water = craft::count(w, ItemKind::WaterBucket);
+                    let stone = craft::count(w, PILLAR_ITEM);
+                    let why = if water < 2 {
+                        format!("{water} water buckets held: the clutch's only")
+                    } else if stone < WATERFALL_KEEP {
+                        format!(
+                            "{stone} end stone held, under {WATERFALL_KEEP}: the pillar dug back"
+                        )
+                    } else {
+                        "no side of the foot with a floor and clear air to the top".to_owned()
+                    };
+                    self.spikes_note(
+                        tick,
+                        "spikes: no landing water".to_owned(),
+                        format!("{why}; at {feet:?}, the way down the dig"),
+                    );
+                }
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
                 let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
                     .then(|| "the dragon closing".to_owned());
@@ -1717,6 +1791,35 @@ impl Plan {
                 Some(Task::Dig(dig_down(w, c, tick)))
             }
             Next::DigOut { cell, toward } => {
+                // The progress invariant: no nearer its target in `DIG_OUT_STALL` ticks, the
+                // dig-out fails, says why and hands back.
+                let dist = f64::from(
+                    (toward.0 - feet.0).abs()
+                        + (toward.1 - feet.1).abs()
+                        + (toward.2 - feet.2).abs(),
+                );
+                if tick < self.spikes.dig_out_off {
+                    return None;
+                }
+                match self.spikes.dig_out_since {
+                    Some((_, best)) if dist < best - 1.0 => {
+                        self.spikes.dig_out_since = Some((tick, dist));
+                    }
+                    Some((at, best)) if tick.saturating_sub(at) > DIG_OUT_STALL => {
+                        self.spikes.dig_out_since = None;
+                        self.spikes.dig_out_off = tick + DIG_OUT_OFF;
+                        self.note(
+                            tick,
+                            format!("spikes: dig-out: no progress at {feet:?}"),
+                            format!(
+                                "no nearer {toward:?} than {best:.0} in {DIG_OUT_STALL} ticks (the cell {cell:?} next); handed back for {DIG_OUT_OFF}"
+                            ),
+                        );
+                        return None;
+                    }
+                    Some(_) => {}
+                    None => self.spikes.dig_out_since = Some((tick, dist)),
+                }
                 // The approaches refused for want of a way are tried again once it is dug.
                 self.spikes.refused.clear();
                 self.spikes_note(
@@ -2077,8 +2180,9 @@ impl Plan {
                     );
                 } else {
                     match pool_site(w, feet) {
-                        Some((stand, cells)) if stand == feet => {
-                            self.spikes.pool = Some(cells);
+                        Some((stand, sq)) if stand == feet => {
+                            self.spikes.pool_square = Some(sq);
+                            self.spikes.pool = Some([sq[0], sq[3]]);
                             self.spikes.pool_stand = Some(stand);
                         }
                         Some((stand, _)) => {
@@ -2111,7 +2215,8 @@ impl Plan {
                 }
             }
             if let Some([c0, c1]) = self.spikes.pool {
-                for c in [c0, c1] {
+                let square = self.spikes.pool_square.unwrap_or([c0, c1, c0, c1]);
+                for c in square {
                     if full(kind(w, c)) {
                         self.spikes_note(
                             tick,
@@ -2141,10 +2246,7 @@ impl Plan {
                         return Some(Task::Idle);
                     }
                 }
-                if [c0, c1]
-                    .iter()
-                    .all(|c| kind(w, *c) == Some(BlockKind::Water))
-                {
+                if square.iter().all(|c| kind(w, *c) == Some(BlockKind::Water)) {
                     self.spikes.pool_made = true;
                     self.note(
                         tick,
@@ -2167,8 +2269,11 @@ impl Plan {
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
         if empty > 0
-            && let Some(cells) = self.spikes.pool
-            && let Some(c0) = cells
+            && let Some(pour) = self.spikes.pool
+            && let Some(c0) = self
+                .spikes
+                .pool_square
+                .unwrap_or([pour[0], pour[1], pour[0], pour[1]])
                 .iter()
                 .copied()
                 .find(|c| kind(w, *c) == Some(BlockKind::Water))

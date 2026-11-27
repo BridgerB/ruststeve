@@ -262,3 +262,25 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Landed ("waterfall down to"), the water is taken back ("landing water taken back at").
   - The pour on the pillar's top is gone.
   - Unit test `the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top`.
+
+## Twelfth race: 45920382795 (dev-end-island, c61e98a, development only)
+- **Lane 0:** 2 crystals.
+  - The pool was made, but only one bucket came back from it: "refilled" once, then "the refill gave up".
+  - With one bucket there was no landing water, so the way down was the dig. The clutch saved one fall of 18.6.
+  - The second clutch sent its pour at 2.9 over the ground, and the bot died of the fall (`death.fell.assist`): no "poured" was seen before the landing killed it.
+- **Lane 1:** killed by endermen during E5's "dig a notch" (E5's).
+
+### Wall 18: a 2 by 1 pool is no infinite source (fixed)
+- **The cause:** a water source regenerates only with two sources beside it. In a 2 by 1 pit each cell has one, so the first bucket taken empties a cell for good.
+- **The fix:**
+  - The pool is a 2 by 2 square, dug whole ("water pool dug at" ×4). Water goes in two diagonal corners ("water pool poured at"), which fills the other two, and every cell then has two sources beside it.
+  - It refills from any cell of the square.
+  - "no landing water" is now noted with its reason (buckets, end stone, or no clear side).
+
+### Wall 19: a dig-out that never got out (the frontier race 45918666403 lane 2; fixed)
+- **What happened:** after a breath put the bot in a notch 2 under its bunker, the hand-off came from (14, 56, 0). The dig-out toward (39, 59, 0) dug a three-step stair, eight cells from tick 10,920 to 12,260, rising only to the foot's height, 59, still under the ground at 62. The bot never moved, every walk was refused, and it sat 19,560 ticks with no pillar and no strike.
+- **The fix:**
+  - The stair rises to the higher of the target's height and the ground over the feet (or over the next column).
+  - With its steps open the bot walks up to the top step, and the dig-out goes on from there.
+  - The progress invariant: a dig-out no nearer its target in 600 ticks fails ("dig-out: no progress at …", with the next cell and the distance) and hands back for 1,200 ticks.
+  - Unit test `a_dig_out_climbs_to_the_ground_and_fails_when_it_gets_no_nearer`.
