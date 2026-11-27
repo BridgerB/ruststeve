@@ -5,8 +5,8 @@ type: reference
 tags: [plan, end, bridge, bunker, gaze, void]
 aliases: [end, EndState, end_task, end_step, end_look, end_gaze, void_edge, void_column, bunker, Bunker, the bridge, BRIDGE_FLOOR, STOCK_WANTED, DRAGON_CLEAR, stock_dir]
 status: draft
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@6b1a3ba
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@117843e
 sourceRefs:
   - "ruststeve:crates/plan/src/end.rs#pub fn end_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:crates/plan/src/end.rs#pub fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {"
@@ -32,7 +32,7 @@ Issue 20e (agent E3, `docs/problems/end-island.md`). `Plan::end_step` runs ahead
 5. **The bunker**: begun only with the dragon over 64 off or perched; a post of two blocks on the ground beside the column, then four digs under the feet, the cell over the new head laid after each (`shaft_ops`, never open to the sky); the door (a three-step stair out) on another side. "end: bunker dug at". Sealed (roof and door laid back) on every return; opened (roof and stair dug) to leave.
 6. **Retreat, eat, heal**: under `RETREAT_HEALTH` 14 back to the bunker until `HEALED` 18; food under `FED` 18 with food held is eaten there.
 7. **The stock**: every run begins and ends at the bunker: stairs down `STOCK_DEPTH` 6 first (their foot kept), then three level arms from the foot, each run walked out to its tip and back (`stock_step`); until `STOCK_WANTED` 160 end stone or `STOCK_RUNS` 24; a run with no walk back ends the stock. From under the ground with no walk home, stairs up to hand over (`OUT_RUNS`).
-8. **The hand-offs**: while a crystal is alive E4's spikes task, then E5's `Plan::dragon_task` (`end_dragon`; the fight waits in `Plan.bunker` while the dragon flies); out by the bunker's stair first. With none ready the bot holds sealed in the bunker.
+8. **The hand-offs**: while a crystal is alive E4's spikes task, then E5's `Plan::dragon_task` (`end_dragon`; the fight waits in `Plan.bunker` while the dragon flies); out by the bunker's stair first. With none ready the bot holds sealed in the bunker. On the bow line (E8, [[end-bow]]) both crystal hand-offs, `end_spikes` and `open_task` before its end stone stock, ask `Plan::bow_task` first; the pillar gets the caged crystals and any the bow leaves.
 
 ## Gaze
 Every look still leaves through `keep_look` ([[way-home]]'s endermen rules). In the End a look no act asked for is straight down (`end_gaze`, ahead of `keep_look` in `Plan::step`); `end_look` sends a wanted look only when it stares at no enderman within 64 from the standing or the crouching eye.

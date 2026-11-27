@@ -271,7 +271,7 @@ fn endermen_holds_within_32_of_one_that_ticks() {
     assert_eq!(world::stage::enderman_near(&w).map(|(id, _)| id), Some(41));
     assert_eq!(w.stage_reached, Some(Stage::Endermen));
     assert_eq!(Stage::from_name("endermen"), Some(Stage::Endermen));
-    assert_eq!(Stage::ALL.len(), 26);
+    assert_eq!(Stage::ALL.len(), 27);
 }
 
 /// An enderman near but frozen (its chunk beyond the simulation distance) does not count, and
@@ -661,6 +661,41 @@ fn armed_needs_the_whole_kit_in_the_overworld() {
     w.step(&tick());
     assert!(!Stage::Armed.holds(&w));
 }
+
+// >>> E8 (issue 20, the bow line)
+/// `bow_armed` is `armed` with a bow and 8 arrows, between `armed` and `end` on the ladder.
+#[test]
+fn bow_armed_is_armed_with_a_bow_and_eight_arrows() {
+    assert!(Stage::Armed < Stage::BowArmed && Stage::BowArmed < Stage::End);
+    assert_eq!(Stage::from_name("bow_armed"), Some(Stage::BowArmed));
+    let kit = |w: &mut World| {
+        w.step(&give(0, ItemKind::IronSword, 1));
+        w.step(&give(1, ItemKind::StonePickaxe, 1));
+        w.step(&give(2, ItemKind::StonePickaxe, 1));
+        w.step(&give(3, ItemKind::CookedPorkchop, 11));
+        w.step(&give(4, ItemKind::CookedMutton, 13));
+        w.step(&give(5, ItemKind::EnderEye, 12));
+        w.step(&give(6, ItemKind::Cobblestone, 64));
+        w.step(&give(7, ItemKind::Netherrack, 64));
+        w.step(&give(8, ItemKind::WaterBucket, 1));
+    };
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&teleport());
+    kit(&mut w);
+    w.step(&give(9, ItemKind::Bow, 1));
+    w.step(&give(10, ItemKind::Arrow, 7));
+    second(&mut w);
+    assert!(
+        Stage::Armed.holds(&w) && !Stage::BowArmed.holds(&w),
+        "7 arrows"
+    );
+    w.step(&give(10, ItemKind::Arrow, 8));
+    second(&mut w);
+    assert!(Stage::BowArmed.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::BowArmed));
+}
+// <<< E8
 
 /// The eyes `armed` asks for are the ring's empty frames: a frame on record with an eye is one
 /// fewer (the frontier's ring has one, probe 45863427332).

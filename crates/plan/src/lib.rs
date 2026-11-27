@@ -14,6 +14,9 @@ pub mod arrival;
 // >>> base (P5, issue 18d)
 pub mod base;
 // <<< base
+// >>> E8 (issue 20, the bow line)
+pub mod bow;
+// <<< E8
 pub mod build;
 // >>> pearls (P3, issue 18e/f)
 pub mod burrow;
@@ -939,6 +942,10 @@ pub struct Plan {
     #[serde(default)]
     pub end: end::EndState,
     // <<< E3
+    // >>> E8 (issue 20, the bow line, docs/problems/end-bow.md): the shot in hand and its counts.
+    #[serde(default)]
+    pub bow: bow::BowState,
+    // <<< E8
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1084,6 +1091,9 @@ impl Plan {
             bunker: None,
             end: end::EndState::default(),
             // <<< E3
+            // >>> E8
+            bow: bow::BowState::default(),
+            // <<< E8
             acts: Vec::new(),
         }
     }
@@ -1759,6 +1769,12 @@ impl Plan {
         // of the crystals' own rows.
         self.perch_fight_step(w, tick);
         // <<< E5
+        // >>> E8 (issue 20, the bow line): the shot in hand, while no task runs (ahead of the
+        // pillar's driver: an open crystal is shot from the ground, docs/problems/end-bow.md).
+        if let Some(c) = self.bow_step(w, tick) {
+            return self.held("bow_step", c);
+        }
+        // <<< E8
         // >>> E4 (issue 20f): the crystals' climb, block, strike or hold, while no task runs.
         if let Some(c) = self.spikes_step(w, tick) {
             return self.held("spikes_step", c);

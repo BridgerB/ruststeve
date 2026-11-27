@@ -985,6 +985,9 @@ pub fn chosen_approach(w: &World, st: &SpikeState, pos: [f64; 3], tick: u64) -> 
     };
     crystals_in_order(w, pos)
         .into_iter()
+        // >>> E8 (issue 20, the bow line): the crystals the bow may still take are left to it.
+        .filter(|(id, _)| !st.bow_keep.contains(id))
+        // <<< E8
         .find_map(|c| approach_to(c.1).map(|sa| (c, sa)))
 }
 
@@ -1079,6 +1082,11 @@ pub struct SpikeState {
     /// The spikes' geography from `config/end.toml` (E1), set by the shell; empty reads the
     /// blocks round each crystal.
     pub geography: Vec<Spike>,
+    // >>> E8 (issue 20, the bow line)
+    /// Crystals the bow may still take (`Plan::bow_task` sets it): `next` leaves them.
+    #[serde(default)]
+    pub bow_keep: Vec<i32>,
+    // <<< E8
     /// Bars count as the wall (true, the default: parity e03 struck through intact bars for
     /// 0.42, the blast's least). False is the fallback: a cage's wall cells are dug and end
     /// stone put in.
@@ -1179,6 +1187,7 @@ impl Default for SpikeState {
     fn default() -> Self {
         Self {
             geography: Vec::new(),
+            bow_keep: Vec::new(),
             bars_shield: true,
             doing: None,
             pillars: Vec::new(),
@@ -1297,6 +1306,12 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     // (race 45949063425 lane 1: four approaches of one spike refused in turn, and back to it,
     // none of the nine others tried).
     let order = crystals_in_order(w, body.pos);
+    // >>> E8 (issue 20, the bow line): the crystals the bow may still take are left to it.
+    let order: Vec<(i32, [f64; 3])> = order
+        .into_iter()
+        .filter(|(id, _)| !st.bow_keep.contains(id))
+        .collect();
+    // <<< E8
     let chosen = chosen_approach(w, st, body.pos, tick);
     let crystal = chosen.map(|(c, _)| c).or_else(|| order.first().copied());
     let approach = chosen.map(|(_, sa)| sa);

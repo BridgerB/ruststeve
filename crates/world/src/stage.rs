@@ -319,6 +319,12 @@ pub const ARMED_PICKAXE_USES: i32 = 260;
 pub const ARMED_COOKED: i64 = 24;
 /// `armed`: building blocks (`[kit] blocks`).
 pub const ARMED_BLOCKS: i64 = 128;
+// >>> E8 (issue 20, the bow line)
+/// `bow_armed`: arrows held with the bow (`[end_kit] arrows` wants 32; 8 is the least: one
+/// for each open crystal, parity e07's two shots both hit; race 46067009450's bots made 8 to 12
+/// in a morning of chickens).
+pub const BOW_ARROWS: i64 = 8;
+// <<< E8
 /// Frames in a ring: the empty ones are these less those on record with an eye.
 pub const RING_FRAMES: i64 = 12;
 /// The fountain's column centre (the podium at 0, 0: EndPodiumFeature, the 26.1.2 jar).
@@ -581,6 +587,11 @@ pub enum Stage {
     /// In the overworld with the End's kit (`armed_kit`; issue 20's first checkpoint, Bridger
     /// 2026-11-26): the overworld prep is never replayed.
     Armed,
+    // >>> E8 (issue 20, the bow line, docs/problems/end-bow.md)
+    /// `armed` reached, then a bow and `BOW_ARROWS` arrows in the overworld: the bow line's first
+    /// checkpoint. Accreted between `armed` and `end` so `Ord` stays the ladder.
+    BowArmed,
+    // <<< E8
     /// In the End (issue 20).
     End,
     /// The feet on the main island's end stone within `ISLAND_NEAR` of the fountain (issue 20).
@@ -602,7 +613,7 @@ pub enum Stage {
 
 impl Stage {
     /// Every stage, lowest first.
-    pub const ALL: [Stage; 26] = [
+    pub const ALL: [Stage; 27] = [
         Stage::InWorld,
         Stage::Log,
         Stage::Table,
@@ -623,6 +634,7 @@ impl Stage {
         Stage::Stronghold,
         Stage::PortalRoom,
         Stage::Armed,
+        Stage::BowArmed,
         Stage::End,
         Stage::Island,
         Stage::Crystals5,
@@ -654,6 +666,7 @@ impl Stage {
             Stage::Stronghold => "stronghold",
             Stage::PortalRoom => "portal_room",
             Stage::Armed => "armed",
+            Stage::BowArmed => "bow_armed",
             Stage::End => "end",
             Stage::Island => "island",
             Stage::Crystals5 => "crystals_5",
@@ -721,6 +734,15 @@ impl Stage {
             Stage::Stronghold => !frames_near(w).is_empty(),
             Stage::PortalRoom => in_portal_room(w),
             Stage::Armed => dim == Some("minecraft:overworld") && armed_kit(w),
+            Stage::BowArmed => {
+                dim == Some("minecraft:overworld")
+                    && has(ItemKind::Bow, 1)
+                    && has(ItemKind::Arrow, BOW_ARROWS)
+                    // `armed` reached, not held now: the bow phase eats into the kit's food
+                    // (race 46072716511 lane 1 held a bow and 12 arrows and never read armed
+                    // again).
+                    && w.stage_reached.is_some_and(|s| s >= Stage::Armed)
+            }
             Stage::End => dim == Some("minecraft:the_end"),
             Stage::Island => on_island(w),
             Stage::Crystals5 => {
@@ -757,6 +779,7 @@ impl Stage {
                             | Stage::Stronghold
                             | Stage::PortalRoom
                             | Stage::Armed
+                            | Stage::BowArmed
                     )
             })
             .find(|s| s.holds(w))

@@ -18,7 +18,7 @@
 //! cell not over lava; an eye into each empty frame (`empty_frames`, the frame's `eye` property)
 //! from the floor outside the ring within `frame_reach` of the frame's top; then the step in.
 
-use data::{BlockKind, ItemKind};
+use data::{BlockKind, EntityKind, ItemKind};
 use memory::Memory;
 use world::{Act, BlockPos, World};
 
@@ -83,6 +83,22 @@ pub struct EndKitRules {
     pub entry_walks: u32,
     pub entry_clicks: u32,
     pub entries: u32,
+    // >>> E8 (issue 20, the bow line): the bow kit's targets (`[end_kit]` in config/goals.toml).
+    /// The bow phase runs (the bow line); false skips it.
+    pub bow: bool,
+    /// Arrows wanted, and the least that counts as armed with a bow (`world::stage::BOW_ARROWS`).
+    pub arrows: i32,
+    /// Sticks and stone pickaxes held when the bow phase is over.
+    pub bow_sticks: i32,
+    pub bow_pickaxes: i32,
+    /// The bow phase's own clock (a night is in it) and its failed tasks.
+    pub bow_ticks: u64,
+    pub bow_fails: u32,
+    /// Chickens and spiders hunted within this of the feet.
+    pub bow_radius: f64,
+    /// The look points (x, z) for chickens and spiders, in turn (`wood_points` when empty).
+    pub bow_points: Vec<[i32; 2]>,
+    // <<< E8
 }
 
 impl Default for EndKitRules {
@@ -127,6 +143,14 @@ impl Default for EndKitRules {
             entry_walks: 4,
             entry_clicks: 9,
             entries: 3,
+            bow: false,
+            arrows: 32,
+            bow_sticks: 16,
+            bow_pickaxes: 4,
+            bow_ticks: 24_000,
+            bow_fails: 24,
+            bow_radius: 48.0,
+            bow_points: Vec::new(),
         }
     }
 }
@@ -142,6 +166,9 @@ pub enum KitPhase {
     Eat,
     Down,
     Over,
+    // >>> E8 (issue 20, the bow line): after the eat, before the way down.
+    Bow,
+    // <<< E8
 }
 
 impl KitPhase {
@@ -154,6 +181,7 @@ impl KitPhase {
             KitPhase::Eat => "eat",
             KitPhase::Down => "down",
             KitPhase::Over => "over",
+            KitPhase::Bow => "bow",
         }
     }
 
@@ -163,7 +191,8 @@ impl KitPhase {
             KitPhase::Wood => KitPhase::Row,
             KitPhase::Row => KitPhase::Cook,
             KitPhase::Cook => KitPhase::Eat,
-            KitPhase::Eat => KitPhase::Down,
+            KitPhase::Eat => KitPhase::Bow,
+            KitPhase::Bow => KitPhase::Down,
             KitPhase::Down | KitPhase::Over => KitPhase::Over,
         }
     }
@@ -218,7 +247,88 @@ pub struct EndPortalState {
     pub pushes: u32,
     /// Frames whose way in was given up.
     pub entry_refused: Vec<[i32; 3]>,
+    // >>> E8 (issue 20, the bow line)
+    /// The look point walked to next for chickens and spiders, the legs retargeted, and the
+    /// bow row's last give-up noted.
+    pub bow_point: usize,
+    pub bow_looks: u32,
+    pub bow_row_said: Option<String>,
+    /// In the portal room: the cobweb walks begun, and whether the room's bow step is over.
+    pub web_tries: u32,
+    pub room_bow_over: bool,
+    // <<< E8
 }
+
+// >>> E8 (issue 20, the bow line)
+/// The bow kit's goal row's id (built where the bot stands from what it holds).
+pub const BOW_ROW: &str = "bow-kit";
+/// The portal room's row: the bow alone.
+pub const BOW_ROOM_ROW: &str = "bow-room";
+
+/// A goal row's step: a task (or a wait), or the row over with why.
+#[allow(clippy::large_enum_variant)]
+pub enum RowStep {
+    Task(Option<Task>),
+    Over(String),
+}
+
+/// The bow kit's row for what is held now: the bow with 3 string held, as many arrows as the
+/// feathers held make (one feather, flint and stick each 4, up to `arrows`), the stone pickaxes,
+/// the sticks. Pure.
+pub fn bow_row(
+    r: &EndKitRules,
+    have_bow: bool,
+    arrows: i32,
+    string: i32,
+    feathers: i32,
+) -> make::Row {
+    let sets_short = ((r.arrows - arrows).max(0) + 3) / 4;
+    let arrow_target = arrows + 4 * feathers.min(sets_short);
+    let mut provides: Vec<(make::Need, i32)> = Vec::new();
+    let mut push = |name: &str, k: i32| {
+        if let Some(need) = make::Need::parse(name) {
+            provides.push((need, k));
+        }
+    };
+    if !have_bow && string >= 3 {
+        push("item:bow", 1);
+    }
+    if arrow_target > arrows {
+        push("item:arrow", arrow_target);
+    }
+    push("item:stone_pickaxe", r.bow_pickaxes);
+    push("item:stick", r.bow_sticks);
+    // Planks for a table where the bow is made (race 46072716511 lane 2 had 3 string in the room
+    // and 2 planks: "no wood underground" for the table, no bow).
+    push("tag:planks", 4);
+    make::Row {
+        id: BOW_ROW.to_owned(),
+        needs: Vec::new(),
+        provides,
+        holds: Vec::new(),
+        spares: Vec::new(),
+        wants: Vec::new(),
+        act: None,
+    }
+}
+
+/// The bow kit in one line, for the notes.
+pub fn bow_line(w: &World) -> String {
+    format!(
+        "bow {}, arrows {}, string {}, feathers {}, flint {}, gravel {}, sticks {}, stone pickaxes {}, logs {}, planks {}",
+        craft::count(w, ItemKind::Bow),
+        craft::count(w, ItemKind::Arrow),
+        craft::count(w, ItemKind::String),
+        craft::count(w, ItemKind::Feather),
+        craft::count(w, ItemKind::Flint),
+        craft::count(w, ItemKind::Gravel),
+        craft::count(w, ItemKind::Stick),
+        craft::count(w, ItemKind::StonePickaxe),
+        base::logs_held(w),
+        base::planks_held(w)
+    )
+}
+// <<< E8
 
 // ------------------------------------------------------------------ pure
 
@@ -669,6 +779,11 @@ impl Plan {
         {
             return Some(t);
         }
+        // >>> E8 (issue 20, the bow line): in the stronghold with no bow, its cobwebs for string.
+        if let Some(t) = self.bow_room_task(w, tick) {
+            return Some(t);
+        }
+        // <<< E8
         self.end_frames_task(w, tick)
     }
     // <<< E2
@@ -691,17 +806,22 @@ impl Plan {
             let spent = tick.saturating_sub(self.end_portal.since);
             // The cook's clock is its own: a furnace cooks a piece in 200 ticks, 30 pieces 6,000
             // (race 45880017656 lane 1 gave the cook up at 6,182 ticks with its last batch done).
-            let clock = if phase == KitPhase::Cook {
-                r.cook_ticks
+            let clock = match phase {
+                KitPhase::Cook => r.cook_ticks,
+                KitPhase::Bow => r.bow_ticks,
+                _ => r.phase_ticks,
+            };
+            let fails_max = if phase == KitPhase::Bow {
+                r.bow_fails
             } else {
-                r.phase_ticks
+                r.phase_fails
             };
             if phase != KitPhase::Up && phase != KitPhase::Down {
                 if spent > clock {
                     self.end_kit_advance(w, tick, &format!("gave up: {spent} ticks of {clock}"));
                     continue;
                 }
-                if self.end_portal.fails >= r.phase_fails {
+                if self.end_portal.fails >= fails_max {
                     let fails = self.end_portal.fails;
                     self.end_kit_advance(w, tick, &format!("gave up: {fails} tasks failed"));
                     continue;
@@ -709,7 +829,7 @@ impl Plan {
             }
             let next = match phase {
                 KitPhase::Up => self.end_kit_up(w, &r, tick),
-                KitPhase::Wood | KitPhase::Row | KitPhase::Cook | KitPhase::Eat => {
+                KitPhase::Wood | KitPhase::Row | KitPhase::Cook | KitPhase::Eat | KitPhase::Bow => {
                     self.end_kit_surface(w, &r, phase, tick)
                 }
                 KitPhase::Down => self.end_kit_down(w, &r, tick),
@@ -1018,9 +1138,361 @@ impl Plan {
                 );
                 Some(Task::Eat(eat::Eat::new(w, f, tick)))
             }
+            KitPhase::Bow => self.end_kit_bow(w, r, night, tick),
             KitPhase::Up | KitPhase::Down | KitPhase::Over => None,
         }
     }
+
+    // >>> E8 (issue 20, the bow line)
+    /// In the portal room with the kit's phases over and no bow (string is scarce by day: race
+    /// 46053975527 lane 0 had 24 arrows and 1 string after a whole day): the stronghold's
+    /// cobwebs with a face open to the air, within `WEB_REACH`, walked to and dug (string, the
+    /// jar's loot); with 3 string the bow made through the bow row. Over at `WEB_TRIES` walks,
+    /// none in reach, or the bow held.
+    fn bow_room_task(&mut self, w: &World, tick: u64) -> Option<Task> {
+        const WEB_REACH: i32 = 40;
+        const WEB_RISE: i32 = 12;
+        const WEB_TRIES: u32 = 48;
+        let r = self.end_rules();
+        if !r.bow || self.end_portal.room_bow_over || !overworld(w) {
+            return None;
+        }
+        let n = |k: ItemKind| craft::count(w, k);
+        if n(ItemKind::Bow) >= 1 {
+            self.room_bow_done(w, tick, "the bow held");
+            return None;
+        }
+        if n(ItemKind::String) >= 3 {
+            // The bow alone: no pickaxe or sticks wanted down here, so no trip for wood (race
+            // 46067009450 lane 2 walked off for logs from the stronghold with 3 string).
+            let row = make::Row {
+                id: BOW_ROOM_ROW.to_owned(),
+                needs: Vec::new(),
+                provides: make::Need::parse("item:bow")
+                    .map(|need| vec![(need, 1)])
+                    .unwrap_or_default(),
+                holds: Vec::new(),
+                spares: Vec::new(),
+                wants: Vec::new(),
+                act: None,
+            };
+            return match self.kit_row_step(w, &r, &row, tick) {
+                RowStep::Task(t) => Some(t.unwrap_or(Task::Idle)),
+                RowStep::Over(why) => {
+                    self.room_bow_done(w, tick, &format!("the room's bow over ({why})"));
+                    None
+                }
+            };
+        }
+        if self.end_portal.web_tries >= WEB_TRIES {
+            self.room_bow_done(w, tick, "no more cobwebs tried");
+            return None;
+        }
+        let feet = path::feet_cell(w.body?.pos);
+        let mut best: Option<(i32, Cell)> = None;
+        for dx in -WEB_REACH..=WEB_REACH {
+            for dz in -WEB_REACH..=WEB_REACH {
+                for dy in -WEB_RISE..=WEB_RISE {
+                    let c = (feet.0 + dx, feet.1 + dy, feet.2 + dz);
+                    if w.block_at(BlockPos::new(c.0, c.1, c.2)) != Some(BlockKind::Cobweb) {
+                        continue;
+                    }
+                    // No X-ray: a face open to the air.
+                    let open = [
+                        (1, 0, 0),
+                        (-1, 0, 0),
+                        (0, 1, 0),
+                        (0, -1, 0),
+                        (0, 0, 1),
+                        (0, 0, -1),
+                    ]
+                    .iter()
+                    .any(|(a, b, d)| {
+                        matches!(
+                            w.block_at(BlockPos::new(c.0 + a, c.1 + b, c.2 + d)),
+                            Some(BlockKind::Air | BlockKind::CaveAir)
+                        )
+                    });
+                    if !open || self.refused_now(c, tick) {
+                        continue;
+                    }
+                    let d = dx.abs() + dz.abs() + 2 * dy.abs();
+                    if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+                        best = Some((d, c));
+                    }
+                }
+            }
+        }
+        let Some((_, c)) = best else {
+            self.room_bow_done(
+                w,
+                tick,
+                &format!("no cobweb within {WEB_REACH} of {feet:?}"),
+            );
+            return None;
+        };
+        self.end_portal.web_tries += 1;
+        let mut walk = Walk::to_dig(c, tick);
+        if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+            self.walks += 1;
+            let line = bow_line(w);
+            self.note(
+                tick,
+                format!("end kit: cobweb at {c:?} for string"),
+                format!("try {} of {WEB_TRIES}; {line}", self.end_portal.web_tries),
+            );
+            return Some(Task::ToLog(walk));
+        }
+        self.expanded += walk.expanded;
+        // No walk (race 46060386538 lane 1: sixteen webs in reach, none walked to): dug toward
+        // through the stronghold's walls, a step at a time, the walk asked again after each.
+        let why = format!("no walk to it (route {:?})", walk.route);
+        if let Some(t) = self.dig_toward(w, c, true, ("the cobweb", &why), tick) {
+            let line = bow_line(w);
+            self.note(
+                tick,
+                format!("end kit: dig toward the cobweb at {c:?}"),
+                format!(
+                    "{why}; try {} of {WEB_TRIES}; {line}",
+                    self.end_portal.web_tries
+                ),
+            );
+            return Some(t);
+        }
+        self.note(
+            tick,
+            format!("end kit: cobweb at {c:?} refused"),
+            format!(
+                "{why}, no dig toward it; try {} of {WEB_TRIES}",
+                self.end_portal.web_tries
+            ),
+        );
+        self.refuse(c, tick);
+        Some(Task::Idle)
+    }
+
+    /// The room's bow step over, noted; after a trip to the cobwebs the way down runs again to
+    /// the room's standing cell (race 46067009450 lane 0 made its bow 16 off in its tunnel, and
+    /// the frames had no standing cell from there).
+    fn room_bow_done(&mut self, w: &World, tick: u64, why: &str) {
+        self.end_portal.room_bow_over = true;
+        let line = bow_line(w);
+        self.note(tick, format!("end kit: room bow step over ({why})"), line);
+        if self.end_portal.web_tries > 0 {
+            self.end_portal.phase = KitPhase::Down;
+            self.end_portal.since = tick;
+            self.end_portal.down_at = None;
+            self.end_portal.down_noted = false;
+            self.note(
+                tick,
+                "end kit: back to the room after the cobwebs".to_owned(),
+                format!("{} cobweb tries", self.end_portal.web_tries),
+            );
+        }
+    }
+
+    /// The bow kit (docs/problems/end-bow.md): by day, what can be made is made (the bow from 3
+    /// string, arrows from the feathers held with flint redug from the gravel held, the spare
+    /// pickaxe, sticks); then chickens hunted for feathers and spiders for string, seen within
+    /// `bow_radius` (the jar's loot: 0 to 2 each); with none in sight, the overland's legs to the
+    /// look points (`wood_points`) in turn. Over once held, or on its clock.
+    fn end_kit_bow(&mut self, w: &World, r: &EndKitRules, night: bool, tick: u64) -> Option<Task> {
+        if !r.bow {
+            self.end_kit_advance(w, tick, "no bow on this line");
+            return None;
+        }
+        let n = |k: ItemKind| craft::count(w, k);
+        let have_bow = n(ItemKind::Bow) >= 1;
+        let arrows = n(ItemKind::Arrow);
+        let pickaxes = n(ItemKind::StonePickaxe);
+        let sticks = n(ItemKind::Stick);
+        if have_bow && arrows >= r.arrows && sticks >= r.bow_sticks && pickaxes >= r.bow_pickaxes {
+            let line = bow_line(w);
+            self.end_kit_advance(w, tick, &format!("the bow kit held: {line}"));
+            return None;
+        }
+        if night {
+            self.retry_at = tick + crate::RETRY_TICKS * 10;
+            return Some(Task::Idle);
+        }
+        if let Some(t) = self.end_hut_exit(w, None, tick) {
+            return Some(t);
+        }
+        // What can be made now, from what is held.
+        let sets_short = ((r.arrows - arrows).max(0) + 3) / 4;
+        let feathers = n(ItemKind::Feather);
+        let string = n(ItemKind::String);
+        let row = bow_row(r, have_bow, arrows, string, feathers);
+        match self.kit_row_step(w, r, &row, tick) {
+            RowStep::Task(Some(t)) => return Some(t),
+            RowStep::Task(None) => {
+                self.retry_at = tick + crate::RETRY_TICKS;
+                return Some(Task::Idle);
+            }
+            RowStep::Over(why) => {
+                if self.end_portal.bow_row_said.as_deref() != Some(why.as_str()) {
+                    let line = bow_line(w);
+                    self.note(tick, format!("end kit: bow row over ({why})"), line);
+                    self.end_portal.bow_row_said = Some(why);
+                }
+            }
+        }
+        let want_feathers = feathers < sets_short;
+        let want_string = !have_bow && string < 3;
+        if !want_feathers && !want_string {
+            let line = bow_line(w);
+            self.end_kit_advance(w, tick, &format!("the bow kit as far as it goes: {line}"));
+            return None;
+        }
+        let body = w.body?;
+        // Feathers or string lying in sight (a defend's kill drops them and moves on: race
+        // 46047707279 lane 2 killed a spider in a defend and walked off): picked up first.
+        let wanted: Vec<ItemKind> = [
+            (want_feathers, ItemKind::Feather),
+            (want_string, ItemKind::String),
+        ]
+        .into_iter()
+        .filter(|x| x.0)
+        .map(|x| x.1)
+        .collect();
+        let lying = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.item().is_some_and(|(k, _)| wanted.contains(&k)))
+            .map(|e| e.pos)
+            .filter(|p| {
+                (0..3)
+                    .map(|i| (p[i] - body.pos[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+                    <= 24.0
+            })
+            .min_by(|a, b| {
+                let d = |p: &[f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>();
+                d(a).total_cmp(&d(b))
+            });
+        if let Some(p) = lying {
+            let c = path::feet_cell(p);
+            if !self.refused_now(c, tick) {
+                let mut walk = Walk::new(c, Goal::Near { pos: c, range: 0.8 }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    let line = bow_line(w);
+                    self.note(
+                        tick,
+                        format!("end kit: pick up the bow's drop at {c:?}"),
+                        line,
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+                self.refuse(c, tick);
+            }
+        }
+        // The nearest chicken or spider seen, with a walk to it.
+        let kinds: Vec<(EntityKind, &str)> = [
+            (want_feathers, EntityKind::Chicken, "feathers"),
+            (want_string, EntityKind::Spider, "string"),
+            (want_string, EntityKind::CaveSpider, "string"),
+        ]
+        .into_iter()
+        .filter(|x| x.0)
+        .map(|x| (x.1, x.2))
+        .collect();
+        let d = |p: [f64; 3]| {
+            (0..3)
+                .map(|i| (p[i] - body.pos[i]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        };
+        let mut prey: Vec<(f64, i32, EntityKind, &str)> = w
+            .entities
+            .iter()
+            .filter(|(id, e)| !e.dead && !self.refused_prey.contains(id))
+            .filter_map(|(id, e)| {
+                kinds
+                    .iter()
+                    .find(|k| k.0 == e.kind)
+                    .map(|k| (d(e.pos), *id, e.kind, k.1))
+            })
+            .filter(|x| x.0 <= r.bow_radius)
+            .collect();
+        prey.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        for (dist, id, kind, item) in prey.into_iter().take(crate::hunt::CANDIDATES) {
+            let mut h = crate::hunt::Hunt::new(w, id, kind, tick);
+            h.extra = vec![ItemKind::Feather, ItemKind::String];
+            if h.reachable(w, tick) {
+                let line = bow_line(w);
+                self.note(
+                    tick,
+                    format!("end kit: hunt {kind:?} {id} for {item}"),
+                    format!("{dist:.0} off; {line}"),
+                );
+                return Some(Task::Hunt(Box::new(h)));
+            }
+            self.refused_prey.push(id);
+        }
+        // None in sight: the overland's legs to the next look point.
+        let points = if r.bow_points.is_empty() {
+            &r.wood_points
+        } else {
+            &r.bow_points
+        };
+        let Some(p) = points.get(self.end_portal.bow_point).copied() else {
+            let line = bow_line(w);
+            self.end_kit_advance(
+                w,
+                tick,
+                &format!("gave up: no chicken or spider found at the look points; {line}"),
+            );
+            return None;
+        };
+        let p = [f64::from(p[0]), f64::from(p[1])];
+        let here = [body.pos[0], body.pos[2]];
+        let dd = (p[0] - here[0]).hypot(p[1] - here[1]);
+        if dd <= r.point_reach || self.overland.arrived || self.end_portal.bow_looks >= r.look_walks
+        {
+            self.end_portal.bow_point += 1;
+            self.end_portal.bow_looks = 0;
+            self.overland.arrived = false;
+            self.note(
+                tick,
+                format!(
+                    "end kit: bow look point {} reached, nothing to hunt",
+                    self.end_portal.bow_point - 1
+                ),
+                format!("{dd:.0} off; on to the next"),
+            );
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        if self
+            .overland
+            .fix
+            .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > 4.0)
+        {
+            self.overland.retarget((p, 0.0), true);
+            self.end_portal.bow_looks += 1;
+            let line = bow_line(w);
+            self.note(
+                tick,
+                format!(
+                    "end kit: legs toward bow look point {}",
+                    self.end_portal.bow_point
+                ),
+                format!("({:.0}, {:.0}), {dd:.0} off; {line}", p[0], p[1]),
+            );
+        }
+        self.end_portal.wood_legs = true;
+        let t = self.overland_task(w, tick);
+        self.end_portal.wood_legs = false;
+        if let Some(t) = t {
+            return Some(t);
+        }
+        self.overland.arrived = true;
+        Some(Task::Idle)
+    }
+    // <<< E8
 
     /// Out of the hut: a wall cell beside the feet dug (the head's first), toward `toward` when
     /// given; `None` once a side is open at the feet and the head, or no hut was built.
@@ -1226,10 +1698,28 @@ impl Plan {
     /// table at hand), a placing, a smelt at the furnace at hand, or a log gathered.
     fn end_kit_row(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
         let table = self.table.clone()?;
-        let Some(row) = table.until("end-kit") else {
+        let Some(row) = table.until("end-kit").cloned() else {
             self.end_kit_advance(w, tick, "no end-kit row in the goal table");
             return None;
         };
+        match self.kit_row_step(w, r, &row, tick) {
+            RowStep::Task(t) => t,
+            RowStep::Over(why) => {
+                self.end_kit_advance(w, tick, &why);
+                None
+            }
+        }
+    }
+
+    // >>> E8 (issue 20, the bow line): the row's step, shared by the end-kit row and the bow's.
+    /// One act of a goal row from the needs planner, where the bot stands: a craft (at the table
+    /// at hand), a placing, a smelt at the furnace at hand, or a log gathered; `Over` with why
+    /// when the row is met or cannot go on here.
+    fn kit_row_step(&mut self, w: &World, r: &EndKitRules, row: &make::Row, tick: u64) -> RowStep {
+        let Some(table) = self.table.clone() else {
+            return RowStep::Over("no goal table".to_owned());
+        };
+        let label = row.id.clone();
         let table_cell = self.at_hand(w, BlockKind::CraftingTable, tick);
         let furnace_cell = self.at_hand(w, BlockKind::Furnace, tick);
         let (table_near, furnace_near) = (table_cell.is_some(), furnace_cell.is_some());
@@ -1242,23 +1732,18 @@ impl Plan {
         let choice =
             make::make_with_wear(&table, &counts, &near, true, &make::Wear::default(), row);
         let act = match choice {
-            Choice::Done => {
-                self.end_kit_advance(w, tick, "the end-kit row is met");
-                return None;
-            }
+            Choice::Done => return RowStep::Over(format!("the {label} row is met")),
             Choice::Stuck => {
-                self.end_kit_advance(w, tick, "gave up: the end-kit row is not makeable");
-                return None;
+                return RowStep::Over(format!("gave up: the {label} row is not makeable"));
             }
             Choice::Act(a) => a,
         };
         let id = act.id.clone();
-        let why = format!("the end-kit row's next step ({id})");
-        match act.act {
+        let why = format!("the {label} row's next step ({id})");
+        let t = match act.act {
             Some(make::Act::Craft(rec)) if !make::fits_grid(rec) => {
                 let Some(t) = table_cell else {
-                    self.end_kit_advance(w, tick, &format!("gave up: {id} wants a table at hand"));
-                    return None;
+                    return RowStep::Over(format!("gave up: {id} wants a table at hand"));
                 };
                 self.note(
                     tick,
@@ -1272,18 +1757,15 @@ impl Plan {
                 Some(Task::Craft(crate::craft::Craft::new(rec, tick)))
             }
             Some(make::Act::Place(b)) => {
-                let p = crate::place::Place::new(b, tick)?;
-                self.note(tick, format!("end kit: place {b:?}"), why);
-                Some(Task::Place(p))
+                let p = crate::place::Place::new(b, tick);
+                if p.is_some() {
+                    self.note(tick, format!("end kit: place {b:?}"), why);
+                }
+                p.map(Task::Place)
             }
             Some(make::Act::Smelt(s)) => {
                 let Some(f) = furnace_cell else {
-                    self.end_kit_advance(
-                        w,
-                        tick,
-                        &format!("gave up: {id} wants a furnace at hand"),
-                    );
-                    return None;
+                    return RowStep::Over(format!("gave up: {id} wants a furnace at hand"));
                 };
                 let count = s
                     .input
@@ -1328,17 +1810,24 @@ impl Plan {
                                 format!("end kit: craft {} for the smelt's fuel", rec.id),
                                 format!("{count} to smelt want {need} ticks, {have} held"),
                             );
-                            return Some(Task::Craft(crate::craft::Craft::new(rec, tick)));
+                            return RowStep::Task(Some(Task::Craft(crate::craft::Craft::new(
+                                rec, tick,
+                            ))));
                         }
                     }
                 }
-                let sm = crate::smelt::Smelt::new(w, f, s, count, tick)?;
-                self.note(
-                    tick,
-                    format!("end kit: smelt {count} for {} at {f:?}", s.id),
-                    why,
-                );
-                Some(Task::Smelt(Box::new(sm)))
+                let sm = crate::smelt::Smelt::new(w, f, s, count, tick);
+                if sm.is_some() {
+                    self.note(
+                        tick,
+                        format!("end kit: smelt {count} for {} at {f:?}", s.id),
+                        why,
+                    );
+                }
+                sm.map(|sm| Task::Smelt(Box::new(sm)))
+            }
+            Some(make::Act::Gather) if label == BOW_ROOM_ROW => {
+                return RowStep::Over("no wood underground".to_owned());
             }
             Some(make::Act::Gather) => {
                 // Wood short for the row: one more log by hand.
@@ -1347,16 +1836,26 @@ impl Plan {
                 if self.end_portal.phase != before {
                     // The wood gave out: the row is over with what is held.
                     self.end_portal.phase = before;
-                    self.end_kit_advance(w, tick, "gave up: no wood for the row");
+                    return RowStep::Over("gave up: no wood for the row".to_owned());
                 }
                 t
             }
-            Some(make::Act::Mine { .. } | make::Act::Redig(_) | make::Act::Scoop) | None => {
-                self.end_kit_advance(w, tick, &format!("gave up: {id} would be a trip"));
-                None
+            // The bow's flint: a held gravel placed and dug again until it drops flint (the
+            // `flint-from-gravel` row; the jar's gravel loot, one time in ten).
+            Some(make::Act::Redig(b)) if label == BOW_ROW => {
+                let rd = crate::redig::Redig::new(w, b, tick);
+                if rd.is_some() {
+                    self.note(tick, format!("end kit: redig {b:?} for flint"), why);
+                }
+                rd.map(|x| Task::Redig(Box::new(x)))
             }
-        }
+            Some(make::Act::Mine { .. } | make::Act::Redig(_) | make::Act::Scoop) | None => {
+                return RowStep::Over(format!("gave up: {id} would be a trip"));
+            }
+        };
+        RowStep::Task(t)
     }
+    // <<< E8
 
     /// Down the same stairs to the room's standing cell; with no walk, the stronghold's way in.
     fn end_kit_down(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
@@ -1364,6 +1863,34 @@ impl Plan {
         let feet = path::stand_cell(w, w.body?.pos);
         let frames = stronghold::frames_near(w, rules.frame_chunks);
         let Some(room) = stronghold::room_of(&frames, rules.frame_over_feet) else {
+            // >>> E8 (issue 20, the bow line): far off its stairs (the bow's look points, race
+            // 46053975527 lane 1 at (1522, 65, -32), 86 off), the frames are out of the search:
+            // the overland's legs back to the stairs' top first.
+            let top = [f64::from(r.way_up[0]) + 0.5, f64::from(r.way_up[2]) + 0.5];
+            let pos = w.body?.pos;
+            let off = (pos[0] - top[0]).hypot(pos[2] - top[1]);
+            if off > 48.0 {
+                if self
+                    .overland
+                    .fix
+                    .is_none_or(|(q, _)| (q[0] - top[0]).hypot(q[1] - top[1]) > 4.0)
+                {
+                    self.overland.retarget((top, 0.0), true);
+                    self.overland.arrived = false;
+                    self.note(
+                        tick,
+                        "end kit: legs back to the stairs' top".to_owned(),
+                        format!("{off:.0} off it and no frame in the search"),
+                    );
+                }
+                self.end_portal.wood_legs = true;
+                let t = self.overland_task(w, tick);
+                self.end_portal.wood_legs = false;
+                if let Some(t) = t {
+                    return Some(t);
+                }
+            }
+            // <<< E8
             self.end_kit_advance(
                 w,
                 tick,

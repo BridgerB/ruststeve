@@ -455,7 +455,31 @@ pub enum Script {
     /// the bucket's 4.5 reach of the ground under it. No second try: the row says whether that
     /// one use placed water and what the fall cost.
     Pour { yaw: f64, walk: u64, before: u64 },
+    // >>> E8 (issue 20, the bow line): e07.
+    /// Issue 20's e07 (`bow:<at>`): standing still aimed by `plan::bow::aim` at the nearest end
+    /// crystal within 64 (the low arc through its box's middle), use the held bow at tick `at`
+    /// and let go `plan::bow::DRAW_HOLD` ticks later: does an arrow from the ground destroy it?
+    Bow { at: u64 },
+    // <<< E8
 }
+
+// >>> E8 (issue 20, the bow line)
+/// The nearest live end crystal within 64 of the feet, and the bow's aim at it from there.
+fn bow_aim(w: &World) -> Option<plan::bow::Aim> {
+    let body = w.body?;
+    let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>();
+    let (_, at) = w
+        .entities
+        .iter()
+        .filter(|(_, e)| !e.dead && e.kind == data::EntityKind::EndCrystal)
+        .map(|(id, e)| (*id, e.pos))
+        .filter(|(_, p)| d(*p) <= 64.0 * 64.0)
+        .min_by(|a, b| d(a.1).total_cmp(&d(b.1)))?;
+    // A row's arena is open air: only a loaded full block stops the arrow here.
+    let mut blocked = |c: (i32, i32, i32)| w.solid(c.0, c.1, c.2).is_some();
+    plan::bow::aim(body.pos, at, &mut blocked).ok()
+}
+// <<< E8
 
 /// Reach of a use along the look (`Player.blockInteractionRange`: 4.5).
 const USE_REACH: f64 = 4.5;
@@ -493,6 +517,13 @@ impl Script {
         match self {
             Script::Burrow(mode) => burrow_controls(mode, w),
             Script::Fetch { at, home } => fetch_controls(w, tick > at, home),
+            // >>> E8
+            Script::Bow { .. } => bow_aim(w).map_or_else(Controls::default, |a| Controls {
+                yaw: a.yaw,
+                pitch: Some(a.pitch),
+                ..Controls::default()
+            }),
+            // <<< E8
             Script::Crystal { .. } | Script::Dragon { .. } => {
                 let kind = match self {
                     Script::Crystal { .. } => data::EntityKind::EndCrystal,
@@ -581,6 +612,9 @@ impl Script {
                 ..Controls::default()
             },
             Script::Crystal { .. } | Script::Dragon { .. } => Controls::default(),
+            // >>> E8
+            Script::Bow { .. } => Controls::default(),
+            // <<< E8
             Script::Clutch { yaw, walk, .. } | Script::Pour { yaw, walk, .. } => Controls {
                 forward: tick < walk,
                 yaw,
@@ -635,6 +669,17 @@ impl Script {
                     None => Vec::new(),
                 }
             }
+            // >>> E8
+            Script::Bow { at } => {
+                if tick == at {
+                    vec![Act::UseItem]
+                } else if tick == at + plan::bow::DRAW_HOLD {
+                    vec![Act::ReleaseUse]
+                } else {
+                    Vec::new()
+                }
+            }
+            // <<< E8
             Script::Clutch { walk, above, .. } => {
                 let Some(body) = w.body else {
                     return Vec::new();
@@ -878,6 +923,9 @@ impl Script {
             Script::Dragon { every, part } => format!("dragon:{every}:{part}"),
             Script::Clutch { yaw, walk, above } => format!("clutch:{yaw}:{walk}:{above}"),
             Script::Pour { yaw, walk, before } => format!("pour:{yaw}:{walk}:{before}"),
+            // >>> E8
+            Script::Bow { at } => format!("bow:{at}"),
+            // <<< E8
         }
     }
 
@@ -990,6 +1038,13 @@ impl Script {
                 home: None,
             });
         }
+        // >>> E8
+        if let Some(at) = s.strip_prefix("bow:") {
+            return Some(Script::Bow {
+                at: at.parse().ok()?,
+            });
+        }
+        // <<< E8
         if let Some(at) = s.strip_prefix("eat:") {
             return Some(Script::Eat {
                 at: at.parse().ok()?,
@@ -1054,6 +1109,7 @@ mod tests {
                 walk: 5,
                 before: 3,
             },
+            Script::Bow { at: 10 },
         ] {
             assert_eq!(Script::parse(&s.name()), Some(s));
         }
