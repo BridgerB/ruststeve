@@ -2686,8 +2686,19 @@ impl Plan {
         {
             return Some(Some(c));
         }
-        if !world::stage::open_sky(w) || self.dragon.notch_failed {
+        if !world::stage::open_sky(w) {
             return None;
+        }
+        // Stood where the feet are, in sight: never a notch dug under them before a threat (dev
+        // race 45940964839: no cell beside fit on the bunker's stair, a notch was dug at the feet
+        // and the bot stood a block down, out of sight, through a strafe of 1,380 ticks).
+        let stand = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            ..Controls::default()
+        };
+        if self.dragon.notch_failed && !threat {
+            return Some(Some(self.strafe_stood(tick, fc, stand)));
         }
         let ready = |n: [i32; 3]| air([n[0], n[1] - 1, n[2]]) && air([n[0], n[1] - 2, n[2]]);
         if threat {
@@ -2726,9 +2737,9 @@ impl Plan {
         {
             self.dragon.strafe_notch = None;
             if !body.on_ground {
-                return None;
+                return Some(Some(stand));
             }
-            let n = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            let Some(n) = [(1, 0), (-1, 0), (0, 1), (0, -1)]
                 .iter()
                 .find_map(|(dx, dz)| {
                     let n = [fc[0] + dx, fc[1], fc[2] + dz];
@@ -2737,7 +2748,10 @@ impl Plan {
                         && notch_diggable(w, n)
                         && notch_diggable(w, [n[0], n[1] - 1, n[2]]))
                     .then_some(n)
-                })?;
+                })
+            else {
+                return Some(Some(self.strafe_stood(tick, fc, stand)));
+            };
             self.dragon.strafe_notch = Some(n);
             self.note(
                 tick,
@@ -2760,11 +2774,20 @@ impl Plan {
                 format!("at {fc:?}; into it when the fireball comes"),
             );
         }
-        Some(Some(Controls {
-            sneak: true,
-            yaw: f64::from(w.player.yaw),
-            ..Controls::default()
-        }))
+        Some(Some(stand))
+    }
+
+    /// Stood where the feet are in a strafe with no notch beside to be had, noted once a strafe.
+    fn strafe_stood(&mut self, tick: u64, fc: [i32; 3], stand: Controls) -> Controls {
+        if !self.dragon.strafe_seen_noted {
+            self.dragon.strafe_seen_noted = true;
+            self.note(
+                tick,
+                format!("strafe: no notch beside, stood in sight at {fc:?}"),
+                "the shelter as before when the fireball comes".to_owned(),
+            );
+        }
+        stand
     }
 
     /// One tick of the notch two deep where the feet are: the end stone under them dug, twice,

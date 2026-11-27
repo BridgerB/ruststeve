@@ -253,3 +253,9 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - A charge is still hidden from at once, and a cloud within reach still holds it in.
   - With no notch beside ready at a threat, the shelter is as before (a shut bunker within 12, else a notch where the feet are).
 - **Unproven:** whether 200 ticks is right, and whether the step in beats the fireball. The fireball spawns at the head and flies about 30 to 40 blocks; the step is one block and a 2-block drop. E3's seal-on-strafe for the bunker hides the bot the same way and will hold the strafe too unless it is capped.
+
+### Dev race 45940964839 (dd18d00, 3 lanes, cap 24,000), read mid-run (lanes 0 and 1 at tick 4,700)
+- **The fix's first race.** Lane 0 perched twice: 4 head strikes, the dragon to 181. Lane 1: 6 head strikes, the dragon to 169. No breath hits in either lane.
+- **Lane 1 is the fix working:** "strafe: stood by the notch at [14, 58, 2] in sight" at 2,940, and in the same tick the strafe fired and went to holding. The fireball passed 14 off.
+- **Wall 26: the old shelter still fired first.** At each strafe's first tick, on the bunker's stair, no cell beside fitted a notch, so the step fell back to the old shelter and dug a notch at the feet. Lane 0 then stood by a notch from a block down, mostly out of sight, and the strafe held 1,380 ticks (2,720 to 4,100).
+  - **Fix:** with no cell beside (or in the air, or the notch's dig failed) and no threat, the bot stands where its feet are, in sight ("strafe: no notch beside, stood in sight at …"). The old shelter is for a threat only.

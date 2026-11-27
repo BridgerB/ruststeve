@@ -1360,6 +1360,46 @@ fn a_strafe_is_met_in_sight_by_a_notch_dug_beside() {
             .iter()
             .any(|e| e.what == "charge: dig a notch at [12, 63, 0]")
     );
+    // No cell beside to dig a notch in (dev race 45940964839, on the bunker's stair): stood where
+    // the feet are, in sight, never a notch dug under them before the fireball.
+    let mut bare = end_at(feet);
+    with_dragon(&mut bare, [-30.5, 80.0, 0.5], 1, 90.0);
+    for (x, z) in [(13, 0), (11, 0), (12, 1), (12, -1)] {
+        bare.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (x, 63, z),
+            state: state(BlockKind::Air),
+        }));
+    }
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([60, FLOOR - 4, 60]);
+    let c = r.charge_step(&bare, 0).expect("stood");
+    assert!(!c.forward && c.sneak);
+    assert!(r.take_acts().is_empty(), "nothing dug");
+    assert!(
+        r.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: no notch beside, stood in sight at [12, 64, 0]"),
+        "{:?}",
+        r.events_since(0)
+    );
+    assert!(
+        !r.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: shelter before the fireball"))
+    );
+    // Its fireball comes: the shelter as before (a notch where the feet are).
+    add(
+        &mut bare,
+        51,
+        EntityKind::DragonFireball,
+        [-10.5, 74.0, 0.5],
+    );
+    assert!(r.charge_step(&bare, 1).is_some());
+    assert!(
+        r.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: shelter before the fireball (a notch)")
+    );
     // Far off: no shelter.
     let mut far = end_at(feet);
     with_dragon(&mut far, [-80.5, 80.0, 0.5], 1, 90.0);
