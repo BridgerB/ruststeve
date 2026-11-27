@@ -301,6 +301,32 @@ struct Detail {
     hits_seen: usize,
     blasts_seen: usize,
     seen: std::collections::BTreeMap<i32, (data::EntityKind, Option<f32>, bool)>,
+    /// The row's watched cells and what each last held (issue 20's e09: when the water came).
+    watch: Vec<(i32, i32, i32)>,
+    cells: std::collections::BTreeMap<(i32, i32, i32), Option<String>>,
+    /// In a fall last tick (e09: the landing's tick).
+    falling: bool,
+}
+
+/// A use sent (issue 20's e09 sweep): from where the body was, which is the position the server
+/// last heard (the tick's move goes out after its acts), its fall, the eye over the ground under
+/// it against the bucket's 4.5, and where the tick's move then takes it.
+fn detail_use(w: &World, d: &mut Detail) {
+    let Some(b) = w.body else {
+        return;
+    };
+    let eye = bot::script::ground_under(w, b.pos).map_or_else(
+        || "none".to_owned(),
+        |g| format!("{:.3}", b.pos[1] + physics::EYE_HEIGHT - g),
+    );
+    d.lines.push(format!(
+        "t {} use_item from y {:.3} vy {:.3} on_ground {} eye over ground {eye} next y {:.3}",
+        w.ticks,
+        b.pos[1],
+        b.vel[1],
+        b.on_ground,
+        b.pos[1] + b.vel[1]
+    ));
 }
 
 /// Entities a report follows.
@@ -326,6 +352,34 @@ fn detail_step(w: &World, d: &mut Detail) {
     if let (false, Some(b)) = (d.placed_after_change, w.body) {
         d.placed_after_change = true;
         d.lines.push(format!("t {t} body at {}", f(b.pos)));
+    }
+    if let Some(b) = w.body {
+        if !b.on_ground && b.vel[1] < -0.2 {
+            d.falling = true;
+            d.lines
+                .push(format!("t {t} fall y {:.3} vy {:.3}", b.pos[1], b.vel[1]));
+        } else if d.falling && b.on_ground {
+            d.falling = false;
+            d.lines.push(format!(
+                "t {t} landed y {:.3} in water {} fall distance {:.2}",
+                b.pos[1], b.in_water, b.fall_distance
+            ));
+        }
+    }
+    for c in d.watch.clone() {
+        let now = w
+            .state_at(world::BlockPos::new(c.0, c.1, c.2))
+            .map(state_text);
+        if d.cells.get(&c) != Some(&now) {
+            d.lines.push(format!(
+                "t {t} cell ({} {} {}) {}",
+                c.0,
+                c.1,
+                c.2,
+                now.as_deref().unwrap_or("unknown")
+            ));
+            d.cells.insert(c, now);
+        }
     }
     if w.player.health != d.health {
         d.lines.push(format!(
@@ -750,6 +804,9 @@ fn trace_recording(
     for rec in &records {
         match rec {
             record::Record::Event(e) => {
+                if matches!(e, record::EventRecord::Act(world::Act::UseItem)) {
+                    detail_use(&folder.world, detail);
+                }
                 folder.step(e)?;
             }
             record::Record::Checkpoint {
@@ -1110,7 +1167,10 @@ fn real_waves(
                             let rsr = a.out.join(format!("{trace_id}.real.rsr"));
                             let mut tracks = tracks_of(&mobs);
                             let mut eye = EyeTrack::default();
-                            let mut detail = Detail::default();
+                            let mut detail = Detail {
+                                watch: watch.clone(),
+                                ..Detail::default()
+                            };
                             let text = trace_recording(&rsr, &mut tracks, &mut eye, &mut detail)
                                 .unwrap_or_else(|e| vec![format!("no trace: {e}")]);
                             write_trace(&a.out, &trace_id, "real", &text)?;
@@ -1276,7 +1336,10 @@ fn sim(a: &Args) -> Result<(), String> {
         }
         let traced = !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some();
         let mut eye = EyeTrack::default();
-        let mut detail = Detail::default();
+        let mut detail = Detail {
+            watch: watched(start, m),
+            ..Detail::default()
+        };
         let mut trace = Vec::new();
         let mut tracks = tracks_of(&mob_spots(start, m));
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
@@ -1297,14 +1360,18 @@ fn sim(a: &Args) -> Result<(), String> {
                     trace.extend(trace_line(w));
                     track_step(w, &mut tracks);
                 }
-                match (&mut planner, script) {
+                let (c, acts) = match (&mut planner, script) {
                     (Some(p), _) => {
                         let c = p.step(w);
                         (c, p.take_acts())
                     }
                     (None, Some(s)) => (s.steer(t, w), s.acts(t, w)),
                     (None, None) => (physics::Controls::default(), Vec::new()),
+                };
+                if m.report && acts.contains(&world::Act::UseItem) {
+                    detail_use(w, &mut detail);
                 }
+                (c, acts)
             },
         );
         if traced {
