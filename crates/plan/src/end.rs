@@ -343,6 +343,28 @@ pub fn strafe_threat(w: &World) -> Option<(EntityKind, [f64; 3])> {
         .map(|e| (e.kind, e.pos))
 }
 
+/// A strafe held near the bot: the dragon in its strafe within `STRAFE_RANGE`, or a fireball in
+/// flight within it. No path of E3's takes the bot under the ground then (a bot out of sight holds
+/// the strafe for good: the coordinator, wall 17).
+pub fn strafe_near(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return false;
+    };
+    strafe_threat(w).is_some()
+        || dragon(w).is_some_and(|(pos, phase)| {
+            phase == Some(STRAFE_PHASE) && dist(pos, body.pos) <= STRAFE_RANGE
+        })
+}
+
+/// A lull: no dragon sent, or the dragon holding (phase 0) farther than `STRAFE_RANGE` off. Only
+/// in one may the stock resume, or a retreat or a meal take the bot into the bunker.
+pub fn lull(w: &World) -> bool {
+    let Some(body) = w.body else {
+        return true;
+    };
+    dragon(w).is_none_or(|(pos, phase)| phase == Some(0) && dist(pos, body.pos) > STRAFE_RANGE)
+}
+
 /// The dragon is strafing (any distance): a hold for a cloud alone is capped.
 pub fn strafing(w: &World) -> bool {
     dragon(w).is_some_and(|(_, phase)| phase == Some(STRAFE_PHASE))
@@ -771,6 +793,7 @@ impl Plan {
             && feet.1 >= b.1 - 3
             && body.on_ground
             && fire_near(w, door_cells[6], STAIR_CLEAR).is_none()
+            && lull(w)
         {
             let rises = b.1 - feet.1;
             self.note(
@@ -833,7 +856,8 @@ impl Plan {
                 format!("health {health:.1}, food {food}"),
             );
         }
-        if self.end.healing || food_held.is_some() {
+        // Into the bunker to heal and eat only in a lull (wall 17); else the hand-off's way.
+        if (self.end.healing || food_held.is_some()) && (inside || lull(w)) {
             if !inside {
                 return self.walk_home(w, b, tick, "to heal and eat");
             }
@@ -890,8 +914,13 @@ impl Plan {
                     ),
                 );
             }
-        } else if self.end.strafe_paused && !strafing(w) {
+        } else if self.end.strafe_paused && lull(w) {
             self.end.strafe_paused = false;
+            self.note(
+                tick,
+                "end: stock resumed in a lull".to_owned(),
+                "the dragon holding over 64 off".to_owned(),
+            );
         }
         if !self.end.stock_over && !self.end.strafe_paused {
             return self.stock_step(w, b, door, feet, inside, sealed, tick);
@@ -942,12 +971,15 @@ impl Plan {
         {
             return None;
         }
-        // 5. The hand-offs: the crystals while one is alive, then the dragon.
+        // 5. The hand-offs: the crystals while one is alive, then the dragon. A strafe near with
+        // the bot under the ground and nothing handed over: out all the same, to be seen.
         let next = if crystals_alive(w) > 0 {
             self.end_spikes(w, tick)
         } else {
             self.end_dragon(w, tick)
         };
+        let next =
+            next.or_else(|| (strafe_near(w) && !world::stage::open_sky(w)).then_some(Task::Idle));
         if let Some(t) = next {
             // Out from under the end stone first: from the tunnel back to the bunker, then its
             // roof and stair dug; the task is chosen again once the sky is over the head.
@@ -1022,7 +1054,11 @@ impl Plan {
             self.end.hold_noted = false;
             return Some(t);
         }
-        // 6. Nothing to hand over to: held sealed in the bunker.
+        // 6. Nothing to hand over to: held sealed in the bunker; under a strafe near, where the
+        // bot stands in the open (E5's pace answers the strafe).
+        if strafe_near(w) {
+            return None;
+        }
         if !inside {
             return self.walk_home(w, b, tick, "nothing to hand over to");
         }

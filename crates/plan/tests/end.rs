@@ -990,3 +990,63 @@ fn a_strafe_calls_the_bot_out_of_the_stock() {
     assert!(noted(&p, "end: stock over for a strafe"), "{:?}", notes(&p));
     assert!(p.end.stock_over);
 }
+
+fn dragon_at(w: &mut World, at: [f64; 3], phase: i32) {
+    with_entity(w, 7, EntityKind::EnderDragon, at);
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.metadata.insert(16, MetaValue::Int(phase));
+    }
+}
+
+#[test]
+fn under_a_strafe_near_no_retreat_takes_the_bot_into_the_bunker() {
+    // Wall 17: a bot out of sight holds the strafe for good. Hurt on the surface, the bunker at
+    // (12, 61, 0) open by its shaft, the dragon strafing 30 off.
+    let mut w = world(4, 0..=7, [30.5, 64.0, 0.5]);
+    for y in 61..=63 {
+        set(&mut w, (12, y, 0), BlockKind::Air);
+    }
+    w.player.health = Some(10.0);
+    dragon_at(&mut w, [50.0, 70.0, 0.0], 1);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    let _ = p.end_task(&w, 0);
+    assert!(!noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+    // In a lull (holding, 100 off) the retreat goes.
+    let mut w2 = world(4, 0..=7, [30.5, 64.0, 0.5]);
+    for y in 61..=63 {
+        set(&mut w2, (12, y, 0), BlockKind::Air);
+    }
+    w2.player.health = Some(10.0);
+    dragon_at(&mut w2, [130.0, 70.0, 0.0], 0);
+    let _ = p.end_task(&w2, 0);
+    assert!(noted(&p, "end: back to the bunker"), "{:?}", notes(&p));
+}
+
+#[test]
+fn the_paused_stock_resumes_only_with_the_dragon_holding_far_off() {
+    // The bunker at (12, 61, 0), sealed; the stock paused by a strafe.
+    let at = |d: [f64; 3], phase: i32| {
+        let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+        set(&mut w, (12, 61, 0), BlockKind::Air);
+        set(&mut w, (12, 62, 0), BlockKind::Air);
+        dragon_at(&mut w, d, phase);
+        w
+    };
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 61, 0]);
+    p.end.door = Some((1, 0));
+    p.end.strafe_paused = true;
+    // Holding but 40 off: still paused.
+    let _ = p.end_task(&at([50.0, 70.0, 0.0], 0), 0);
+    assert!(!noted(&p, "end: stock resumed"), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+    // Holding 100 off: resumed.
+    let _ = p.end_task(&at([110.0, 70.0, 0.0], 0), 0);
+    assert!(noted(&p, "end: stock resumed in a lull"), "{:?}", notes(&p));
+    assert!(noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+}
