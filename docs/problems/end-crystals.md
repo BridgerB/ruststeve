@@ -542,3 +542,20 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - no waterfall or clutch descent is begun ("no drop: the knock-off").
   - Wall 36's water descent takes the bot off the pillar long before a perch: lane 3's descent would have begun at 29,780.
   - Unit test `no_drop_climb_or_stand_while_the_dragon_would_knock_the_bot_off`.
+
+### Wall 38: the climb began on a perch, and the charge followed (E9's read of race 46038776204 lanes 1, 3 and 4; fixed)
+- **What happened:**
+  - Lanes 1, 3 and 4 all died `fell.assist` from a charge that came 80 to 160 ticks after "sitting-scanning -> charging".
+  - Lane 1 began "pillar up from (39, 59, 0)" at 17,420 with the dragon sitting at the fountain (phase 5) and was struck at 17,540, 11 up.
+  - Lane 3 dug down from 91, ten digs from 7,280, on through a charge that began at 7,800 ("hold ended by the dragon … the way down"), and was struck at y 83 at 7,960.
+  - The climb rule we started from ("more than 64 off, or perched") was the flaw: a perched dragon scans, then charges whoever it sees.
+- **The fix:**
+  - A climb begins only with the dragon holding (phase 0) more than 64 off (`climb_refusal`, `HOLDING_PHASE`).
+  - While the bot is up, a landing approach, landing, sitting or charge (`DESCEND_PHASES`) stops the climb ("climb stopped by the perch"). The bot comes down by water at once: the landing water if poured, else the clutch off a side that falls clear (`spikes_descend`). A strike due at the stand goes first.
+  - Within `KNOCK_NEAR` the bot holds instead (wall 37).
+  - With no water bucket, a charge within 64 holds the bot rather than digging on in the open column ("hold, not the dig, from the charge").
+  - Unit tests `a_climb_begins_only_with_the_dragon_holding_over_64_off` and `the_dragon_perching_while_the_bot_is_up_takes_it_down_by_water`.
+
+### Wall 39: the clutch's pour landed short under fast knock-back (lanes 1 and 4; fixed)
+- **What happened:** flung about 60 blocks sideways, the pour went to "beside the feet's (an edge)" columns: in lane 1 it was sent at 17,825 with 19.7 under the feet. The body landed far past it.
+- **The fix:** the landing is predicted over the whole fall (`predict_landing`: stepped tick by tick with gravity 0.08, vertical drag 0.98 and air drag 0.91, from vanilla `LivingEntity.travel`). The first column under the box whose ground the feet reach is the one the pour aims at and is timed by. Unit test `a_body_flung_sideways_lands_where_its_fall_takes_it`.

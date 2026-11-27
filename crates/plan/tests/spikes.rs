@@ -444,16 +444,16 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
     assert!(notes(&p).iter().any(|n| n == "spikes: no climb"));
-    // Perched 50 off: the climb.
+    // Perched 50 off: no climb (part 2: a perched dragon scans, then charges whoever it sees).
     let mut w = world(2, [8.5, 64.0, 5.5]);
     water(&mut w);
     dragon(&mut w, [8.5, 64.0, 55.5], 6);
     let mut p = Plan::new(Aim::Race);
     p.spikes_task(&w, 100);
     assert!(
+        notes(&p).iter().any(|n| n == "spikes: no climb"),
+        "{:?}",
         notes(&p)
-            .iter()
-            .any(|n| n.starts_with("spikes: pillar up from"))
     );
     // Flying 100 off: the climb.
     let mut w = world(2, [8.5, 64.0, 5.5]);
@@ -2200,4 +2200,66 @@ fn no_drop_climb_or_stand_while_the_dragon_would_knock_the_bot_off() {
         notes(&p)
     );
     assert!(spikes::knock_risk(None).is_none());
+}
+
+#[test]
+fn a_climb_begins_only_with_the_dragon_holding_over_64_off() {
+    // E9's read of race 46038776204 lanes 1, 3 and 4: struck by the charge 80 to 160 ticks after
+    // "sitting-scanning -> charging"; lane 1 began with the dragon sitting at the fountain.
+    for (phase, z, climbs) in [
+        (0, 75.5, true),
+        (6, 105.5, false),
+        (1, 105.5, false),
+        (0, 55.5, false),
+    ] {
+        let mut w = world(2, [8.5, 64.0, 5.5]);
+        water(&mut w);
+        dragon(&mut w, [8.5, 64.0, z], phase);
+        let mut p = Plan::new(Aim::Race);
+        p.spikes_task(&w, 100);
+        let began = notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: pillar up from"));
+        assert_eq!(began, climbs, "phase {phase} at {z}: {:?}", notes(&p));
+    }
+}
+
+#[test]
+fn the_dragon_perching_while_the_bot_is_up_takes_it_down_by_water() {
+    // The descent rule: landing, sitting or charging past KNOCK_NEAR with the bot up a pillar,
+    // down by the clutch off a side now, not on up and not the dig.
+    for phase in [2, 3, 6, 8] {
+        let mut w = world(2, [8.5, 67.0, 5.5]);
+        pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+        water(&mut w);
+        dragon(&mut w, [8.5, 67.0, 50.5], phase);
+        let mut p = Plan::new(Aim::Race);
+        p.spikes.pillars.push(PillarRec {
+            x: 8,
+            z: 5,
+            base: 64,
+        });
+        assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle), "phase {phase}");
+        assert!(
+            notes(&p)
+                .iter()
+                .any(|n| n == "spikes: clutch down from (8, 67, 5)"),
+            "phase {phase}: {:?}",
+            notes(&p)
+        );
+    }
+}
+
+#[test]
+fn a_body_flung_sideways_lands_where_its_fall_takes_it() {
+    // E9's read of race 46038776204 lanes 1 and 4: flung 60 blocks sideways, the pour went to
+    // the column beside the feet, and the body landed far past it.
+    let w = world(2, [20.5, 80.0, 20.5]);
+    let still = spikes::predict_landing(&w, [20.5, 80.0, 20.5], [0.0, -0.5, 0.0]);
+    assert_eq!(still.map(|(c, g, _)| (c, g)), Some(((20, 20), 64.0)));
+    let (col, g, t) =
+        spikes::predict_landing(&w, [20.5, 80.0, 20.5], [1.5, 0.0, 0.0]).expect("lands");
+    assert_eq!(g, 64.0);
+    assert_eq!(col.1, 20);
+    assert!(col.0 > 30, "carried sideways: {col:?} in {t} ticks");
 }
