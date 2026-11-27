@@ -1128,43 +1128,37 @@ fn a_body_flung_sideways_pours_on_the_column_it_will_land_on() {
 }
 
 #[test]
-fn the_waterfall_is_poured_on_the_pillars_top_and_ridden_down() {
-    // The orchestrator's waterfall descent: the dig down was the longest time up high, and every
-    // death of races 4 to 8 was a blow up there and a fall.
-    let mut w = world(2, [8.5, 70.0, 5.5]);
-    pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
-    set(&mut w, (8, 70, 6), BlockKind::EndStone);
-    set(&mut w, (8, 71, 6), BlockKind::EndStone);
-    gone(&mut w);
+fn the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top() {
+    // Race 45916169323 lane 1: a pour on the pillar's top made a waterfall too slow to ride, and
+    // the bot drowned in it. The water goes at the foot before the climb; the way down is a drop.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
     w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
     let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: landing water poured at (9, 64, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Bucket { .. })));
+    // The pillar up, the crystal struck: from the top, off the side over the water.
+    p.spikes.doing = None;
+    pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
+    set(&mut w, (8, 70, 6), BlockKind::EndStone);
+    set(&mut w, (8, 71, 6), BlockKind::EndStone);
+    set(&mut w, (9, 64, 5), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    gone(&mut w);
+    at(&mut w, [8.5, 70.0, 5.5]);
     p.spikes.pillars.push(PillarRec {
         x: 8,
         z: 5,
         base: 64,
     });
-    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
-    assert!(
-        notes(&p)
-            .iter()
-            .any(|n| n == "spikes: waterfall poured at (8, 70, 5)"),
-        "{:?}",
-        notes(&p)
-    );
-    p.spikes_step(&w, 101);
-    assert_eq!(
-        p.take_acts(),
-        vec![Act::Hold { slot: 1 }],
-        "a water bucket to hand"
-    );
-    w.held = 1;
-    p.spikes_step(&w, 102);
-    assert_eq!(p.take_acts(), vec![Act::UseItem], "poured, looking down");
-    set(&mut w, (8, 70, 5), BlockKind::Water);
-    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
-    assert!(p.spikes_step(&w, 103).is_none(), "the pour done");
-    assert_eq!(p.spikes_task(&w, 104), Some(Task::Idle));
+    assert_eq!(p.spikes_task(&w, 200), Some(Task::Idle));
     assert!(
         notes(&p)
             .iter()
@@ -1180,16 +1174,19 @@ fn the_waterfall_is_poured_on_the_pillars_top_and_ridden_down() {
             ..
         })
     ));
-    // Landed beside the pillar at its base: down, the pillar left standing.
+    // Landed in the water: down, and the water taken back.
     p.spikes.doing = None;
     at(&mut w, [9.5, 64.0, 5.5]);
-    p.spikes_task(&w, 200);
+    assert_eq!(p.spikes_task(&w, 300), Some(Task::Idle));
+    let n = notes(&p);
     assert!(
-        notes(&p)
-            .iter()
-            .any(|n| n.starts_with("spikes: waterfall down to")),
-        "{:?}",
-        notes(&p)
+        n.iter().any(|n| n.starts_with("spikes: waterfall down to")),
+        "{n:?}"
+    );
+    assert!(
+        n.iter()
+            .any(|n| n == "spikes: landing water taken back at (9, 64, 5)"),
+        "{n:?}"
     );
     assert!(p.spikes.pillars.is_empty());
     assert_eq!(p.spikes.waterfalls, 1);

@@ -677,6 +677,8 @@ pub struct SpikeState {
     pub dragon_seen: Option<(u64, f64)>,
     /// The pillar column a waterfall is being ridden down beside.
     pub riding: Option<(i32, i32)>,
+    /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
+    pub landings: Vec<((i32, i32), Cell)>,
 }
 
 /// A fall caught with the water bucket (parity e06, E6: a 21-block fall onto water poured while
@@ -722,6 +724,7 @@ impl Default for SpikeState {
             refills: 0,
             dragon_seen: None,
             riding: None,
+            landings: Vec::new(),
         }
     }
 }
@@ -1098,6 +1101,18 @@ pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 2]> {
     })
 }
 
+/// The cell beside a pillar's foot its landing water goes in: open with a full floor at the
+/// foot's height, and open air over it to over the top, so a body stepped off the top falls
+/// straight into it. `None` when no side has one.
+pub fn landing_cell(w: &World, column: (i32, i32), base: i32, top: i32) -> Option<Cell> {
+    Axis::ALL.iter().find_map(|a| {
+        let (dx, dz) = a.step();
+        let (x, z) = (column.0 + dx, column.1 + dz);
+        let clear = (base..=top + 1).all(|y| open(kind(w, (x, y, z))));
+        (clear && full(kind(w, (x, base - 1, z)))).then_some((x, base, z))
+    })
+}
+
 /// Columns round the feet a pool's site is looked for in.
 pub const POOL_SITE: i32 = 3;
 
@@ -1295,6 +1310,34 @@ impl Plan {
             self.spikes.riding = None;
             let p = self.spikes.pillars.remove(i);
             self.spikes.pillars_down += 1;
+            if let Some(j) = self
+                .spikes
+                .landings
+                .iter()
+                .position(|(c, _)| *c == (p.x, p.z))
+            {
+                let (_, l) = self.spikes.landings.remove(j);
+                if kind(w, l) == Some(BlockKind::Water) && craft::count(w, ItemKind::Bucket) > 0 {
+                    self.note(
+                        tick,
+                        format!("spikes: landing water taken back at {l:?}"),
+                        "the bucket filled again".to_owned(),
+                    );
+                    self.spikes.doing = Some(Doing::Bucket {
+                        look: [
+                            f64::from(l.0) + 0.5,
+                            f64::from(l.1) + 0.5,
+                            f64::from(l.2) + 0.5,
+                        ],
+                        item: ItemKind::Bucket,
+                        want: ItemKind::WaterBucket,
+                        count: craft::count(w, ItemKind::WaterBucket) + 1,
+                        until: tick + BUCKET_TICKS,
+                        last: None,
+                        why: "the landing water's take-back".to_owned(),
+                    });
+                }
+            }
             self.note(
                 tick,
                 format!("spikes: waterfall down to {feet:?}"),
@@ -1303,6 +1346,10 @@ impl Plan {
                     p.x, p.z, p.base, self.spikes.waterfalls
                 ),
             );
+            if self.spikes.doing.is_some() {
+                self.retry_at = tick + 1;
+                return Some(Task::Idle);
+            }
         }
         if let Some(t) = self.spikes_water(w, tick, &body, feet, &n) {
             return Some(t);
@@ -1469,6 +1516,32 @@ impl Plan {
                         );
                         return Some(self.spikes_hold(tick));
                     }
+                }
+                // The landing water at the pillar's foot, before the climb: the way down is a
+                // drop into it. Two buckets held (one stays for the clutch), end stone to spare.
+                if !climbing
+                    && craft::count(w, ItemKind::WaterBucket) >= 2
+                    && craft::count(w, PILLAR_ITEM) >= WATERFALL_KEEP
+                    && !self.spikes.landings.iter().any(|(c, _)| *c == column)
+                    && let Some(l) = landing_cell(w, column, feet.1, top)
+                {
+                    self.spikes.landings.push((column, l));
+                    self.spikes_note(
+                        tick,
+                        format!("spikes: landing water poured at {l:?}"),
+                        format!("beside the pillar's foot {feet:?}, the drop from {top}"),
+                    );
+                    self.spikes.doing = Some(Doing::Bucket {
+                        look: [f64::from(l.0) + 0.5, f64::from(l.1), f64::from(l.2) + 0.5],
+                        item: ItemKind::WaterBucket,
+                        want: ItemKind::Bucket,
+                        count: craft::count(w, ItemKind::Bucket) + 1,
+                        until: tick + BUCKET_TICKS,
+                        last: None,
+                        why: "the landing water's pour".to_owned(),
+                    });
+                    self.retry_at = tick + 1;
+                    return Some(Task::Idle);
                 }
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
                 let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
@@ -1942,8 +2015,10 @@ impl Plan {
     ) -> Option<Task> {
         let water = craft::count(w, ItemKind::WaterBucket);
         let empty = craft::count(w, ItemKind::Bucket);
-        // The waterfall: at a recorded pillar's top, the way down asked, two buckets held and
-        // end stone to spare for the pillars to come.
+        // The way down (race 45916169323 lane 1: a pour on the pillar's top made a waterfall too
+        // slow to ride, 10 blocks in 400 ticks, and the bot drowned in it): at the top with the
+        // crystal gone, a step off the side over the landing water poured at the pillar's foot
+        // before the climb, a free fall into it (water at the landing cancels the fall).
         if let Next::DigDown(_) = n
             && body.on_ground
             && let Some(rec) = self
@@ -1952,48 +2027,31 @@ impl Plan {
                 .iter()
                 .find(|r| (r.x, r.z) == (feet.0, feet.2) && feet.1 > r.base + 4)
                 .copied()
-            && craft::count(w, PILLAR_ITEM) >= WATERFALL_KEEP
+            && let Some((_, l)) = self
+                .spikes
+                .landings
+                .iter()
+                .find(|(c, _)| *c == (rec.x, rec.z))
+                .copied()
+            && kind(w, l) == Some(BlockKind::Water)
         {
-            let here = kind(w, feet);
-            if here == Some(BlockKind::Water) {
-                // Off the top into the falling water, on a side with a drop.
-                let side = Axis::ALL.iter().map(|a| a.step()).find(|(dx, dz)| {
-                    let c = (feet.0 + dx, feet.1, feet.2 + dz);
-                    !full(kind(w, c)) && !full(kind(w, (c.0, c.1 - 1, c.2)))
-                });
-                if let Some((dx, dz)) = side {
-                    self.spikes.riding = Some((rec.x, rec.z));
-                    self.spikes.waterfalls += 1;
-                    self.note(
-                        tick,
-                        format!("spikes: waterfall down from {feet:?}"),
-                        format!(
-                            "off its side ({dx}, {dz}); {} waterfalls; health {:?}",
-                            self.spikes.waterfalls, w.player.health
-                        ),
-                    );
-                    self.spikes.doing = Some(Doing::Step {
-                        to: (feet.0 + dx, feet.1, feet.2 + dz),
-                        sneak: false,
-                        until: tick + STEP_TICKS,
-                    });
-                    self.retry_at = tick + 1;
-                    return Some(Task::Idle);
-                }
-            } else if water >= 2 && open(here) {
-                self.spikes_note(
+            let (dx, dz) = (l.0 - rec.x, l.2 - rec.z);
+            let edge = (feet.0 + dx, feet.1, feet.2 + dz);
+            if passable(kind(w, edge)) && passable(kind(w, (edge.0, edge.1 + 1, edge.2))) {
+                self.spikes.riding = Some((rec.x, rec.z));
+                self.spikes.waterfalls += 1;
+                self.note(
                     tick,
-                    format!("spikes: waterfall poured at {feet:?}"),
-                    format!("{water} water buckets held, one kept for the clutch"),
+                    format!("spikes: waterfall down from {feet:?}"),
+                    format!(
+                        "off its side ({dx}, {dz}) into the landing water at {l:?}; {} drops; health {:?}",
+                        self.spikes.waterfalls, w.player.health
+                    ),
                 );
-                self.spikes.doing = Some(Doing::Bucket {
-                    look: [body.pos[0], f64::from(feet.1), body.pos[2]],
-                    item: ItemKind::WaterBucket,
-                    want: ItemKind::Bucket,
-                    count: empty + 1,
-                    until: tick + BUCKET_TICKS,
-                    last: None,
-                    why: "the waterfall's pour".to_owned(),
+                self.spikes.doing = Some(Doing::Step {
+                    to: edge,
+                    sneak: false,
+                    until: tick + STEP_TICKS,
                 });
                 self.retry_at = tick + 1;
                 return Some(Task::Idle);

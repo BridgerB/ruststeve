@@ -247,3 +247,18 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - **The fix:** every refusal is now noted ("no pool: buckets", "no pool: no site" with each axis's first reason, "no pool: no way to its site").
   - The site is looked for within 3 columns (`pool_site`) and walked to ("to the pool site at").
   - Unit test `no_pool_site_says_why`.
+
+## Eleventh race: 45916169323 (dev-end-island, 966d029, development only)
+- **Lane 1:**
+  - The pool was made at (9, 61, 1) and (8, 61, 1) ("water pool at", 3 refills). The bunker's own floor had refused it first, which "no pool: no site" said; the site search found it 1 off at the stair's top.
+  - Then the caged crystal, the waterfall poured, and the ride. The ride went 82 to 72 in 400 ticks in the falling water, the eye under all the way, and the bot drowned (`death.attack.drown`, tick 1,980).
+- **Lane 0:** 1 crystal, then a fall after a blow (the clutch began).
+
+### Wall 17: a waterfall too slow to ride (fixed: a landing pool instead)
+- **The cause:** water's drag holds a body to about 0.03 blocks a tick, and a 23-block ride outlasts the air.
+- **The fix:**
+  - Before the climb, at the pillar's foot, the landing water is poured in the cell beside it with clear air up past the top ("landing water poured at"; two buckets held, one stays for the clutch).
+  - At the top after the strike, the bot steps off that side and falls straight into it ("waterfall down from"; a fall into water does no harm).
+  - Landed ("waterfall down to"), the water is taken back ("landing water taken back at").
+  - The pour on the pillar's top is gone.
+  - Unit test `the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top`.
