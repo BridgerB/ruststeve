@@ -1189,3 +1189,48 @@ fn in_the_bunker_under_a_breath_the_bot_stays_there() {
     let c = p.breath_step(&w, 0).expect("held in the bunker");
     assert!(c.sneak && !c.forward);
 }
+
+#[test]
+fn out_of_cover_at_a_perch_by_a_shaft_up_never_under_a_breath() {
+    // Race 45918669138 lane 1: held covered the whole race, 0 strikes.
+    let roofed = || {
+        let mut w = end_at([12.5, 64.0, 0.5]);
+        for c in [
+            (12, 66, 0),
+            (13, 64, 0),
+            (11, 64, 0),
+            (12, 64, 1),
+            (12, 64, -1),
+        ] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: c,
+                state: state(BlockKind::EndStone),
+            }));
+        }
+        with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+        w
+    };
+    let w = roofed();
+    let mut p = Plan::new(Aim::Race);
+    p.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    p.dragon.climb_out = true;
+    p.step(&w);
+    assert!(
+        p.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Dig { pos, .. } if *pos == world::BlockPos::new(12, 66, 0))),
+        "the roof over the head dug first"
+    );
+    // A breath over the shaft's top: no dig, held in cover.
+    let mut b = roofed();
+    cloud(&mut b, 50, [12.5, 67.0, 0.5], 3.0);
+    let mut q = Plan::new(Aim::Race);
+    q.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    q.dragon.climb_out = true;
+    let c = q.step(&b);
+    assert!(c.sneak && !c.forward, "held in cover");
+    assert!(
+        !q.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "no dig under a breath"
+    );
+}

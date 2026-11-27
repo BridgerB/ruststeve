@@ -1760,6 +1760,14 @@ impl Plan {
                     "dragon: out of cover".to_owned(),
                     format!("at {:?}", w.body.map(|b| cell_of(b.pos))),
                 );
+            } else if let Some(body) = w.body
+                && breathed(&breaths(w), body.pos, 0.0)
+            {
+                // A breath over the shaft's top: stay in cover until it clears.
+                return Controls {
+                    sneak: true,
+                    ..looking_down(w)
+                };
             } else if let Some(body) = w.body {
                 let fc = cell_of(body.pos);
                 let head = [fc[0], fc[1] + 2, fc[2]];

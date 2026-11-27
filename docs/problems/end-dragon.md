@@ -197,7 +197,7 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
     - A bunker not clear of every breath (on the plane and in height) is not gone to; the notch where the bot stands is dug instead.
 - **Wall 20: held in cover while the dragon sat.**
   - Lane 1 was in its notch under the bunker (wall 18), and "end: covered" from an angry enderman ran the whole race: 0 strikes.
-  - **Fix:** a fight walk that fails NoPath in cover while the dragon is grounded climbs out by a shaft straight up: the block over the head dug, a block put under the feet at each jump, until the sky is over the head. Notes: "out by a shaft up", "dragon: out of cover".
+  - **Fix:** a fight walk that fails NoPath in cover while the dragon is grounded climbs out by a shaft straight up: the block over the head dug, a block put under the feet at each jump, until the sky is over the head. Never while a breath lies over the shaft on the plane: it stays in cover until the cloud clears. Notes: "out by a shaft up", "dragon: out of cover". Unit-tested.
 
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
