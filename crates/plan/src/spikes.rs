@@ -892,6 +892,37 @@ pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
     full(under) && (recorded || placed)
 }
 
+/// The feet up on a spike: on its top (`on_spike`), or on its cage's bars or its bedrock.
+pub fn on_spike_top(w: &World, feet: Cell) -> bool {
+    on_spike(w, feet)
+        || matches!(
+            kind(w, (feet.0, feet.1 - 1, feet.2)),
+            Some(BlockKind::IronBars | BlockKind::Bedrock)
+        )
+}
+
+/// Inside a spike's cage with no edge: the bar beside the feet to break, at the feet's height
+/// first and then the head's, on the side facing the island's centre best (race 46070173620:
+/// the crystals_5 stand on the caged [-34, 24] was inside its bars, "no edge over ground" 12 to
+/// 53 times, 6 of 8 dead). `None` with no bar beside.
+pub fn cage_bar(w: &World, feet: Cell) -> Option<Cell> {
+    let facing = |(dx, dz): (i32, i32)| -(dx * feet.0.signum() + dz * feet.2.signum());
+    let mut sides: Vec<(i32, i32)> = Axis::ALL
+        .iter()
+        .map(|a| a.step())
+        .filter(|(dx, dz)| {
+            (0..=1).any(|dy| {
+                kind(w, (feet.0 + dx, feet.1 + dy, feet.2 + dz)) == Some(BlockKind::IronBars)
+            })
+        })
+        .collect();
+    sides.sort_by_key(|d| (-facing(*d), *d));
+    let (dx, dz) = *sides.first()?;
+    (0..=1)
+        .map(|dy| (feet.0 + dx, feet.1 + dy, feet.2 + dz))
+        .find(|c| kind(w, *c) == Some(BlockKind::IronBars))
+}
+
 /// The feet stand on a spike's top: three obsidian under them (the End's platform is one thick).
 pub fn on_spike(w: &World, feet: Cell) -> bool {
     (1..=3).all(|d| kind(w, (feet.0, feet.1 - d, feet.2)) == Some(BlockKind::Obsidian))
@@ -1386,6 +1417,11 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             // the nearest approach (the frontier race 45898928805 lane 1: an enderman's pocket put
             // blocks on the bunker's stair, (12, 60, 0) and (13, 61, 0), and every walk from
             // (13, 59, 0) was refused for 12,000 ticks).
+            // Never a dig-out from a spike's top: its own blocks or its cage's bars are no way out
+            // (race 46070173620: "dig the way out at (-34, 79, 26) … shut in a pocket" in a cage).
+            if on_spike_top(w, feet) {
+                return Next::Wait("stranded on a spike's top with no pillar down".to_owned());
+            }
             let out = spike_for(w, &st.geography, pos)
                 .and_then(|sp| best_approach(w, &sp, body.pos, &[], tick))
                 .and_then(|a| {
@@ -2288,7 +2324,7 @@ impl Plan {
                 // Up a spike's top with no pillar down: never a wait there (race 46059621531, the
                 // crystals_5 resume: 7 of 10 waited "stranded" until a fireball's cloud came):
                 // to its edge over ground and off it onto the clutch.
-                if body.on_ground && on_spike(w, feet) {
+                if body.on_ground && on_spike_top(w, feet) {
                     if let Some(k) = knock_risk(d.as_ref()) {
                         self.spikes_note(
                             tick,
@@ -2329,7 +2365,23 @@ impl Plan {
                             }
                             self.expanded += walk.expanded;
                         }
-                        (false, _) | (true, None) => {}
+                        (true, None) => {
+                            // Caged: out through the bar facing the island's centre best.
+                            if let Some(bar) = cage_bar(w, feet) {
+                                self.spikes_note(
+                                    tick,
+                                    format!("spikes: out of the cage at {bar:?}"),
+                                    format!(
+                                        "{why}; from {feet:?}, the bar toward the island's centre"
+                                    ),
+                                );
+                                let mut dg = Dig::new(w, bar, tick);
+                                dg.drop = None;
+                                dg.others.clear();
+                                return Some(Task::Dig(dg));
+                            }
+                        }
+                        (false, _) => {}
                     }
                     self.spikes_note(
                         tick,
