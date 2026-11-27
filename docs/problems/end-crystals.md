@@ -231,3 +231,19 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - With none, the pool refills one; with no pool, no pillar is climbed.
   - A pool is begun only with both its buckets in hand.
   - Unit test `no_climb_begins_without_a_water_bucket_in_the_hotbar`. E6's sim crystal runs are given a water bucket (fenced E4 in `crates/bot/tests/end_loop.rs`).
+
+## Tenth race: 45912100302 (dev-end-island, e67f786, development only), read at tick ~4,700
+
+### Wall 16: the escape out of water took the bot off its waterfall (fixed)
+- **What happened** (lane 1, ticks 1,220 to 1,340):
+  - After the caged (42, 0) it poured the waterfall at (39, 82, 0) and stepped off (-1, 0).
+  - Mid-ride, at y 77, the always-row "escape-water (trapped in water)" walked it to dry land: (41, 82, 0), the spike's top.
+  - There the pillar's watered top read as no way down: "stranded on a spike's top" from 1,340 to the cap.
+- **The fix:**
+  - While a waterfall is ridden (in its water, not on the ground) the crystals hold the controls ahead of every row ("riding the waterfall"; the same call site as the clutch).
+  - A pillar's top holding water counts as a way back.
+  - Unit test `the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back`.
+- **No pool in race 10, read from the ledger:** lane 1's ledger has no pool note at all. The only chance was tick 680, at the bunker stair's top (11, 60, -2), and the pool was looked for only beside the feet.
+  - **The fix:** every refusal is now noted ("no pool: buckets", "no pool: no site" with each axis's first reason, "no pool: no way to its site").
+  - The site is looked for within 3 columns (`pool_site`) and walked to ("to the pool site at").
+  - Unit test `no_pool_site_says_why`.

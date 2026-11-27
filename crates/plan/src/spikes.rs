@@ -260,6 +260,11 @@ pub fn open(k: Option<BlockKind>) -> bool {
     )
 }
 
+/// A cell a body passes through: open, or water (a waterfall's pour on a pillar's top).
+fn passable(k: Option<BlockKind>) -> bool {
+    open(k) || k == Some(BlockKind::Water)
+}
+
 fn full(k: Option<BlockKind>) -> bool {
     k.and_then(data::generated::shapes::collision) == Some(data::types::Collision::Full)
 }
@@ -857,8 +862,8 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                 (r.x - feet.0).abs() <= SPIKE_SEARCH
                     && (r.z - feet.2).abs() <= SPIKE_SEARCH
                     && feet.1 > r.base
-                    && open(kind(w, (r.x, feet.1, r.z)))
-                    && open(kind(w, (r.x, feet.1 + 1, r.z)))
+                    && passable(kind(w, (r.x, feet.1, r.z)))
+                    && passable(kind(w, (r.x, feet.1 + 1, r.z)))
             })
             .min_by_key(|r| (r.x - feet.0).abs() + (r.z - feet.2).abs())
             .map_or_else(
@@ -1091,6 +1096,64 @@ pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 2]> {
         };
         (ground(c0) && ground(c1) && walled(c0) && walled(c1)).then_some([c0, c1])
     })
+}
+
+/// Columns round the feet a pool's site is looked for in.
+pub const POOL_SITE: i32 = 3;
+
+/// The nearest standable cell within `POOL_SITE` of the feet (a floor under it, room over it)
+/// with a pool's two cells beside it, and those cells.
+pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 2])> {
+    let mut best: Option<(i32, Cell, [Cell; 2])> = None;
+    for dx in -POOL_SITE..=POOL_SITE {
+        for dz in -POOL_SITE..=POOL_SITE {
+            for dy in -1..=1 {
+                let c = (feet.0 + dx, feet.1 + dy, feet.2 + dz);
+                let stands = full(kind(w, (c.0, c.1 - 1, c.2)))
+                    && open(kind(w, c))
+                    && open(kind(w, (c.0, c.1 + 1, c.2)));
+                if !stands {
+                    continue;
+                }
+                if let Some(cells) = pool_cells(w, c) {
+                    let d = dx.abs() + dz.abs() + dy.abs();
+                    if best.is_none_or(|(b, _, _)| d < b) {
+                        best = Some((d, c, cells));
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_, c, cells)| (c, cells))
+}
+
+/// Why no pool fits beside the feet, the first refusal along each axis: for the ledger.
+pub fn pool_refusal(w: &World, feet: Cell) -> String {
+    let (x, y, z) = feet;
+    Axis::ALL
+        .iter()
+        .map(|a| {
+            let (dx, dz) = a.step();
+            let why = [(x + dx, y - 1, z + dz), (x + 2 * dx, y - 1, z + 2 * dz)]
+                .iter()
+                .find_map(|c| {
+                    let k = kind(w, *c);
+                    if k != Some(BlockKind::EndStone) {
+                        return Some(format!("{c:?} is {k:?}"));
+                    }
+                    if !full(kind(w, (c.0, c.1 - 1, c.2))) {
+                        return Some(format!("nothing under {c:?}"));
+                    }
+                    if !open(kind(w, (c.0, c.1 + 1, c.2))) {
+                        return Some(format!("{:?} over {c:?}", kind(w, (c.0, c.1 + 1, c.2))));
+                    }
+                    None
+                })
+                .unwrap_or_else(|| "a side open".to_owned());
+            format!("{a:?}: {why}")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn eye(body: &physics::Body) -> [f64; 3] {
@@ -1626,6 +1689,21 @@ impl Plan {
             pitch: Some(crate::endermen::EYES_DOWN),
             ..Controls::default()
         };
+        // A waterfall ridden: the water carries the body down, and no other row (the escape out
+        // of water) takes it off the fall (race 45912100302 lane 1: "trapped in water" at y 77
+        // walked it back onto the spike's top, stranded to the cap).
+        if self.spikes.riding.is_some()
+            && !body.on_ground
+            && (body.in_water || body.eye_in_water)
+            && self.spikes.clutch.is_none()
+        {
+            self.spikes_note(
+                tick,
+                "spikes: riding the waterfall".to_owned(),
+                format!("at {:?}", path::feet_cell(body.pos)),
+            );
+            return Some(down);
+        }
         let ground = ground_under(w, body.pos);
         let height = ground.map(|g| body.pos[1] - g);
         let Some(mut c) = self.spikes.clutch.take() else {
@@ -1931,13 +2009,50 @@ impl Plan {
         {
             // A pool is begun only with both its sources in hand: one bucket alone makes no
             // infinite source, and would be lost.
-            let pool = self
-                .spikes
-                .pool
-                .or_else(|| (water >= 2).then(|| pool_cells(w, feet)).flatten());
-            if let Some([c0, c1]) = pool {
-                self.spikes.pool = Some([c0, c1]);
-                self.spikes.pool_stand.get_or_insert(feet);
+            if self.spikes.pool.is_none() {
+                // Race 45912100302 wrote nothing of why no pool was made: every refusal says so.
+                if water < 2 {
+                    self.spikes_note(
+                        tick,
+                        "spikes: no pool: buckets".to_owned(),
+                        format!("{water} water buckets held, two wanted, at {feet:?}"),
+                    );
+                } else {
+                    match pool_site(w, feet) {
+                        Some((stand, cells)) if stand == feet => {
+                            self.spikes.pool = Some(cells);
+                            self.spikes.pool_stand = Some(stand);
+                        }
+                        Some((stand, _)) => {
+                            let mut walk =
+                                Walk::new(stand, Goal::Block { pos: stand }, Arrive::Goal, tick);
+                            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                                self.spikes_note(
+                                    tick,
+                                    format!("spikes: to the pool site at {stand:?}"),
+                                    format!("from {feet:?}, the bunker at {b:?}"),
+                                );
+                                return Some(Task::Explore(walk));
+                            }
+                            self.expanded += walk.expanded;
+                            self.spikes_note(
+                                tick,
+                                "spikes: no pool: no way to its site".to_owned(),
+                                format!("{stand:?} from {feet:?}"),
+                            );
+                        }
+                        None => self.spikes_note(
+                            tick,
+                            "spikes: no pool: no site".to_owned(),
+                            format!(
+                                "no two walled end stone cells within {POOL_SITE} of {feet:?}; {}",
+                                pool_refusal(w, feet)
+                            ),
+                        ),
+                    }
+                }
+            }
+            if let Some([c0, c1]) = self.spikes.pool {
                 for c in [c0, c1] {
                     if full(kind(w, c)) {
                         self.spikes_note(
