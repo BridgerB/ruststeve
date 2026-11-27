@@ -1384,3 +1384,40 @@ fn the_first_surface_stock_stops_at_enough_for_the_tallest_pillar() {
     assert!(noted(&p, "end: surface stock over"), "{:?}", notes(&p));
     assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
 }
+
+#[test]
+fn surface_mining_notes_every_dig_and_keeps_its_pit_one_deep() {
+    // Race 45988967677: 117 surface digs began with no reason; lanes 1 and 5 stalled in pits.
+    let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    for _ in 0..3 {
+        p.task = plan::Task::Idle;
+        let _ = p.end_task(&w, 0);
+    }
+    let digs = p
+        .events
+        .iter()
+        .filter(|e| e.what.starts_with("end: surface end stone at"))
+        .count();
+    assert_eq!(digs, 3, "{:?}", notes(&p));
+    // Down one in the pit (the mining began at 64): only the cells beside the feet at their height.
+    assert_eq!(
+        plan::end::surface_cell_at(&w, (20, 63, 0), false).map(|c| c.1),
+        Some(63)
+    );
+    let mut w2 = world(4, 0..=7, [20.5, 63.0, 0.5]);
+    for c in [
+        (20, 63, 0),
+        (21, 63, 0),
+        (19, 63, 0),
+        (20, 63, 1),
+        (20, 63, -1),
+    ] {
+        set(&mut w2, c, BlockKind::Air);
+    }
+    // Its walls at 63 gone, the floor at 62 beside is never dug below the level.
+    assert_eq!(plan::end::surface_cell_at(&w2, (20, 63, 0), false), None);
+}
