@@ -471,6 +471,9 @@ pub fn mine_ground(w: &World, feet: Cell, tried: &[Cell]) -> Option<Cell> {
 /// No full block at the feet's height this near: the true ground, where a dig one under may go.
 pub const PIT_LOOK: i32 = 2;
 
+/// Runs of wooden pickaxes at a placed table at most (the frontier bot's wood makes two or three).
+pub const WOOD_RUNS: u32 = 3;
+
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -784,6 +787,9 @@ pub struct EndState {
     /// The cell of the surface dig in hand (cut for a cloud on the feet).
     #[serde(default)]
     pub surface_dig: Option<Cell>,
+    /// Wooden pickaxe runs begun.
+    #[serde(default)]
+    pub wood_runs: u32,
     /// Mining ground walked to, the newest last.
     #[serde(default)]
     pub mine_tried: Vec<Cell>,
@@ -1710,6 +1716,12 @@ impl Plan {
             return None;
         }
         self.end.out_runs = 0;
+        // Wooden pickaxes from the wood carried, under the reserve (race 46071506005 lanes 2 and
+        // 3 down to 2 and 9 uses at about 16,800 with a table, a log, 6 planks and 4 sticks held:
+        // wood mines end stone; the stone swords do not).
+        if let Some(t) = self.end_wood_picks(w, feet, tick) {
+            return Some(t);
+        }
         let stone = pillar_blocks(w);
         // What the next pillar needs, no more (race 45994686575 lane 5: three stone pickaxes worn
         // out by 49,600, 44 held against the last pillar's 49, the End has no wood): at most the
@@ -1760,6 +1772,51 @@ impl Plan {
             self.end.handoffs += 1;
         }
         next
+    }
+
+    /// A run of wooden pickaxes at a crafting table placed where the bot stands (way home's
+    /// `TRIP_WOOD_STEPS`; `arrival_table` places the carried one and takes it back after), begun
+    /// with the pickaxe uses under `PICK_RESERVE`, two or more logs and planks held, on the ground
+    /// under the sky with no cloud near and the dragon in a lull; at most `WOOD_RUNS`. Noted.
+    fn end_wood_picks(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
+        let picking = self.base.steps == crate::home::TRIP_WOOD_STEPS.to_vec() && !self.base.over;
+        if !picking {
+            let uses = crate::endermen::pickaxe_uses_left(w);
+            let wood = crate::base::logs_held(w) + crate::base::planks_held(w);
+            let body = w.body?;
+            let calm = world::stage::open_sky(w)
+                && body.on_ground
+                && cloud_on(w, &[feet]).is_none()
+                && fire_near(w, feet, STAIR_CLEAR).is_none()
+                && lull(w);
+            if uses >= PICK_RESERVE || wood < 2 || self.end.wood_runs >= WOOD_RUNS || !calm {
+                return None;
+            }
+            self.end.wood_runs += 1;
+            self.base = crate::base::BaseState {
+                steps: crate::home::TRIP_WOOD_STEPS.to_vec(),
+                ..crate::base::BaseState::default()
+            };
+            self.note(
+                tick,
+                format!("end: wooden pickaxes at a placed table ({})", self.end.wood_runs),
+                format!(
+                    "pickaxe uses {uses} under {PICK_RESERVE}; {} logs, {} planks, {} sticks, {} tables",
+                    crate::base::logs_held(w),
+                    crate::base::planks_held(w),
+                    craft::count(w, ItemKind::Stick),
+                    craft::count(w, ItemKind::CraftingTable)
+                ),
+            );
+        }
+        let running = self.base.steps == crate::home::TRIP_WOOD_STEPS.to_vec() && !self.base.over;
+        if let Some(t) = self.arrival_table(w, tick, running) {
+            return Some(t);
+        }
+        if running {
+            return self.base_task(w, tick);
+        }
+        None
     }
 
     /// Up out of a mining pit onto the flat at `level`: a walk to a standable cell there beside.
