@@ -366,3 +366,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The landing water from another bucket:**
   - The landing pour uses a water bucket other than the clutch's (the hotbar's highest water slot): another hotbar one, else one from the main slots swapped into a hotbar slot that is not the clutch's (`pour_hold`).
   - So the clutch's stays in the hotbar, with no "no climb: no water" pass after the pour (race 45942992471 lane 1 lost 40 ticks to it).
+
+### Wall 24: the dig could not beat the fireball (frontier race 45947478869 lane 1; fixed)
+- **What happened:**
+  - The climb began at tick 13,160 with the dragon 93 off in phase 0. The strafe began at 13,280 with the bot at y 70; it climbed on through.
+  - At 13,320 a fireball 58 off: "climb stopped by a fireball", "down from a fireball", the dig at (39, 73, 0), with no landing water on that pillar ("no side of the foot with a floor and clear air").
+  - The cloud came 40 ticks later, at 13,360, with one block dug. E5's dodge found "no dodge cell" up there but did not pre-empt my rule. My rule fired in time; its way down was too slow.
+- **The fix:**
+  - A strafe within 64 now counts as a fireball for this rule, and stops a climb.
+  - With no landing water, the bot drops off a side that falls clear, holding the clutch's bucket in the hotbar ("drop with the clutch from"): a fall of about 2 s that the clutch catches (E6's window, race 16's 5 of 5), where the dig is a block every 40 ticks.
+  - The dig stays only for a bot with no bucket in the hotbar.
+  - Unit test `a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down`, extended.

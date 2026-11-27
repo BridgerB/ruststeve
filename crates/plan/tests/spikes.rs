@@ -1515,14 +1515,50 @@ fn a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down() {
         z: 5,
         base: 64,
     });
+    // Frontier race 45947478869 lane 1: the dig down, a block every 40 ticks, could not beat the
+    // fireball. Off the side onto the clutch instead.
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: drop with the clutch from (8, 67, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(
+        p.spikes.doing,
+        Some(spikes::Doing::Step { sneak: false, .. })
+    ));
+    // No water bucket in the hotbar: the dig, the only way left.
+    w.inventory.slots.remove(&44);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
     match p.spikes_task(&w, 100) {
         Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
         t => panic!("{t:?} {:?}", notes(&p)),
     }
+    // The strafe within 64 with no fireball yet: the same drop.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    water(&mut w);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    dragon(&mut w, [8.5, 80.0, 50.5], 1);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
     assert!(
         notes(&p)
             .iter()
-            .any(|n| n == "spikes: down from a fireball at (8, 67, 5)")
+            .any(|n| n == "spikes: drop with the clutch from (8, 67, 5)"),
+        "{:?}",
+        notes(&p)
     );
 }
 

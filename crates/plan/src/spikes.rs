@@ -750,6 +750,8 @@ pub struct SpikeState {
     pub dragon_seen: Option<(u64, f64)>,
     /// The pillar column a waterfall is being ridden down beside.
     pub riding: Option<(i32, i32)>,
+    /// Deliberate drops off a pillar onto the clutch, from a fireball or a strafe.
+    pub clutch_drops: u32,
     /// The dig-out's start (tick, blocks from its target) for its progress invariant, and the
     /// tick until which a failed one stays off.
     pub dig_out_since: Option<(u64, f64)>,
@@ -811,6 +813,7 @@ impl Default for SpikeState {
             riding: None,
             landings: Vec::new(),
             dig_out_since: None,
+            clutch_drops: 0,
             dig_out_off: 0,
         }
     }
@@ -1547,9 +1550,14 @@ impl Plan {
         // read, DragonFireball.onHit: its cloud goes on the first living entity within 4 of the
         // impact, walls or not; up high there is no room to dodge). Into the landing water when
         // it is poured and the feet are at the top, else the dig.
+        // A strafe (phase 1) within 64 counts the same: it fires (frontier race 45947478869 lane
+        // 1: the strafe began with the bot climbing at y 70, the fireball came at 74, and the
+        // dig down, a block every 40 ticks, could not beat it; dead in the cloud).
+        let strafing = d.is_some_and(|d| d.phase == Some(STRAFE_PHASE) && d.dist <= THREAT_NEAR);
         if body.on_ground
             && on_pillar(w, feet, &self.spikes.pillars)
-            && let Some(fb) = fireball_near(w, body.pos)
+            && let Some(fb) =
+                fireball_near(w, body.pos).or_else(|| strafing.then(|| d.map_or(0.0, |d| d.dist)))
         {
             let rec = self
                 .spikes
@@ -1587,6 +1595,39 @@ impl Plan {
                     self.retry_at = tick + 1;
                     return Some(Task::Idle);
                 }
+            }
+            // No landing water: off the pillar's side with the clutch's bucket in the hotbar,
+            // a fall in about 2 s the clutch catches (E6's window), where the dig is a block
+            // every 40 ticks.
+            let clutch = w
+                .inventory
+                .slots
+                .iter()
+                .any(|(sl, (k, _))| (36..=44).contains(sl) && *k == ItemKind::WaterBucket);
+            let side = Axis::ALL.iter().map(|a| a.step()).find(|(dx, dz)| {
+                let c = (feet.0 + dx, feet.1, feet.2 + dz);
+                passable(kind(w, c))
+                    && passable(kind(w, (c.0, c.1 + 1, c.2)))
+                    && open(kind(w, (c.0, c.1 - 1, c.2)))
+            });
+            if clutch && let Some((dx, dz)) = side {
+                let edge = (feet.0 + dx, feet.1, feet.2 + dz);
+                self.spikes.clutch_drops += 1;
+                self.note(
+                    tick,
+                    format!("spikes: drop with the clutch from {feet:?}"),
+                    format!(
+                        "a fireball or the strafe {fb:.0} off; off the side ({dx}, {dz}); {} drops",
+                        self.spikes.clutch_drops
+                    ),
+                );
+                self.spikes.doing = Some(Doing::Step {
+                    to: edge,
+                    sneak: false,
+                    until: tick + STEP_TICKS,
+                });
+                self.retry_at = tick + 1;
+                return Some(Task::Idle);
             }
             let c = (feet.0, feet.1 - 1, feet.2);
             self.spikes_note(
@@ -2932,8 +2973,12 @@ impl Plan {
             );
             return None;
         }
-        // A fireball near: the climb stops, and the planner takes the bot down (spikes_task).
-        if let Some(fb) = fireball_near(w, body.pos) {
+        // A fireball near, or the strafe within 64: the climb stops, and the planner takes the
+        // bot down (spikes_task).
+        let strafe = dragon_near(w, body.pos)
+            .filter(|d| d.phase == Some(STRAFE_PHASE) && d.dist <= THREAT_NEAR)
+            .map(|d| d.dist);
+        if let Some(fb) = fireball_near(w, body.pos).or(strafe) {
             self.note(
                 tick,
                 format!("spikes: climb stopped by a fireball at {feet:?}"),
