@@ -343,3 +343,11 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 - **The strafe was not held.** Each strafe ended by firing within 100 to 400 ticks of the bot in sight: at 1,580, 1,700, 2,340 to 2,540, 4,600 to 4,940, 5,340 to 5,640 and 6,040 to 6,300, each with its fireball sound, the bot paced about 40 from the fountain.
 - The idle was the crystals' "spikes: no climb: too few blocks (1 end stone held, 27 wanted)" (E4) and "end: stock paused for a strafe" (E3).
 - **Wall 37: the pace took the bot from the work.** In sight with a task in hand, the task now goes on through a strafe. The dodge begins when the fire is due (`fire_imminent`), and only a bot with nothing in hand is paced.
+
+### Frontier race 45978279345 (b1acf60, 8 lanes, the first with no notches): 0/8, all dead of breath, 0 crystals struck, 1.38 breath hits per 1,000 ticks
+- **Wall 38: no block to rise on.** Five bots (lanes 0, 1, 3, 5, 6) died between ticks 820 and 1,840 on or by the bunker's stair, (13, 59, 0) or (10, 59, 3). E3 was opening the bunker and E4 digging "the way out … shut in a pocket", and the bots held 0 to 3 end stone.
+  - "fireball: no dodge cell …; risen a block at a jump" was noted, but `rise_step` needs a block under the feet, so it did nothing.
+  - Then the walk out of the cloud failed `NoPath` and the cloud was on them.
+  - **Fix:** with no dodge cell and no block held, the wall toward the open side is dug ("fireball: no block to rise on, the wall dug at …"). That opens a way and gives a block.
+  - The root is the bunker dug with 0 end stone held and the stair shut during the open (E3's and E4's).
+- Lane 4 lived to 22,460 (27 or more dodges, 38 breath events, 2 crystals struck). Lane 7 died at 5,760 walking into the bunker under a cloud ("breath: into the bunker", the walk `NoPath`). Lane 2 died digging surface end stone in the open (E3's restock).

@@ -2066,3 +2066,34 @@ fn in_sight_in_a_strafe_the_task_in_hand_goes_on_and_only_idle_is_paced() {
             .any(|e| e.what.starts_with("fireball: dodge to"))
     );
 }
+
+#[test]
+fn with_no_way_out_and_no_block_the_wall_toward_the_open_is_dug() {
+    // Frontier race 45978279345: five bots on the bunker's stair with no block to rise on,
+    // "risen a block at a jump" and never risen; the cloud was put on them.
+    let feet = [12.5, 61.0, 0.5];
+    let mut w = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    for y in [61, 62, 63] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    w.inventory.slots.clear();
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "fireball: no block to rise on, the wall dug at [12, 61, 1]"),
+        "{:?}",
+        p.events_since(0)
+    );
+    assert!(p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
+}

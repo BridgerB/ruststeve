@@ -1960,6 +1960,9 @@ pub struct DragonState {
     /// The cell out of a breath pressed straight on toward when no walk planned (wall 36).
     #[serde(default)]
     pub breath_straight: Option<[i32; 3]>,
+    /// The wall dug for a block or a way when no dodge cell was had and no block held.
+    #[serde(default)]
+    pub dodge_wall: Option<[i32; 3]>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -3340,9 +3343,25 @@ impl Plan {
         let Some(c) = self.dragon.dodge_to else {
             // No way out on foot under the open sky (a pit, the bunker's shaft with its stair shut:
             // frontier race 45969992660 lane 2): up a block at a jump, at most `DODGE_RISES`.
+            // With no block to rise on (frontier race 45978279345: five bots on the bunker's stair
+            // with 0 to 3 end stone, "risen a block at a jump" and never risen): the wall toward the
+            // open side dug, which opens a way and gives the block.
+            if crate::spikes::pillar_item(w).is_none() {
+                let side = [feet[0] - dir[1] * 6.0, feet[1], feet[2] + dir[0] * 6.0];
+                if let Some(n) = wall_toward(w, feet, cell_of(side)) {
+                    if self.dragon.dodge_wall != Some(n) {
+                        self.dragon.dodge_wall = Some(n);
+                        self.note(
+                            tick,
+                            format!("fireball: no block to rise on, the wall dug at {n:?}"),
+                            format!("from {:?}; toward the open side", cell_of(feet)),
+                        );
+                    }
+                    return self.charge_dig_step(w, tick, n);
+                }
+            }
             if let Some(from) = self.dragon.dodge_from
                 && cell_of(feet)[1] < from[1] + DODGE_RISES
-                && w.body.is_some()
             {
                 return Some(self.rise_step(w, tick, body));
             }
