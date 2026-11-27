@@ -382,6 +382,13 @@ pub const SURFACE_STEP: f64 = 4.0;
 /// or one under an open cell beside them (its top face exposed), never the cell under the feet,
 /// and with no void column within `VOID_KEEP` of it.
 pub fn surface_cell(w: &World, feet: Cell) -> Option<Cell> {
+    surface_cell_at(w, feet, true)
+}
+
+/// `surface_cell`, the cells one under an open cell beside the feet only with `under` (never once
+/// the feet are below where the mining began: the pit stays one deep and walkable, race
+/// 45988967677 lanes 1 and 5 stalled in surface-mining pits).
+pub fn surface_cell_at(w: &World, feet: Cell, under_ok: bool) -> Option<Cell> {
     let near_void = |c: Cell| {
         (-VOID_KEEP..=VOID_KEEP)
             .any(|dx| (-VOID_KEEP..=VOID_KEEP).any(|dz| void_column(w, (c.0 + dx, c.1, c.2 + dz))))
@@ -393,7 +400,8 @@ pub fn surface_cell(w: &World, feet: Cell) -> Option<Cell> {
             let under = (beside.0, beside.1 - 1, beside.2);
             [
                 (kind(w, beside) == Some(BlockKind::EndStone)).then_some(beside),
-                (open(w, beside) && kind(w, under) == Some(BlockKind::EndStone)).then_some(under),
+                (under_ok && open(w, beside) && kind(w, under) == Some(BlockKind::EndStone))
+                    .then_some(under),
             ]
         })
         .flatten()
@@ -646,6 +654,10 @@ pub struct EndState {
     pub handed_back: bool,
     #[serde(default)]
     pub restocks: u32,
+    /// The feet's height where this surface mining began: no cell under one beside the feet once
+    /// they are below it.
+    #[serde(default)]
+    pub surface_y: Option<i32>,
     /// The surface stock before the crystals is over (the target held, or none in reach).
     #[serde(default)]
     pub open_stock_over: bool,
@@ -1413,21 +1425,26 @@ impl Plan {
     /// edge. With none, a short walk toward the fountain over the island's top.
     fn surface_mine(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
         let stone = craft::count(w, ItemKind::EndStone);
-        if let Some(c) = surface_cell(w, feet).filter(|c| !self.refused_now(*c, tick)) {
+        let level = *self.end.surface_y.get_or_insert(feet.1);
+        if let Some(c) =
+            surface_cell_at(w, feet, feet.1 >= level).filter(|c| !self.refused_now(*c, tick))
+        {
             self.end.surface_walks = 0;
             self.end.surface_digs += 1;
-            if self.end.surface_digs % 8 == 1 {
-                self.note(
-                    tick,
-                    format!("end: surface end stone at {c:?}"),
-                    format!(
-                        "{stone} held, {STOCK_ENOUGH} wanted for the crystals; dig {} in the open",
-                        self.end.surface_digs
-                    ),
-                );
-            }
+            // Every dig its reason (race 45988967677: 117 of its digs began with none, the
+            // coverage row's "tasks with a reason" 620/1500).
+            self.note(
+                tick,
+                format!("end: surface end stone at {c:?}"),
+                format!(
+                    "{stone} held, {STOCK_ENOUGH} wanted for the crystals; dig {} in the open",
+                    self.end.surface_digs
+                ),
+            );
             return Some(Task::Dig(Dig::new(w, c, tick)));
         }
+        // None in reach: the next ground is the mining's level again.
+        self.end.surface_y = None;
         // None in reach: a few cells on toward the fountain, the island's middle.
         self.end.surface_walks += 1;
         if self.end.surface_walks > SURFACE_WALKS {
