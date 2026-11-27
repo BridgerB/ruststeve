@@ -1453,9 +1453,14 @@ pub struct DragonState {
     pub ender_noted: Option<String>,
     #[serde(default)]
     pub ender_noted_at: u64,
-    /// Down a notch from a breath.
+    /// Down a notch from a breath, and from an enderman.
     #[serde(default)]
     pub breath_notch: bool,
+    #[serde(default)]
+    pub ender_notch: bool,
+    /// The notch's dig failed: crouched where the feet are, no dig tried again.
+    #[serde(default)]
+    pub notch_failed: bool,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -2351,6 +2356,10 @@ impl Plan {
         if self.dragon.notch_from.is_none() {
             self.dragon.notch_from = Some(fc);
             self.dragon.roof_tries = 0;
+            self.dragon.notch_failed = false;
+        }
+        if self.dragon.notch_failed {
+            return crouch;
         }
         let from = self.dragon.notch_from.unwrap_or(fc);
         if fc[1] > from[1] - 2 && body.on_ground && notch_diggable(w, fc) {
@@ -2507,6 +2516,10 @@ impl Plan {
                     "crouched where the feet are".to_owned(),
                 );
                 self.dragon.notch_step = None;
+                // Never the same failed dig again each tick (race 45913263506 lane 2: a wall cell
+                // in water, "failed: Gone" 289 times while a fireball's cloud burned it).
+                self.dragon.breath_wall = None;
+                self.dragon.notch_failed = true;
             }
             self.dragon.charge_dig = None;
         }
@@ -2574,7 +2587,17 @@ impl Plan {
     pub fn end_enderman_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         let Some(id) = crate::endermen::angry(w) else {
             self.dragon.ender_walk = None;
-            return None;
+            // Down a notch from an enderman: out once it is calm, by the roof and the step.
+            if self.dragon.ender_notch {
+                self.dragon.ender_notch = false;
+                self.note(
+                    tick,
+                    "end: out of the enderman's notch".to_owned(),
+                    "it is calm or gone".to_owned(),
+                );
+                self.notch_leave(w);
+            }
+            return self.notch_exit_step(w, tick);
         };
         let body = w.body?;
         // E3's and E4's own answers first, as inside `ender_threat`: covered (the bunker, a
@@ -2639,6 +2662,24 @@ impl Plan {
                 c.pitch = Some(90.0);
             }
             return Some(c);
+        }
+        // No bunker near: down a notch two deep where the feet are, roofed, which it can neither
+        // enter nor see into (race 45913296602 lane 1: fought in the open, 7 a blow, dead at tick
+        // 260 with the enderman at 13.6). A fight in the open is lost: 40 health against 6 a
+        // strike, 7 a blow every second.
+        let crouch = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        if body.on_ground || self.dragon.ender_notch {
+            if !self.dragon.ender_notch {
+                self.dragon.ender_notch = true;
+                self.dragon.notch_from = None;
+            }
+            self.ender_note(tick, id, "a notch down, no bunker near");
+            return Some(self.notch_dig_step(w, tick, crouch, "enderman"));
         }
         if !above {
             self.ender_note(
