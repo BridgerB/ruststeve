@@ -659,6 +659,11 @@ pub const DODGE_AIM: f64 = 6.0;
 /// twice the farthest cell is no dodge: the fireball flies about 20 to 40 ticks).
 pub const DODGE_NODES: u32 = 800;
 pub const DODGE_STEPS: usize = 16;
+/// Blocks off sideways a charge or the body's knock is dodged to (wall 41, race 46038776204 lane
+/// 6: a 6-cell step on a charge's line, knocked 70 off the island). The wing parts ride about 4.5
+/// out from the body, 4 across, and knock what is in their boxes grown by 4 (`EnderDragon`): about
+/// 10.5 each side of its line, and a margin.
+pub const CHARGE_SPAN: (i32, i32) = (12, 16);
 /// Heights off the feet a dodge cell is looked for at, nearest first: up to 4 (from the bunker's
 /// stair, 3 under the ground: frontier race 45964846590, "no dodge cell from [13, 59, 0]").
 /// Blocks a bot with no dodge cell rises out of a pit or a shaft at most.
@@ -701,6 +706,9 @@ pub const HEAL_NOTE_TICKS: u64 = 200;
 pub const MEAL_CLEAR: f64 = 40.0;
 /// Ticks between the checks of a dodge cell from where the bot stands as the dragon comes down.
 pub const READY_CHECK_TICKS: u64 = 20;
+/// Blocks from the fountain within which a bot not fighting paces while the dragon scans (the
+/// charge looks for a player near it).
+pub const SCAN_PACE_NEAR: f64 = 48.0;
 
 /// The nearest standing crystal's distance from `p`, if any is shown.
 pub fn nearest_crystal(w: &World, p: [f64; 3]) -> Option<f64> {
@@ -865,6 +873,21 @@ pub fn dodge_cell(
     banned: &[(i32, i32)],
     prefer: Option<f64>,
 ) -> Option<[i32; 3]> {
+    dodge_cell_within(w, from, dir, dragon, banned, prefer, (DODGE_MIN, DODGE_MAX))
+}
+
+/// `dodge_cell` with the blocks off sideways `span` (least, most): a charge's and the body's knock
+/// want `CHARGE_SPAN` (wall 41).
+pub fn dodge_cell_within(
+    w: &World,
+    from: [i32; 3],
+    dir: [f64; 2],
+    dragon: Option<[f64; 3]>,
+    banned: &[(i32, i32)],
+    prefer: Option<f64>,
+    span: (i32, i32),
+) -> Option<[i32; 3]> {
+    let steps = DODGE_STEPS.max(usize::try_from(span.1 * 2).unwrap_or(DODGE_STEPS));
     let perp = [-dir[1], dir[0]];
     let (cx, cz) = (f64::from(from[0]) + 0.5, f64::from(from[2]) + 0.5);
     let away = dragon.is_some_and(|d| (d[0] - cx) * perp[0] + (d[2] - cz) * perp[1] > 0.0);
@@ -906,7 +929,7 @@ pub fn dodge_cell(
             DODGE_NODES,
         );
         matches!(r.status, crate::path::Status::Found)
-            && r.waypoints.len() <= DODGE_STEPS
+            && r.waypoints.len() <= steps
             && r.waypoints.iter().all(|p| {
                 // A cloud already on the start is walked out of; any other is kept off the way.
                 !clouds.iter().any(|b| {
@@ -928,7 +951,7 @@ pub fn dodge_cell(
         })
         .collect();
     dirs.iter().find_map(|d| {
-        (DODGE_MIN..=DODGE_MAX).find_map(|k| {
+        (span.0..=span.1).find_map(|k| {
             let k = f64::from(k);
             let (x, z) = (
                 (cx + d[0] * k).floor() as i32,
@@ -3007,8 +3030,11 @@ impl Plan {
             self.dragon.unseen_since = None;
             self.dragon.unseen_noted = false;
             self.dragon.unseen_rise_from = None;
-            self.dragon.pace_to = None;
-            self.dragon.pace_walk = None;
+            // The scan's pace (`charge_ready_step`) keeps its leg.
+            if !view(w).is_some_and(|(_, v)| v.phase() == Some(Phase::SittingScanning)) {
+                self.dragon.pace_to = None;
+                self.dragon.pace_walk = None;
+            }
             if self.dragon.charging {
                 // Stayed in until no cloud lies within reach.
                 if breathed(&breaths(w), body.pos, 0.0) {
@@ -3351,7 +3377,13 @@ impl Plan {
             yaw: f64::from(w.player.yaw),
             ..Controls::default()
         };
-        Some(Some(self.pace_step(w, tick, body, stand)))
+        Some(Some(self.pace_step(
+            w,
+            tick,
+            body,
+            stand,
+            (DODGE_MIN, DODGE_MAX),
+        )))
     }
 
     /// One tick of the answer to a dragon fireball in flight aimed near the bot: a walk on open
@@ -3450,7 +3482,20 @@ impl Plan {
             });
             self.dragon.pace_to = None;
             self.dragon.pace_walk = None;
-            let to = dodge_cell(w, from, dir, view(w).map(|(_, v)| v.pos), &banned, prefer);
+            let span = if matches!(id, CHARGE | KNOCK) {
+                CHARGE_SPAN
+            } else {
+                (DODGE_MIN, DODGE_MAX)
+            };
+            let to = dodge_cell_within(
+                w,
+                from,
+                dir,
+                view(w).map(|(_, v)| v.pos),
+                &banned,
+                prefer,
+                span,
+            );
             self.dragon.dodge_to = to;
             let eta = (along / FIREBALL_SPEED).ceil();
             match to {
@@ -3502,13 +3547,19 @@ impl Plan {
         {
             self.dragon.dodge_at = tick;
             let banned = self.bunker_columns();
-            if let Some(c) = dodge_cell(
+            let span = if matches!(self.dragon.dodge_id, Some(CHARGE | KNOCK)) {
+                CHARGE_SPAN
+            } else {
+                (DODGE_MIN, DODGE_MAX)
+            };
+            if let Some(c) = dodge_cell_within(
                 w,
                 cell_of(feet),
                 dir,
                 view(w).map(|(_, v)| v.pos),
                 &banned,
                 None,
+                span,
             ) {
                 self.dragon.dodge_to = Some(c);
                 self.dragon.dodges += 1;
@@ -3626,6 +3677,7 @@ impl Plan {
         tick: u64,
         body: physics::Body,
         stand: Controls,
+        span: (i32, i32),
     ) -> Controls {
         let feet = body.pos;
         let fc = cell_of(feet);
@@ -3649,13 +3701,14 @@ impl Plan {
                 1.0
             };
             let banned = self.bunker_columns();
-            let Some(to) = dodge_cell(
+            let Some(to) = dodge_cell_within(
                 w,
                 fc,
                 [bx / len, bz / len],
                 Some(v.pos),
                 &banned,
                 Some(self.dragon.pace_side),
+                span,
             ) else {
                 self.dragon.pace_to = None;
                 return self.strafe_stood(tick, fc, stand);
@@ -4342,8 +4395,16 @@ impl Plan {
             let to = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
             let d = to[0].hypot(to[1]).max(1e-6);
             let banned = self.bunker_columns();
-            self.dragon.ready =
-                dodge_cell(w, fc, [to[0] / d, to[1] / d], Some(v.pos), &banned, None).is_some();
+            self.dragon.ready = dodge_cell_within(
+                w,
+                fc,
+                [to[0] / d, to[1] / d],
+                Some(v.pos),
+                &banned,
+                None,
+                CHARGE_SPAN,
+            )
+            .is_some();
             if !self.dragon.ready && self.dragon.ready_noted != Some(fc) {
                 self.dragon.ready_noted = Some(fc);
                 self.note(
@@ -4354,6 +4415,15 @@ impl Plan {
             }
         }
         if self.dragon.ready {
+            // Scanning for a charge: already on the move sideways in legs the charge's sweep
+            // cannot follow (wall 41: walking 12 takes about 55 ticks, the charge about 20).
+            if v.phase() == Some(Phase::SittingScanning) && from_fountain(feet) <= SCAN_PACE_NEAR {
+                let stand = Controls {
+                    yaw: f64::from(w.player.yaw),
+                    ..Controls::default()
+                };
+                return Some(self.pace_step(w, tick, body, stand, CHARGE_SPAN));
+            }
             return None;
         }
         // A short drop beside (a step, a low pillar): off it.

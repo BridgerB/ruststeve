@@ -386,3 +386,8 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
     - Up a crystal's pillar or spike it is E4's. Noted "charge: no dodge from … with the dragon coming down".
 - **Lane 8:** "fireball: no dodge cell from [34, 55, 53] (ticks 58)": risen out of a one-deep pit, still under the aim, no new choice. Then a meal was begun in the cloud.
   - **Fix:** the dodge cell is chosen again after a rise and every `DODGE_RETRY` (10) ticks while none is had. No meal starts or goes on with a cloud on the feet or within reach (`dragon_holds_meal`).
+- **Wall 41: the charge dodge was inside the wings' sweep** (race 46038776204 lane 6). At (24, 60, 3), 24 from the fountain: sitting-scanning at 36,620, charging at 36,720, "charge: dodge to [23, 62, 9] (ticks 25)" (6 cells), and at 36,740 knocked to (93, 99, 40), off the island.
+  - The wing parts ride about 4.5 out from the body, 4 across, and knock what is within their boxes grown by 4: about 10.5 each side of its line.
+  - **Fix:** charges and the body's knock are dodged 12 to 16 off (`CHARGE_SPAN`, routes up to 32 steps).
+  - While the dragon scans, a bot not fighting it within 48 of the fountain is already pacing sideways in legs of 12 to 16, since walking 12 takes about 55 ticks and the charge about 20.
+  - Out of pits from the landing approach (wall 40).

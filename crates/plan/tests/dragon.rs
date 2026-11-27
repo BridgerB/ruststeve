@@ -863,7 +863,7 @@ fn a_charge_is_dodged_sideways_never_met_in_a_notch() {
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "charge: dodge to [12, 64, 6]"),
+            .any(|e| e.what == "charge: dodge to [12, 64, 12]"),
         "{:?}",
         p.events_since(0)
     );
@@ -2269,4 +2269,28 @@ fn with_the_dragon_coming_down_the_bot_gets_onto_ground_it_can_dodge_a_charge_fr
     let c = t.charge_step(&tall, 0).expect("down");
     assert!(!c.jump);
     assert!(t.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
+}
+
+#[test]
+fn while_the_dragon_scans_the_bot_paces_wider_than_its_wings_sweep() {
+    // Race 46038776204 lane 6: a 6-cell dodge on the charge's line, knocked 70 off the island;
+    // the wings knock within about 10.5 of the body's line.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 5, 270.0);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some(), "paced");
+    let to = p.dragon.pace_to.expect("a leg");
+    let off = to[2].abs();
+    assert!(off >= dragon::CHARGE_SPAN.0, "{to:?}");
+    assert!(p.dragon.pace_walk.is_some());
+    // The next tick keeps the leg (not chosen again).
+    assert!(p.charge_step(&w, 1).is_some());
+    assert_eq!(p.dragon.pace_to, Some(to));
+    // Fighting it (the perch's strikes): no pace.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    q.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    assert_eq!(q.charge_step(&w, 0), None);
 }
