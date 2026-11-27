@@ -1027,15 +1027,22 @@ pub fn pour_now(feet_y: f64, vy: f64, ground: f64) -> bool {
 /// handles the packet, which may be after the feet arrive): the pour goes in the tick whose sent
 /// position is in reach while the one two ticks on is not, so the last tick in reach and the one
 /// before it both qualify, and the clutch sends at the first (`Clutch::sent_at` keeps it to one).
+///
+/// Measured (E6's parity e09-pour, run 45929976619, docs/problems/end-model.md "The water
+/// clutch window"): the server judges the use from the last position it heard, the body's
+/// before this tick's move, and places water only with the eye within 4.5 of the ground there
+/// (every use with the eye at 3.93 or less placed it, every one at 4.56 or more nothing). So the
+/// pour goes by the body's current height, the feet `POUR_FEET` or less over the ground under
+/// them, every tick until the water shows; a late pour is never too late (K1 saved every drop
+/// up to 60). `vy` and `g2` are kept for the callers and unused.
 pub fn pour_now_at(feet_y: f64, vy: f64, g1: Option<f64>, g2: Option<f64>) -> bool {
-    // The first tick in reach (race 45927433568 lane 0: a pour sent 3 ticks before the landing,
-    // a tick before the last in reach, still did not save it): the most time for the server,
-    // and the water lies in the landing cell whenever it goes.
-    let _ = g2;
-    let p1 = feet_y + vy;
-    let in_reach = |p: f64, g: f64| p > g && p + physics::EYE_HEIGHT - g <= POUR_REACH;
-    g1.is_some_and(|g| in_reach(p1, g))
+    let _ = (vy, g2);
+    g1.is_some_and(|g| feet_y > g && feet_y - g <= POUR_FEET)
 }
+
+/// Feet over the ground at or under which the clutch pours: the measured reach, eye 4.5 less
+/// the eye's 1.62, is 2.88; less a margin.
+pub const POUR_FEET: f64 = 2.7;
 
 /// Ticks until feet at `feet_y` falling at `vy` reach `ground` (for the ledger).
 pub fn ticks_to_land(feet_y: f64, vy: f64, ground: f64) -> u32 {
@@ -1050,7 +1057,7 @@ pub fn ticks_to_land(feet_y: f64, vy: f64, ground: f64) -> u32 {
 /// Ticks after landing the water is tried to be taken back, and the most a clutch lasts.
 pub const CLUTCH_TAKE_TICKS: u64 = 40;
 /// Ticks after a pour before another is sent (the bucket's change seen by then).
-pub const POUR_RESEND: u64 = 6;
+pub const POUR_RESEND: u64 = 2;
 pub const CLUTCH_TICKS: u64 = 200;
 
 /// The dig of the pillar's cell under the feet, its drop not waited for: it falls into the cell
@@ -2015,17 +2022,14 @@ impl Plan {
                 } else if crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
                     && c.sent_at
                         .is_none_or(|t| tick.saturating_sub(t) >= POUR_RESEND)
-                    && {
-                        // The ground under where the body will be this tick and the next.
-                        let v = body.vel;
-                        let p1 = [body.pos[0] + v[0], body.pos[1] + v[1], body.pos[2] + v[2]];
-                        let p2 = [
-                            p1[0] + v[0] * physics::AIR_INERTIA,
-                            p1[1],
-                            p1[2] + v[2] * physics::AIR_INERTIA,
-                        ];
-                        pour_now_at(body.pos[1], v[1], ground_under(w, p1), ground_under(w, p2))
-                    }
+                    // Again every tick until the water shows under the feet (E6: retry until
+                    // it shows), never once it is there: a use of the emptied bucket would take
+                    // it back up.
+                    && ground.is_some_and(|g| {
+                        let f = path::feet_cell(body.pos);
+                        kind(w, (f.0, g as i32, f.2)) != Some(BlockKind::Water)
+                    })
+                    && pour_now_at(body.pos[1], body.vel[1], ground, None)
                     && self.acts.is_empty()
                 {
                     let land = ground.map(|g| ticks_to_land(body.pos[1], body.vel[1], g));

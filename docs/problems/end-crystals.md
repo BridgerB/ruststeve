@@ -307,3 +307,11 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 ### Wall 20: the pour sent too late, and the landing water left behind (fixed)
 - **The pour:** sent in the first tick whose sent position is in reach, for the most time for the server.
 - **The approach:** an approach whose column already has its landing water goes first, so a poured bucket is not lost to another axis.
+
+### The clutch's window, measured (E6's parity e09-pour, run 45929976619; docs/problems/end-model.md "The water clutch window")
+- **The rule now:**
+  - The server judges a use from the last position it heard (the body's before this tick's move), and places water only with the eye within 4.5 of the ground there. 3.93 or less always placed it; 4.56 or more never did.
+  - So the pour goes by the current height: the feet 2.7 or less over the ground under the body (`POUR_FEET`).
+  - It is tried again every 2 ticks until the water shows under the feet, and never once it is there.
+  - A late pour is never too late: K1 saved every drop up to 60.
+- **The races fit:** race 45927433568's pour "3.31 over" was the eye at 4.93, out of reach.

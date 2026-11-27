@@ -874,18 +874,14 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
         y += v;
         v = (v - 0.08) * 0.98;
     }
-    // At terminal speed a tick falls 3.9, more than the 2.78 the reach spans over the ground
-    // (4.4 less the eye's 1.62), so a fall's phase can skip it: this one's does not. The last tick
-    // in reach and the one before it qualify; the clutch sends at the first.
+    // E6's parity e09-pour (run 45929976619): the server judges the use from the body's position
+    // before this tick's move, and places water with the eye within 4.5 of the ground there. So
+    // the pour goes by the current height, the feet `POUR_FEET` (2.7) or less over the ground.
+    // At terminal speed a tick falls 3.9, more than that band, so a fall's phase can skip it:
+    // this one's does not.
     assert!(!pours.is_empty(), "{pours:?}");
-    let (py, pv) = pours[0];
-    let sent = py + pv;
-    assert!(sent > ground, "the feet still over the ground: {sent}");
-    assert!(
-        sent + 1.62 - ground <= spikes::POUR_REACH,
-        "the eye in reach: {}",
-        sent + 1.62 - ground
-    );
+    let (py, _) = pours[0];
+    assert!(py > ground && py - ground <= spikes::POUR_FEET, "{py}");
     // Every start from rest 5 to 60 over the ground: under 2.78 a tick (about 100 blocks of
     // fall), a tick always lands in reach, and exactly one pour goes.
     for h in 5..=60 {
@@ -1121,14 +1117,11 @@ fn a_body_flung_sideways_pours_on_the_column_it_will_land_on() {
     // Race 45903987747: both bots knocked off sideways near the island's edge, the column under
     // the fall's start not the one landed on.
     let g = 54.0;
-    // Over the void now, the next tick over ground in reach, the one after past it: pour.
-    assert!(spikes::pour_now_at(g + 3.0, -1.5, Some(g), None));
-    // In reach this tick: the pour now, the first tick in reach.
-    assert!(spikes::pour_now_at(g + 3.0, -0.5, Some(g), Some(g)));
-    // Out of reach this tick: no pour yet.
-    assert!(!spikes::pour_now_at(g + 8.0, -0.5, Some(g), Some(g)));
-    // No ground under this tick's position: no pour.
-    assert!(!spikes::pour_now_at(g + 3.0, -1.5, None, Some(g)));
+    // By the current height over the ground under the body (E6's parity e09-pour): in reach,
+    // the pour; over it, none yet; no ground under the body, none.
+    assert!(spikes::pour_now_at(g + 2.5, -1.5, Some(g), None));
+    assert!(!spikes::pour_now_at(g + 3.0, -0.5, Some(g), Some(g)));
+    assert!(!spikes::pour_now_at(g + 2.5, -1.5, None, Some(g)));
 }
 
 #[test]
