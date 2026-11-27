@@ -1733,17 +1733,19 @@ fn under_the_pickaxe_reserve_wooden_pickaxes_are_made_from_the_wood_carried() {
 }
 
 #[test]
-fn calm_is_holding_forty_off_and_not_closing() {
-    // The coordinator's rule (shared with E4): holding over 64 off is seldom true for long.
+fn calm_is_holding_forty_off() {
+    // Race 46079924222: a holding circle closes on part of every arc; 13 of 14 climbs stopped.
     let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
-    dragon_at(&mut w, [110.5, 70.0, 0.5], 0);
+    dragon_at(&mut w, [145.5, 70.0, 0.5], 0);
     let mut p = racer();
-    assert!(p.calm(&w, 0), "60 off, holding");
+    assert!(p.calm(&w, 0), "95 off, holding");
     if let Some(e) = w.entities.get_mut(&7) {
-        e.pos = [95.5, 70.0, 0.5];
+        e.pos = [140.5, 70.0, 10.5];
     }
-    assert!(!p.calm(&w, 25), "45 off and 15 nearer in 25 ticks: closing");
-    assert!(p.calm(&w, 50), "45 off, no nearer since tick 25");
+    assert!(
+        p.calm(&w, 25),
+        "holding on an approaching arc, still over 40: calm"
+    );
     if let Some(e) = w.entities.get_mut(&7) {
         e.pos = [85.5, 70.0, 0.5];
     }
