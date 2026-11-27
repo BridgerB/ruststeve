@@ -826,6 +826,17 @@ pub fn climb_refusal(d: Option<&DragonNear>, health: Option<f32>, danger: f32) -
     }
 }
 
+/// Blocks under the stand within which a climb goes on through a refusal: the dragon holding
+/// and not closing (the orchestrator's one exception, after E5's read of race 46063334187 lane
+/// 5: "climb on through" with the dragon 63 off, struck off at (42, 91, 19)).
+pub const STAND_NEAR: i32 = 5;
+
+/// The one exception to "a refusal mid-climb stops it": within `STAND_NEAR` of the stand, the
+/// dragon holding (phase 0) and not closing.
+pub fn climb_on_near_stand(d: Option<&DragonNear>, closing: bool, under: i32) -> bool {
+    under <= STAND_NEAR && !closing && d.is_none_or(|d| d.phase == Some(HOLDING_PHASE))
+}
+
 /// The dragon's holding pattern (`EnderDragonPhase` 0), the one phase a climb begins in.
 pub const HOLDING_PHASE: i32 = 0;
 /// The phases that end a stay up a pillar: the landing approach and the landing, the sitting
@@ -2489,11 +2500,33 @@ impl Plan {
                         );
                         return Some(self.spikes_hold(tick));
                     }
-                    self.spikes_note(
-                        tick,
-                        "spikes: climb on through".to_owned(),
-                        format!("{why}; at {feet:?}, {} under {top}", top - feet.1),
-                    );
+                    // Up already: no climb on through (E5's read of race 46063334187 lane 5,
+                    // struck off 3 under its stand with the dragon 63 off): down by water, or
+                    // held, never on, but near the stand with the dragon holding and not closing.
+                    if climb_on_near_stand(d.as_ref(), closing, top - feet.1) {
+                        self.spikes_note(
+                            tick,
+                            "spikes: climb on, the stand near".to_owned(),
+                            format!("{why}; at {feet:?}, {} under {top}", top - feet.1),
+                        );
+                    } else {
+                        if let Some(rec) = self
+                            .spikes
+                            .pillars
+                            .iter()
+                            .find(|r| (r.x, r.z) == column)
+                            .copied()
+                            && let Some(t) = self.spikes_descend(w, tick, feet, rec, &why)
+                        {
+                            return Some(t);
+                        }
+                        self.spikes_note(
+                            tick,
+                            "spikes: climb stopped, held".to_owned(),
+                            format!("{why}; at {feet:?}, no water way down"),
+                        );
+                        return Some(self.spikes_hold(tick));
+                    }
                 }
                 if pillar_blocks(w) == 0 && climbing {
                     let c = (feet.0, feet.1 - 1, feet.2);
@@ -4010,9 +4043,27 @@ impl Plan {
         if let Some(why) = refusal.or_else(|| {
             threatens(d.as_ref()).then(|| "the dragon strafes or charges near".to_owned())
         }) {
+            let closing = match (d, self.spikes.dragon_seen) {
+                (Some(now), Some((at, then))) => {
+                    tick.saturating_sub(at) <= CLOSING_TICKS && now.dist < then - CLOSING_BY
+                }
+                (Some(_) | None, _) => false,
+            };
+            if !climb_on_near_stand(d.as_ref(), closing, c.goal - feet.1) {
+                self.note(
+                    tick,
+                    format!("spikes: climb stopped at {feet:?}"),
+                    format!(
+                        "{why}; {} under the goal {}; the way down by water",
+                        c.goal - feet.1,
+                        c.goal
+                    ),
+                );
+                return None;
+            }
             self.spikes_note(
                 tick,
-                "spikes: climb on through".to_owned(),
+                "spikes: climb on, the stand near".to_owned(),
                 format!(
                     "{why}; at {feet:?}, {} under the goal {}",
                     c.goal - feet.1,

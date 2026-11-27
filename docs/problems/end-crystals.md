@@ -592,3 +592,11 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The knock rule holds first.
   - The clutch's water is also looked for within 2 on the plane, from 2 under the feet up to them, the nearest first (`CLUTCH_WATER_REACH`).
   - Unit tests `stranded_on_a_spikes_top_the_bot_comes_down_onto_the_clutch` and `the_clutchs_water_is_found_a_little_further_out`.
+
+### Wall 43: "climb on through" with the dragon inside 64 (E5's read of race 46063334187 lane 5; fixed)
+- **What happened:** at 1,500, "spikes: climb on through (the dragon 63 off in phase Some(0), not holding over 64 off; at (33, 70, 19), 24 under the goal 94)". The climb went on, and a dragon blow knocked the bot off at (42, 91, 19) at 1,680: a fatal fall.
+- **The fix:**
+  - No climb on through. Up already, a refusal (the dragon inside 64 or not holding, low health, a fireball, the dragon closing) stops the climb ("climb stopped at"). The bot comes down by water (`spikes_descend`: the landing water, else the clutch off a clear side), or is held with no water way down ("climb stopped, held"), never on.
+  - The one exception, explicit: within `STAND_NEAR` (5) of the stand with the dragon holding and not closing, the climb goes on ("climb on, the stand near"; `climb_on_near_stand`).
+  - A climb stopped mid-way leaves its pillar standing. That approach's foot is then the pillar's top, so the next climb takes another axis of the spike.
+  - Unit tests `no_climb_on_through_the_dragon_inside_64_or_not_holding` and `the_one_exception_near_the_stand_holding_and_not_closing`.
