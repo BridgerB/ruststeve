@@ -2612,7 +2612,7 @@ impl Plan {
                     Some(Phase::SittingScanning | Phase::SittingAttacking)
                 )
             });
-            if let Some(b) = self.bunker
+            if let Some(b) = self.bunker_now(w)
                 && !window
                 && breathed(&clouds, feet, BUNKER_HOLD)
             {
@@ -2650,10 +2650,13 @@ impl Plan {
             }
             return None;
         };
-        // Never a notch under a breath (wall 36: a cloud on the body reaches it there; dev race
-        // 45964846590 lanes 4, 5, 6 dug one under the cloud and died in it): out on foot, pressed
-        // straight on when no walk plans.
-        self.dragon.breath_notch = false;
+        // Down a notch from a cloud on the body (no walk out planned): down and roofed. The
+        // cloud's box is 0.5 high at the height it was put at, so two down is under it (wall 38:
+        // with the notch taken away, five bots stood in one cloud for its whole life, frontier race
+        // 45978279345).
+        if self.dragon.breath_notch {
+            return Some(self.notch_dig_step(w, tick, crouch, "breath"));
+        }
         if let Some(t) = self.dragon.breath_straight {
             if cell_of(feet) != t && !clear_of_breath(&clouds, feet) {
                 return Some(toward(feet, mid(t)));
@@ -2666,8 +2669,23 @@ impl Plan {
         // Only a bunker clear of every breath (on the plane and in height); else a notch here.
         // And only a bunker shut, roof and door: an open one lets the fireball in (frontier race
         // 45931225605 lane 1: sheltered in it, the cloud on the bot inside it).
+        // In the bunker with the breath on: a notch down from there (wall 38, as before wall 36).
         if let Some(b) = self.bunker
-            && cell_of(feet) != b
+            && cell_of(feet) == b
+        {
+            self.dragon.breath_notch = true;
+            self.note(
+                tick,
+                format!("breath: in the bunker at {b:?}, a notch down"),
+                format!(
+                    "a breath {:.1} off, radius {:.1}",
+                    flat(on.pos, feet),
+                    on.radius
+                ),
+            );
+            return Some(self.notch_dig_step(w, tick, crouch, "breath"));
+        }
+        if let Some(b) = self.bunker_now(w)
             && flat(feet, mid(b)) <= BUNKER_NEAR
             && clear_of_breath(&clouds, mid(b))
             && self.bunker_shut(w)
@@ -2797,17 +2815,25 @@ impl Plan {
                     );
                     return self.charge_dig_step(w, tick, n);
                 }
-                // No walk planned (water, a stair, a notch's floor): pressed straight on toward the
-                // cell out, never a notch under the cloud (wall 36).
-                self.dragon.breath_straight = Some(target);
+                // In water no walk plans: pressed straight on toward the cell out.
+                if let Some(feet) = w.body.map(|b| b.pos)
+                    && in_water(w, cell_of(feet))
+                {
+                    self.dragon.breath_straight = Some(target);
+                    self.note(
+                        tick,
+                        format!("walk out of the breath to {target:?} failed: {e:?}"),
+                        "pressed straight on toward it, in water".to_owned(),
+                    );
+                    return Some(toward(feet, mid(target)));
+                }
+                // Else down a notch where the feet are, under the cloud's box (wall 38).
+                self.dragon.breath_notch = true;
                 self.note(
                     tick,
                     format!("walk out of the breath to {target:?} failed: {e:?}"),
-                    "pressed straight on toward it".to_owned(),
+                    "a notch down where the feet are".to_owned(),
                 );
-                if let Some(feet) = w.body.map(|b| b.pos) {
-                    return Some(toward(feet, mid(target)));
-                }
             }
         }
         if c.pitch.is_none() {
@@ -2935,7 +2961,7 @@ impl Plan {
         }
         // For a strafe only a bunker shut (roof and door): an open one lets the fireball in.
         let shut = strafe.is_none() || self.bunker_shut(w);
-        let bunker = self.bunker.filter(|b| {
+        let bunker = self.bunker_now(w).filter(|b| {
             shut && flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
                 && (body.pos[1] - f64::from(b[1])).abs() <= 5.0
         });
@@ -3414,6 +3440,12 @@ impl Plan {
                 Some(toward(feet, mid(c)))
             }
         }
+    }
+
+    /// The bunker as a place to go: none while a crystal is alive (the crystal phase is fought on
+    /// the surface, in sight; frontier race 45978279345 lane 7 died walking into it under a cloud).
+    pub fn bunker_now(&self, w: &World) -> Option<[i32; 3]> {
+        self.bunker.filter(|_| crate::end::crystals_alive(w) == 0)
     }
 
     /// The columns on the plane of the bunker (its cell and roof) and its stair's cells; none with
@@ -3967,7 +3999,7 @@ impl Plan {
             self.ender_note(tick, id, "covered within 8: held");
             return Some(crouch);
         }
-        let bunker = self.bunker.filter(|b| {
+        let bunker = self.bunker_now(w).filter(|b| {
             self.dragon.ender_walk_failed != Some(id)
                 && (!above || flat(body.pos, mid(*b)) <= ENDER_BUNKER_REACH)
         });

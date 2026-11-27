@@ -351,3 +351,8 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix:** with no dodge cell and no block held, the wall toward the open side is dug ("fireball: no block to rise on, the wall dug at …"). That opens a way and gives a block.
   - The root is the bunker dug with 0 end stone held and the stair shut during the open (E3's and E4's).
 - Lane 4 lived to 22,460 (27 or more dodges, 38 breath events, 2 crystals struck). Lane 7 died at 5,760 walking into the bunker under a cloud ("breath: into the bunker", the walk `NoPath`). Lane 2 died digging surface end stone in the open (E3's restock).
+- **Wall 38, part two: wall 36's straight press was a regression.** In 45978279345 the five early deaths took one cloud each and lost 24 health in 4 blows: they stood in it for its life. Pressing straight on in a shut stair went nowhere.
+  - A fireball's cloud is put at the body's height, and its box is 0.5 high. A notch dug down under it puts the body below the box, which is why bots in earlier races lived past 10,000 ticks.
+  - **Reverted for a cloud already on the body with no walk out:** in the bunker, or when the walk out fails and no wall is to be dug, a notch down where the feet are (as before wall 36). In water: pressed straight on.
+  - Still out: a notch for a charge, and cover from a strafe.
+  - And none of E5's steps sends the bot into the bunker while a crystal is alive (`Plan::bunker_now`; lane 7 died walking into it under a cloud).

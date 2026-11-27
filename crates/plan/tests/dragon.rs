@@ -1118,19 +1118,34 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
         "{:?}",
         p.events_since(0)
     );
-    // In the bunker with the breath on the body: walked out of it, never a notch (wall 36).
+    // In the bunker with the breath on the body: a notch down, under the cloud's box (wall 38).
     let mut q = Plan::new(Aim::Race);
     q.bunker = Some([12, FLOOR, 0]);
     assert!(q.breath_step(&w, 0).is_some());
     assert!(
         q.events_since(0)
             .iter()
-            .any(|e| e.what.starts_with("out of the breath to")),
+            .any(|e| e.what.starts_with("breath: in the bunker at")),
         "{:?}",
         q.events_since(0)
     );
-    assert!(q.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })));
-    assert!(!q.dragon.breath_notch);
+    assert!(q.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
+    assert!(q.dragon.breath_notch);
+    // A crystal alive: never into the bunker (frontier race 45978279345 lane 7).
+    let mut c = end_at([12.5, 64.0, 0.5]);
+    cloud(&mut c, 50, [12.5, 64.0, 0.5], 3.0);
+    add(&mut c, 80, EntityKind::EndCrystal, [40.5, 90.0, 0.5]);
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([15, FLOOR - 4, 0]);
+    r.end.door = Some((1, 0));
+    let _ = r.breath_step(&c, 0);
+    assert!(
+        !r.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("breath: into the bunker")),
+        "{:?}",
+        r.events_since(0)
+    );
 }
 
 #[test]
