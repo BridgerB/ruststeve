@@ -34,6 +34,11 @@ So the bow wants: 3 string, feathers and flint (one each per 4 arrows), and stic
 - **The shot** (`plan::bow`): see the brain note `end-bow`. Asked first at E3's two crystal hand-offs (`end_spikes`, and `open_task` before the end stone stock); `bow_step` ahead of `spikes_step`.
 - **Not built**: the carved pumpkin (the snapshot holds 1 iron ingot, shears want 2).
 
+## Parity e07 (run 46046036900, 8838a9d, real server, Normal, full iron): both crystals destroyed by aimed arrows
+- **e07-bow-24**: the bot at (1688.5, 65, 26.5), the crystal 24 east and 7 up (25 off). The look `-90.0, -18.8` (`plan::bow::aim`), `use_item` at t 64, released at 88, **the crystal removed at t 98** (10 ticks of flight; the aim predicted 9), its blast after. Health 20.0 throughout.
+- **e07-bow-40**: the bot at (1688.5, 64, -93.5), the crystal 40 east and 21 up (45 off). The look `-90.0, -34.4`, `use_item` at t 75, released at 99, **the crystal removed at t 117** (18 ticks). Health 20.0 throughout.
+- One arrow, one crystal, at both ranges: the jar's flight and the low arc are right to within the box.
+
 ## Parity e07, first run (46041683496, 3ea46ea): no evidence
 - Both rows' bots kept the look 0, 0 from start to end (the trace's `look 0.0 0.0`): `plan::bow::aim` refused every flight from under the crystal (wall 1), so the script sent no aim and the bow was drawn and let go facing south. The 24 row's arrow went 12 south into the 40 row's bot (3.1, `arrow`, cause the player). The 24 row's crystal was removed at its t 114, near the script's end, by no arrow of its own: not read as a hit.
 - The arenas were 12 apart; now 120.
