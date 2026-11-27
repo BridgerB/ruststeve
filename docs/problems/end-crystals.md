@@ -570,3 +570,52 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - No clutch pour while the vertical speed is upward.
   - Unit tests `the_clutchs_water_counts_as_taken_back_only_with_more_water_buckets`, `no_clutch_pour_while_rising` and `an_empty_bucket_refills_from_the_water_left_behind`.
 - **Lane 5** dug down through a charge (33,620 to 34,020), the same as lane 3: wall 38's descent and the no-dig hold cover it.
+
+### Wall 41: the far caged crystal first, while a near one healed the dragon (dev race 46048455555 lane 1; fixed)
+- **What happened:** lane 1 took (42, 0) first, the caged spike and the most work. It left (12, 39), which healed the dragon back to 200 at every perch.
+- **The fix:** E5's jar read (`EnderDragon.checkCrystals`, javap probe 46039100437; `dragon::HEAL_RANGE` 32 plus `dragon::HEAL_BOX_HALF` 8, from `dragon::PERCH_POINT`): the perched dragon heals from crystals within 40 on x and z of the perch.
+  - Those crystals are worked first, nearest first among them (`heals_the_perch`, `crystals_in_order`). (42, 0) and (-42, -1) come last, so with only those two left the bot can go to the fight.
+  - E5's constants are used rather than a second copy of the number.
+  - Unit test `the_crystals_that_heal_the_perch_are_taken_first`.
+- **Lane 1's death at 5,920** (on c09bf25, before walls 35 to 40), checked against today's rules:
+  - Its climbs began at 2,820 (landing approach, 72 off), 3,080 (landing, 90 off) and 3,260 (landing, 42 off). Each is refused now: a climb begins only with the dragon holding over 64 off.
+  - After the strike at 3,400 it dug down. Today the clutch descent runs first (`spikes_water` comes before the hurt rule), and at 3,480 (a charge 17 off) the knock rule holds it.
+  - What killed it was "eat in the shaft" on the open pillar at y 81: an Eat task that ran 2,360 ticks, from 3,560 to 5,920, through two perch-and-charge cycles. Today the hurt rule eats only when no water way down exists. An Eat lasting 2,360 ticks is a fault of its own, in the shared eat task.
+
+### Wall 42: stranded on a spike's top, waiting (race 46059621531, the crystals_5 resume; fixed)
+- **What happened:**
+  - The resume put the bot on the spike's top at (-33.4, 79, 27.6) with no pillar record.
+  - It noted "spikes: wait (stranded on a spike's top with no pillar down …)" 5 to 15 times until a fireball's cloud came: 7 of 10 dead within 3,460 ticks.
+  - Lane 2's clutch, from a 4.8-block fall, poured on an edge's column (-36, 79, 24) and landed on a higher one at (-35, 80, 25). It was "the water gone, not taken back; 0 water buckets held": the source was out of the take-back's search.
+- **The fix:**
+  - Never a wait on a spike's top: the nearest cell of the top with a side whose fall lands on ground, not the void (`spike_edge`), is walked to ("to the spike's edge at"). From it the bot steps off onto the clutch ("off the spike's top onto the clutch at"). With no water bucket in the hotbar, one is swapped in and the bot is held.
+  - The knock rule holds first.
+  - The clutch's water is also looked for within 2 on the plane, from 2 under the feet up to them, the nearest first (`CLUTCH_WATER_REACH`).
+  - Unit tests `stranded_on_a_spikes_top_the_bot_comes_down_onto_the_clutch` and `the_clutchs_water_is_found_a_little_further_out`.
+
+### Wall 43: "climb on through" with the dragon inside 64 (E5's read of race 46063334187 lane 5; fixed)
+- **What happened:** at 1,500, "spikes: climb on through (the dragon 63 off in phase Some(0), not holding over 64 off; at (33, 70, 19), 24 under the goal 94)". The climb went on, and a dragon blow knocked the bot off at (42, 91, 19) at 1,680: a fatal fall.
+- **The fix:**
+  - No climb on through. Up already, a refusal (the dragon inside 64 or not holding, low health, a fireball, the dragon closing) stops the climb ("climb stopped at"). The bot comes down by water (`spikes_descend`: the landing water, else the clutch off a clear side), or is held with no water way down ("climb stopped, held"), never on.
+  - The one exception, explicit: within `STAND_NEAR` (5) of the stand with the dragon holding and not closing, the climb goes on ("climb on, the stand near"; `climb_on_near_stand`).
+  - A climb stopped mid-way leaves its pillar standing. That approach's foot is then the pillar's top, so the next climb takes another axis of the spike.
+  - Unit tests `no_climb_on_through_the_dragon_inside_64_or_not_holding` and `the_one_exception_near_the_stand_holding_and_not_closing`.
+
+### Wall 44: stubs of its own could use up a spike's four approaches (the orchestrator, after wall 43; fixed)
+- **The risk:** a climb stopped mid-way, or a pillar left standing by a water descent, leaves a stub. Its approach's foot then reads as the stub's top, unreachable by a walk, so the approach is refused. With stops on all four axes, a spike would have no approach left.
+- **The fix:**
+  - The bot's own standing pillars are recorded as stubs (`SpikeState::stubs`, on landing by its water when the pillar still stands).
+  - A stubbed approach is resumed: the walk goes to a side foot beside the stub (`stub_side`: a column with its ground at the stub's base and open to over its top, a side pillar of its own begun there first). The bot pillars up there to the stub's top and steps onto it ("on the stub at"). The climb goes on in the stub's column, its record from the stub's base again; the side pillar is left a stub.
+  - Its blocks are counted for the whole pillar from the stub's base (`pillar_wants`), and `blocks_wanted` and both gates read the same count.
+  - Unit test `stubs_of_its_own_on_all_four_axes_are_climbed_back_onto`: all four axes stubbed, a walk to a side foot (never a refusal), the side pillar, the step onto the stub, and the climb on from there.
+
+### Wall 45: stranded inside a spike's cage (race 46070173620, from the crystals_5 stand on [-34, 24]; fixed)
+- **What happened:**
+  - 6 of 8 dead and 0 struck. "off the spike" fired 0 times.
+  - Every lane noted "stranded on the spike's top (… at (-33, 79, 25); no edge over ground)" 12 to 53 times until a cloud came. The first act was "dig the way out at (-34, 79, 26) … shut in a pocket".
+  - [-34, 24] is caged (config/end.toml, top 79): iron bars on the ring where |dx| or |dz| is 2 from the top to top + 2, and a 5 by 5 roof at top + 3, 73 bars. A radius-2 spike's whole top layer lies under the ring, so from inside no side was passable. `spike_edge` found no edge, and the dig-out struck a bar of its own cage.
+  - The ground under the edges was known: the world holds every block of the chunks the server sent, and `spike_edge` reads them, not sight. So E9's cause (a) was not it.
+- **The fix:**
+  - Never a dig-out from a spike's top, its cage's bars or its bedrock (`on_spike_top`). It is "stranded" instead, and the stranded rule runs.
+  - Caged with no edge: the bar beside the feet is broken, the feet's height and then the head's, on the side facing the island's centre best ("out of the cage at"; `cage_bar`). Then the walk to the gap at the top's edge and the step off onto the clutch (wall 42).
+  - Unit test `caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off`, with the vanilla cage round the test spike.

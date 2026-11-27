@@ -1046,15 +1046,36 @@ fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
     let mut w = end_at(feet);
     angry(&mut w);
     let mut p = Plan::new(Aim::Race);
+    // No bunker near, over the danger line, in reach: struck with the sword, never a notch (wall
+    // 42: dev race 46048455555 lane 0 was killed in one).
     assert!(p.end_enderman_step(&w, 0).is_some());
+    let acts = p.take_acts();
     assert!(
-        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
-        "no bunker near: a notch down, never a fight in the open (race 45913296602 lane 1)"
+        acts.iter().any(|a| matches!(a, Act::Attack { entity: 70 })),
+        "{acts:?}"
+    );
+    assert!(acts.iter().all(|a| !matches!(a, Act::Dig { .. })));
+    assert!(
+        p.events_since(0).iter().any(|e| e.what
+            == "end: no pocket for enderman 70 (struck with the sword over the danger line)")
+    );
+    // Under the danger line: walked away to open ground, never a fight, never a notch.
+    let mut low = end_at(feet);
+    angry(&mut low);
+    low.player.health = Some(6.0);
+    let mut u = Plan::new(Aim::Race);
+    assert!(u.end_enderman_step(&low, 0).is_some());
+    assert!(u.dragon.ender_walk.is_some(), "a walk away begun");
+    assert!(
+        u.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. } | Act::Dig { .. }))
     );
     assert!(
-        p.events_since(0)
-            .iter()
-            .any(|e| e.what == "end: no pocket for enderman 70 (a notch down, no bunker near)")
+        u.events_since(0).iter().any(|e| e.what
+            == "end: no pocket for enderman 70 (under the danger line, walked away to open ground)"),
+        "{:?}",
+        u.events_since(0)
     );
     // The bunker within reach: into it.
     let mut q = Plan::new(Aim::Race);
@@ -1669,7 +1690,7 @@ fn an_angry_endermans_hold_is_near_only_and_capped() {
     assert!(
         noted(
             &t,
-            "end: no pocket for enderman 70 (a notch down, no bunker near)"
+            "end: no pocket for enderman 70 (over the danger line, met in the open)"
         ),
         "{:?}",
         t.events_since(0)
@@ -2114,10 +2135,10 @@ fn with_no_way_out_and_no_block_the_wall_toward_the_open_is_dug() {
 }
 
 #[test]
-fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
-    // Race 45994686575: three bots at 1 crystal left, the dragon at 200 through 37 perches
-    // (lane 5), the fight waiting for every crystal. EnderDragon.checkCrystals heals only from
-    // the nearest in its box grown by 32 (per axis: 40 across), 8 of 10 spikes in it from the perch.
+fn no_perch_is_fought_while_a_crystal_stands() {
+    // Wall 45, dev race 46050674145 lane 0: with only the far crystals standing, 28 strikes and
+    // every perch refilled to 200 in flight (EnderDragon.checkCrystals: the nearest in its box
+    // grown by 32 heals it 1 every 10 ticks, its holding pattern passing within 40 of them).
     let feet = [9.5, 64.0, 0.5];
     let sat = |crystals: &[[f64; 3]]| {
         let mut w = end_at(feet);
@@ -2129,49 +2150,27 @@ fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
     };
     let spike = [42.5, 83.0, 0.5];
     let other = [12.5, 77.0, 39.5];
-    // Two standing, one ((12, 39)) able to heal it at the perch: not fought (race 46040826241
-    // lane 1: struck to 190.8, healed back to 200); the other alone: fought.
-    assert!(dragon::fight_with_crystals(&sat(&[spike, other])).is_none());
-    assert_eq!(
-        dragon::fight_with_crystals(&sat(&[spike])).map(|(n, _)| n),
-        Some(1)
-    );
-    // Three standing, one ((12, 39)) in the heal's box from the perch: not fought.
     assert!(dragon::heals_from(dragon::PERCH_POINT, other));
     assert!(
         !dragon::heals_from(dragon::PERCH_POINT, spike),
         "(42, 0): 42 on x, past 40"
     );
-    assert!(
-        dragon::fight_with_crystals(&sat(&[spike, other, [-34.5, 80.0, 24.5]])).is_none(),
-        "3 left, a heal in reach"
-    );
-    // Three standing, none in reach of a heal: fought.
-    assert!(
-        dragon::fight_with_crystals(&sat(&[spike, [-41.5, 89.0, -0.5], [50.5, 80.0, 50.5]]))
-            .is_some()
-    );
-    // One standing out of heal reach, the dragon sitting: the fight begun, the task cut.
-    let w = sat(&[spike]);
+    for crystals in [
+        &[spike][..],
+        &[spike, other][..],
+        &[spike, [-41.5, 89.0, -0.5]][..],
+    ] {
+        let w = sat(crystals);
+        assert!(dragon::fight_with_crystals(&w).is_none(), "{crystals:?}");
+        let mut p = Plan::new(Aim::Race);
+        p.perch_fight_step(&w, 0);
+        assert!(matches!(p.task, plan::Task::Idle), "{crystals:?}");
+        assert!(p.dragon_task(&w, 0).is_none(), "{crystals:?}");
+    }
+    // None standing: the fight is the task.
     let mut p = Plan::new(Aim::Race);
-    p.perch_fight_step(&w, 0);
-    assert!(matches!(p.task, plan::Task::Dragon(_)));
-    assert!(
-        p.events_since(0)
-            .iter()
-            .any(|e| e.what == "dragon: the perch fought with 1 crystals standing")
-    );
-    assert!(p.dragon_task(&w, 0).is_some());
-    // Flying: never begun.
-    let mut fly = end_at(feet);
-    with_dragon(&mut fly, [0.5, 90.0, 40.5], 0, 0.0);
-    add(&mut fly, 80, EntityKind::EndCrystal, spike);
-    let mut q = Plan::new(Aim::Race);
-    q.perch_fight_step(&fly, 0);
-    assert!(matches!(q.task, plan::Task::Idle));
-    assert!(q.dragon_task(&fly, 0).is_none());
+    assert!(p.dragon_task(&sat(&[]), 0).is_some());
 }
-
 #[test]
 fn a_heal_is_written_to_the_ledger_and_a_meal_waits_for_the_dragon_far_off() {
     let feet = [12.5, 64.0, 0.5];
@@ -2301,4 +2300,135 @@ fn while_the_dragon_scans_the_bot_paces_wider_than_its_wings_sweep() {
     let mut r = Plan::new(Aim::Race);
     r.bunker = Some([60, FLOOR - 4, 60]);
     assert_eq!(r.charge_step(&none, 0), None);
+}
+
+#[test]
+fn a_meal_is_cut_when_the_dragon_comes_and_capped_at_100_ticks() {
+    // Dev race 46048455555 lane 1: an eat begun on a pillar ran 2,360 ticks through two perches.
+    let feet = [12.5, 64.0, 0.5];
+    let eating = |w: &World, at: u64| {
+        let mut p = Plan::new(Aim::Race);
+        p.task = plan::Task::Eat(plan::eat::Eat::new(w, data::ItemKind::CookedBeef, at));
+        p
+    };
+    let eat = Some(plan::make::Always::Eat);
+    // The dragon strafing: cut at once.
+    let mut near = end_at(feet);
+    with_dragon(&mut near, [0.5, 80.0, 20.5], 1, 0.0);
+    let mut p = eating(&near, 0);
+    assert_eq!(p.meal_cut(&near, 5, eat), None);
+    assert!(matches!(p.task, plan::Task::Idle));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "eat cut: the dragon near or a cloud")
+    );
+    // Holding far off: kept to the cap, then cut.
+    let mut far = end_at(feet);
+    with_dragon(&mut far, [0.5, 90.0, 60.5], 0, 0.0);
+    let mut q = eating(&far, 0);
+    assert_eq!(q.meal_cut(&far, 50, eat), eat);
+    assert!(matches!(q.task, plan::Task::Eat(_)));
+    assert_eq!(q.meal_cut(&far, dragon::MEAL_CAP_TICKS + 1, eat), None);
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "eat cut: over the meal's cap")
+    );
+}
+
+#[test]
+fn two_angry_endermen_are_answered_with_water_at_the_feet_taken_back_after() {
+    // Race 46063334187 lane 7: four angry at once after a charge, fought with the sword, lost.
+    let feet = [12.5, 64.0, 0.5];
+    let angry = |w: &mut World, id: i32, at: [f64; 3]| {
+        add(w, id, EntityKind::Enderman, at);
+        data(w, id, vec![(17, MetaValue::Bool(true))]);
+    };
+    let bucket = |w: &mut World, k: data::ItemKind| {
+        w.inventory.slots.insert(36, (k, 1));
+        w.held = 0;
+    };
+    let mut w = end_at(feet);
+    angry(&mut w, 70, [15.5, 64.0, 0.5]);
+    angry(&mut w, 71, [12.5, 64.0, 5.5]);
+    bucket(&mut w, data::ItemKind::WaterBucket);
+    let mut p = Plan::new(Aim::Race);
+    let c = p.end_enderman_step(&w, 0).expect("pouring");
+    assert!(c.pitch.is_some_and(|x| x > 60.0), "looking down: {c:?}");
+    assert!(p.take_acts().contains(&Act::UseItem));
+    assert!(
+        p.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. })),
+        "never two fought"
+    );
+    // The source at the feet: stood in, noted.
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (12, 64, 0),
+        state: state(BlockKind::Water),
+    }));
+    let _ = p.end_enderman_step(&w, 20);
+    assert_eq!(p.dragon.ender_water, Some([12, 64, 0]));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: water poured at [12, 64, 0] against 2 angry endermen")
+    );
+    // None angry near: the water taken back with the empty bucket.
+    let mut calm = end_at(feet);
+    calm.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (12, 64, 0),
+        state: state(BlockKind::Water),
+    }));
+    bucket(&mut calm, data::ItemKind::Bucket);
+    assert!(p.ender_water_step(&calm, 40).is_some());
+    assert!(p.take_acts().contains(&Act::UseItem));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: the water against endermen taken back at [12, 64, 0]")
+    );
+    // One angry, unhurt: no water; it is the sword's.
+    let mut one = end_at(feet);
+    angry(&mut one, 70, [13.5, 64.0, 0.5]);
+    bucket(&mut one, data::ItemKind::WaterBucket);
+    let mut q = Plan::new(Aim::Race);
+    assert_eq!(q.ender_water_step(&one, 0), None);
+}
+
+#[test]
+fn a_pace_leg_a_cloud_reaches_is_given_up_and_recovery_comes_first_at_low_health() {
+    // Race 46063334187 lane 9: paced into a cloud; lane 4 walked through clouds at 1.7 health.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 0.0);
+    cloud(&mut w, 50, [12.5, 64.0, 6.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    p.dragon.pace_to = Some([12, 64, 6]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert_ne!(
+        p.dragon.pace_to,
+        Some([12, 64, 6]),
+        "the leg into the cloud given up"
+    );
+    // Under 10: work cut, noted, kept away from the cloud.
+    let mut low = end_at(feet);
+    cloud(&mut low, 50, [14.5, 64.0, 0.5], 3.0);
+    low.player.health = Some(6.0);
+    let mut r = Plan::new(Aim::Race);
+    r.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    let c = r.recover_step(&low, 0).expect("recovering");
+    assert!(matches!(r.task, plan::Task::Idle));
+    assert!(c.forward, "away from the cloud: {c:?}");
+    assert!(
+        r.events_since(0)
+            .iter()
+            .any(|e| e.what == "recover: health 6.0 under 10")
+    );
+    // Back over 16: the work goes on.
+    low.player.health = Some(17.0);
+    assert_eq!(r.recover_step(&low, 100), None);
+    assert!(!r.dragon.recovering);
 }

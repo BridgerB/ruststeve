@@ -1708,6 +1708,12 @@ impl Plan {
             return self.held("spikes_clutch", c);
         }
         // <<< E4
+        // >>> E3 (issue 20e): the head out of water before it drowns, ahead of every row and task
+        // but a live dodge (`end::Plan::drown_guard`; race 46045482138 lane 5 drowned in a pit).
+        if let Some(c) = self.drown_guard(w, tick) {
+            return self.held("drown_guard", c);
+        }
+        // <<< E3
         // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
         // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
         if let Some(c) = self.charge_step(w, tick) {
@@ -1721,6 +1727,11 @@ impl Plan {
         if let Some(c) = self.always(w, &body, tick) {
             return self.held("always", c);
         }
+        // >>> E5 (wall 46): recovery first at low health in the End.
+        if let Some(c) = self.recover_step(w, tick) {
+            return self.held("recover_step", c);
+        }
+        // <<< E5
         // >>> pearls (P3, issue 18f): the hunt's rule table, in the warped forest
         // (docs/problems/pearls-hunt.md). `None` lets the task in hand run.
         if let Some(c) = self.pearls_step(w, tick) {
@@ -2391,6 +2402,10 @@ impl Plan {
             // <<< E5
             | Task::Swim(..) => None,
         };
+        // >>> E5 (walls 39, 44): a meal in hand is cut when the dragon comes in the End, and any
+        // meal past its cap (dev race 46048455555 lane 1: an eat held 2,360 ticks).
+        let running = self.meal_cut(w, tick, running);
+        // <<< E5
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
         let mut chosen: Option<(String, make::Always)> = None;
         for (id, row) in &table.always {
@@ -2400,9 +2415,6 @@ impl Plan {
                     running == Some(make::Always::Defend)
                         || defend::foe_except(w, rules, &ignored, never_kinds).is_some()
                 }
-                // >>> E5 (wall 39): a meal in hand in the End is cut when the dragon comes.
-                make::Always::Eat if running == Some(*row) => !self.dragon_holds_meal(w),
-                // <<< E5
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
                 make::Always::Eat => {

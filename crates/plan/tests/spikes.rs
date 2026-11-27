@@ -2357,3 +2357,369 @@ fn an_empty_bucket_refills_from_the_water_left_behind() {
         notes(&p)
     );
 }
+
+#[test]
+fn the_crystals_that_heal_the_perch_are_taken_first() {
+    // E5's jar read: the perched dragon heals from the nearest crystal within 40 on x and z of the
+    // perch; dev race 46048455555 lane 1 took the caged (42, 0) first and left (12, 39), which
+    // healed the dragon back to 200.
+    assert!(spikes::heals_the_perch([12.5, 77.0, 39.5]));
+    assert!(spikes::heals_the_perch([-33.5, 80.0, 24.5]));
+    assert!(!spikes::heals_the_perch([42.5, 104.0, 0.5]));
+    assert!(!spikes::heals_the_perch([-41.5, 90.0, -0.5]));
+    let mut w = world(2, [40.5, 64.0, 0.5]);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![CRYSTAL] }));
+    for (id, pos) in [
+        (81, [42.5, 104.0, 0.5]),
+        (82, [12.5, 77.0, 39.5]),
+        (83, [33.5, 92.0, -24.5]),
+    ] {
+        w.step(&Event::Packet(S2c::AddEntity {
+            id,
+            uuid: [id as u8; 16],
+            kind: EntityKind::EndCrystal.id(),
+            x: pos[0],
+            y: pos[1],
+            z: pos[2],
+            velocity: [0.0; 3],
+        }));
+    }
+    let order: Vec<i32> = spikes::crystals_in_order(&w, [40.5, 64.0, 0.5])
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect();
+    // (33, -25) and (12, 39) heal the perch: first, nearest first; the caged (42, 0) last though
+    // nearest.
+    assert_eq!(order, vec![83, 82, 81]);
+}
+
+#[test]
+fn blocks_wanted_is_the_number_the_pillar_checks_compare_against() {
+    // Frontier race 46055289196: E3's stock stopped at its own 22 to 40, the pillar wanted 35 to
+    // 41, and "too few blocks" repeated 60 times with nothing mined. One source for both.
+    let wanted_in = |p: &Plan, what: &str| -> Option<i32> {
+        p.events
+            .iter()
+            .find(|e| e.what == what)
+            .and_then(|e| e.why.split(", ").nth(1))
+            .and_then(|s| s.split(' ').next())
+            .and_then(|n| n.parse().ok())
+    };
+    // The walk to the foot.
+    let mut w = world(2, [14.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 3));
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), None);
+    let noted = wanted_in(&p, "spikes: no walk to the foot: too few blocks");
+    assert!(noted.is_some(), "{:?}", notes(&p));
+    assert_eq!(spikes::blocks_wanted(&p, &w), noted);
+    // The climb at the foot.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 3));
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), None);
+    let noted = wanted_in(&p, "spikes: no climb: too few blocks");
+    assert!(noted.is_some(), "{:?}", notes(&p));
+    assert_eq!(spikes::blocks_wanted(&p, &w), noted);
+    // Enough held: the same number, and the climb.
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 64));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes_task(&w, 100);
+    assert!(spikes::blocks_wanted(&p, &w).is_some_and(|n| n <= 64));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: pillar up from"))
+    );
+}
+
+#[test]
+fn stranded_on_a_spikes_top_the_bot_comes_down_onto_the_clutch() {
+    // Race 46059621531 (the crystals_5 resume): on the spike's top with no pillar record, 7 of
+    // 10 waited "stranded" until a fireball's cloud came.
+    // At the top's edge over ground: off it.
+    let mut w = world(2, [10.5, 70.0, 8.5]);
+    water(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: off the spike's top onto the clutch at (10, 70, 8)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(
+        p.spikes.doing,
+        Some(spikes::Doing::Step {
+            to: (11, 70, 8),
+            sneak: false,
+            ..
+        })
+    ));
+    // Inside the top: walked to its edge first.
+    let mut w = world(2, [9.5, 70.0, 8.5]);
+    water(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Explore(_))),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: to the spike's edge at")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!notes(&p).iter().any(|n| n == "spikes: wait"));
+}
+
+#[test]
+fn the_clutchs_water_is_found_a_little_further_out() {
+    // Race 46059621531 lane 2: poured on an edge's column, landed on a higher one; "the water
+    // gone, not taken back; 0 water buckets held".
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    set(&mut w, (22, 63, 21), BlockKind::Water);
+    assert_eq!(spikes::clutch_water(&w, (20, 64, 20)), Some((22, 63, 21)));
+    set(&mut w, (21, 64, 20), BlockKind::Water);
+    assert_eq!(
+        spikes::clutch_water(&w, (20, 64, 20)),
+        Some((21, 64, 20)),
+        "the nearest first"
+    );
+}
+
+#[test]
+fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
+    // E5's read of race 46063334187 lane 5: "climb on through (the dragon 63 off in phase 0)",
+    // struck off 3 under its stand at (42, 91, 19), a fatal fall.
+    // Up, holding 50 off and closing (70 off 5 ticks ago): the climb stops and the bot comes
+    // down by the clutch (the test spike's stand is 3 over, so only the closing denies the
+    // near-stand exception here; `the_one_exception_near_the_stand_holding_and_not_closing`
+    // covers the rest).
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    water(&mut w);
+    dragon(&mut w, [8.5, 67.0, 55.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.dragon_seen = Some((95, 70.0));
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    let n = notes(&p);
+    assert!(
+        !n.iter().any(|n| n.starts_with("spikes: climb on")),
+        "{n:?}"
+    );
+    assert!(
+        n.iter().any(|n| n == "spikes: clutch down from (8, 67, 5)"),
+        "{n:?}"
+    );
+    // Not holding (strafing 70 off, past the strafe's reach): stopped and down, near the stand
+    // or not.
+    dragon(&mut w, [8.5, 67.0, 75.5], 1);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    p.spikes_task(&w, 100);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: clutch down from (8, 67, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    // No water bucket: held, not on.
+    dragon(&mut w, [8.5, 67.0, 55.5], 0);
+    w.inventory.slots.remove(&44);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.dragon_seen = Some((95, 70.0));
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: climb stopped, held"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn the_one_exception_near_the_stand_holding_and_not_closing() {
+    let holding = |dist: f64, phase: i32| spikes::DragonNear {
+        id: DRAGON,
+        dist,
+        phase: Some(phase),
+    };
+    assert!(spikes::climb_on_near_stand(
+        Some(&holding(50.0, 0)),
+        false,
+        3
+    ));
+    assert!(spikes::climb_on_near_stand(None, false, 5));
+    assert!(
+        !spikes::climb_on_near_stand(Some(&holding(50.0, 0)), false, 6),
+        "too far under"
+    );
+    assert!(
+        !spikes::climb_on_near_stand(Some(&holding(50.0, 0)), true, 3),
+        "closing"
+    );
+    assert!(
+        !spikes::climb_on_near_stand(Some(&holding(50.0, 1)), false, 3),
+        "strafing"
+    );
+}
+
+#[test]
+fn stubs_of_its_own_on_all_four_axes_are_climbed_back_onto() {
+    // The orchestrator, after wall 43: a spike has 4 axes; stubs left standing on each must never
+    // leave it with no approach.
+    let mut w = world(2, [16.5, 64.0, 16.5]);
+    water(&mut w);
+    let sp = spikes::spike_for(&w, &[], CRYSTAL_AT).expect("the spike");
+    let mut st = SpikeState::default();
+    for a in Axis::ALL {
+        let col = spikes::stand(&sp, a).column;
+        pillar(&mut w, col, 64, 66, BlockKind::Cobblestone);
+        st.stubs.push(PillarRec {
+            x: col.0,
+            z: col.1,
+            base: 64,
+        });
+    }
+    // From the ground: a walk to a side foot beside a stub, never a refusal.
+    let (to, axis) = match spikes::next(&w, &st, 0) {
+        Next::Walk {
+            to,
+            approach: Some((8, 8, axis)),
+        } => (to, axis),
+        n => panic!("{n:?}"),
+    };
+    let col = spikes::stand(&sp, axis).column;
+    assert_eq!(to.1, 64, "the side foot on the ground");
+    assert_eq!(
+        (to.0 - col.0).abs() + (to.2 - col.1).abs(),
+        1,
+        "beside the stub {col:?}: {to:?}"
+    );
+    // At the side foot: up a side pillar to the stub's top.
+    at(&mut w, [f64::from(to.0) + 0.5, 64.0, f64::from(to.2) + 0.5]);
+    match spikes::next(&w, &st, 0) {
+        Next::Pillar { column, top, .. } => {
+            assert_eq!(column, (to.0, to.2));
+            assert_eq!(top, 67);
+        }
+        n => panic!("{n:?}"),
+    }
+    // At the side pillar's top: onto the stub.
+    pillar(&mut w, (to.0, to.2), 64, 66, BlockKind::Cobblestone);
+    at(&mut w, [f64::from(to.0) + 0.5, 67.0, f64::from(to.2) + 0.5]);
+    st.pillars.push(PillarRec {
+        x: to.0,
+        z: to.2,
+        base: 64,
+    });
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Step {
+            to: (col.0, 67, col.1),
+            sneak: false
+        }
+    );
+    // On the stub: the climb goes on there, the whole pillar's blocks wanted from its base.
+    at(
+        &mut w,
+        [f64::from(col.0) + 0.5, 67.0, f64::from(col.1) + 0.5],
+    );
+    match spikes::next(&w, &st, 0) {
+        Next::Pillar { column, .. } => assert_eq!(column, col),
+        n => panic!("{n:?}"),
+    }
+    let a = spikes::approach_along(&w, &sp, axis).expect("the approach");
+    assert_eq!(
+        spikes::pillar_wants(&st, &a),
+        spikes::stand(&sp, axis).stand.1 - 64 + spikes::PILLAR_SPARE
+    );
+}
+
+/// A spike's cage as vanilla's guarded spike puts it (config/end.toml: iron bars over centre -2..+2
+/// on x and z, y top..top + 3; 73 bars): the ring where |dx| or |dz| is 2 from top to top + 2, and
+/// the 5 by 5 roof at top + 3.
+fn cage(w: &mut World, (cx, cz): (i32, i32), top: i32) {
+    for dx in -2..=2_i32 {
+        for dz in -2..=2_i32 {
+            for y in top..=top + 3 {
+                if y == top + 3 || dx.abs() == 2 || dz.abs() == 2 {
+                    set(w, (cx + dx, y, cz + dz), BlockKind::IronBars);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off() {
+    // Race 46070173620: the crystals_5 stand on the caged [-34, 24] was inside its bars; "no edge
+    // over ground" 12 to 53 times, a dig-out at its own bar, 6 of 8 dead.
+    let mut w = world(2, [9.5, 70.0, 9.5]);
+    water(&mut w);
+    cage(&mut w, (8, 8), 70);
+    // Never a dig-out from the spike's top.
+    assert!(
+        !matches!(
+            spikes::next(&w, &SpikeState::default(), 0),
+            Next::DigOut { .. }
+        ),
+        "{:?}",
+        spikes::next(&w, &SpikeState::default(), 0)
+    );
+    // The bar beside the feet, the feet's height first.
+    let mut p = Plan::new(Aim::Race);
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (9, 70, 10)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: out of the cage at (9, 70, 10)"),
+        "{:?}",
+        notes(&p)
+    );
+    // Then the head's.
+    set(&mut w, (9, 70, 10), BlockKind::Air);
+    assert_eq!(spikes::cage_bar(&w, (9, 70, 9)), Some((9, 71, 10)));
+    // Both out: to the gap at the top's edge, over ground, and off.
+    set(&mut w, (9, 71, 10), BlockKind::Air);
+    assert_eq!(
+        spikes::spike_edge(&w, (9, 70, 9)),
+        Some(((9, 70, 10), (9, 70, 11)))
+    );
+    let mut p = Plan::new(Aim::Race);
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Explore(_))),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: to the spike's edge at (9, 70, 10)"),
+        "{:?}",
+        notes(&p)
+    );
+}

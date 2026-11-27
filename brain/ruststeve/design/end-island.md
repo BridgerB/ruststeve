@@ -9,7 +9,7 @@ lastUpdated: 2026-11-27
 verifiedAgainst: ruststeve@117843e
 sourceRefs:
   - "ruststeve:crates/plan/src/end.rs#pub fn end_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
-  - "ruststeve:crates/plan/src/end.rs#pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {"
+  - "ruststeve:crates/plan/src/end.rs#pub fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {"
   - "ruststeve:crates/plan/src/end.rs#pub fn end_look(w: &World, want: Option<(f32, f32)>) -> (f32, f32) {"
   - "ruststeve:crates/plan/src/end.rs#pub fn void_edge(w: &World, feet: Cell) -> bool {"
   - "ruststeve:crates/plan/tests/end.rs#fn in_the_sealed_bunker_short_of_stone_a_stock_tunnel_begins() {"

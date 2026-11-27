@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "island"
-tag = "race-45888713362"
-asset = "snapshot-island-45888713362-race-45888713362-lane-0.tar.zst"
-commit = "ad49b79068f3dcbbe28a0c15a0bd5e929cef177a"
-how = "rs-l00-b00 of race 45888713362 (issue 20, 2026-11-26), resumed from the real end frontier (race 45887747475 lane 1, on the End's arrival platform): pillared up 4, bridged west over the void with rails on both sides, onto the main island, at (30.2, 60.0, 0.5) at server tick 1,000. Holds full iron armour, an iron sword, a shield, 3 stone pickaxes, 23 cooked food, 2 water buckets, 28 cobblestone. All 3 lanes of the race reached it. Real (no development mark, no kind)."
+stage = "crystals_5"
+tag = "race-46063334187"
+asset = "snapshot-crystals_5-46063334187-race-46063334187-lane-8.tar.zst"
+commit = "5caa8c94e1de6256d0b7beeb76e4f3880b01b362"
+how = "rs-l08-b00 of race 46063334187 (issue 20, 2026-11-27), resumed from the real island frontier (race 45888713362 lane 0): five crystals destroyed by pillar and strike ('gone (struck)' with its blast; 2160 [12, 39], 2680 [-34, 24], 4400 [33, 24], 14180 [-34, -25], 28540 [-13, -40]), the snapshot at the fifth strike on its stand by spike [-13, -40], at (-9.3, 97.0, -39.5), server tick 28,540. Chosen over race 46055583508 lane 2's crystals_5 (the stand on spike [-34, 24]): from that one E4's step-off found no edge over seen ground and 6 of 8 died stranded (race 46070173620), while from this one 4 of 4 stepped off onto the clutch and landed alive (race 46066925064). Real (no development mark, no kind)."

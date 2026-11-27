@@ -129,6 +129,10 @@ near = 60.0
 # (race 45994686575: three bots reached 1 left, one 2 left, and none was saved).
 left_5 = 5
 left_1 = 1
+# ... and only with the feet on the ground: this many of the four cells beside the block under
+# the feet full (a 1x1 pillar 0, a stand beside a spike 1, the island 4). Race 46059621531
+# resumed a crystals_5 taken on a stand at the 5th strike: 7 of 10 lanes stranded and dead.
+ground_sides = 3
 # The entity tracking distance that `near` keeps every spike inside (view distance 8 less one
 # chunk, ChunkMap.TrackedEntity; the race server's server.properties).
 tracking = 112.0

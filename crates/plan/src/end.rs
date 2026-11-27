@@ -380,15 +380,8 @@ pub const PICK_RESERVE: i32 = 40;
 /// carried (E4 builds from any; the frontier bot carries about 92: the first pillar may need no
 /// mining at all).
 pub fn pillar_blocks(w: &World) -> i32 {
-    [
-        ItemKind::EndStone,
-        ItemKind::Cobblestone,
-        ItemKind::CobbledDeepslate,
-        ItemKind::Netherrack,
-    ]
-    .iter()
-    .map(|k| craft::count(w, *k))
-    .sum()
+    // E4's own count, so the stock and the climb agree (frontier race 46055289196).
+    crate::spikes::pillar_blocks(w)
 }
 
 /// The hotbar slot (0 to 8) of the most worn pickaxe there, used first so another stays fresh.
@@ -414,6 +407,72 @@ pub const MINE_FROM_FOUNTAIN: f64 = 40.0;
 pub fn dragon_down_or_charging(w: &World) -> bool {
     dragon(w).is_some_and(|(_, phase)| phase.is_some_and(|p| matches!(p, 2 | 3 | 5 | 6 | 7 | 8)))
 }
+
+/// A full air supply (the player's metadata index 1), and how recent a drown hit counts.
+pub const FULL_AIR: i32 = 300;
+pub const DROWN_RECENT: u64 = 40;
+
+/// E4's "too few blocks" notes count this many ticks back.
+pub const WANTED_RECENT: u64 = 200;
+
+/// The number before " wanted" in a note ("29 blocks held, 37 wanted for the pillar …" gives 37).
+pub fn wanted_in(text: &str) -> Option<i32> {
+    let at = text.find(" wanted")?;
+    let head = text.get(..at)?;
+    let digits: String = head
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    digits.parse().ok()
+}
+
+/// Ground walked to for mining, kept so the next walk goes elsewhere.
+pub const MINE_TRIED_KEPT: usize = 16;
+/// How far round the feet the next mining ground is looked for.
+pub const MINE_LOOK: i32 = 12;
+
+/// The next ground to mine from: a cell standing on exposed surface end stone, `MINE_FROM_FOUNTAIN`
+/// or more from the fountain, with a block to dig beside it (`surface_cell`), not one of `tried`,
+/// nearest the feet first, within `MINE_LOOK`.
+pub fn mine_ground(w: &World, feet: Cell, tried: &[Cell]) -> Option<Cell> {
+    let mut best: Option<(i32, Cell)> = None;
+    for dx in -MINE_LOOK..=MINE_LOOK {
+        for dz in -MINE_LOOK..=MINE_LOOK {
+            let d2 = dx * dx + dz * dz;
+            if d2 < 4 || best.is_some_and(|(b, _)| d2 >= b) {
+                continue;
+            }
+            let (x, z) = (feet.0 + dx, feet.2 + dz);
+            let at = [f64::from(x) + 0.5, 0.0, f64::from(z) + 0.5];
+            if flat_to_fountain(at) < MINE_FROM_FOUNTAIN {
+                continue;
+            }
+            let Some(top) = surface_y(w, x, z, feet.1 + 8) else {
+                continue;
+            };
+            let cell = (x, top + 1, z);
+            if kind(w, (x, top, z)) != Some(BlockKind::EndStone)
+                || tried.contains(&cell)
+                || !path::Cells::new(w).standable(cell)
+                || surface_cell(w, cell).is_none()
+            {
+                continue;
+            }
+            best = Some((d2, cell));
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
+/// No full block at the feet's height this near: the true ground, where a dig one under may go.
+pub const PIT_LOOK: i32 = 2;
+
+/// Runs of wooden pickaxes at a placed table at most (the frontier bot's wood makes two or three).
+pub const WOOD_RUNS: u32 = 3;
 
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
@@ -446,10 +505,14 @@ pub fn surface_cell_at(w: &World, feet: Cell, under_ok: bool) -> Option<Cell> {
         let c = (feet.0 + dx, feet.1, feet.2 + dz);
         (kind(w, c) == Some(BlockKind::EndStone) && solid(w, (c.0, c.1 - 1, c.2))).then_some(c)
     });
+    // Flat, and on the true ground: no full block at the feet's height within `PIT_LOOK` (the bottom
+    // of a wide trench looks flat too, and digging under it again made a pit 8 deep: race
+    // 46066925064 lane 0, killed by breath mining at (7, 54, -42)).
     let flat = SIDES.iter().all(|(dx, dz)| {
         let b = (feet.0 + dx, feet.1, feet.2 + dz);
         open(w, b) && open(w, (b.0, b.1 + 1, b.2))
-    });
+    }) && (-PIT_LOOK..=PIT_LOOK)
+        .all(|dx| (-PIT_LOOK..=PIT_LOOK).all(|dz| !solid(w, (feet.0 + dx, feet.1, feet.2 + dz))));
     let under = SIDES.iter().filter_map(|(dx, dz)| {
         let b = (feet.0 + dx, feet.1, feet.2 + dz);
         let c = (b.0, b.1 - 1, b.2);
@@ -714,6 +777,22 @@ pub struct EndState {
     /// they are below it.
     #[serde(default)]
     pub surface_y: Option<i32>,
+    /// The drowning guard: in force, its dig over the head, guards begun.
+    #[serde(default)]
+    pub drowning: bool,
+    #[serde(default)]
+    pub drown_dig: Option<Dig>,
+    #[serde(default)]
+    pub drown_guards: u32,
+    /// The cell of the surface dig in hand (cut for a cloud on the feet).
+    #[serde(default)]
+    pub surface_dig: Option<Cell>,
+    /// Wooden pickaxe runs begun.
+    #[serde(default)]
+    pub wood_runs: u32,
+    /// Mining ground walked to, the newest last.
+    #[serde(default)]
+    pub mine_tried: Vec<Cell>,
     /// The hold for the dragon noted.
     #[serde(default)]
     pub dragon_held_noted: bool,
@@ -1555,11 +1634,12 @@ impl Plan {
                     self.end.surface_digs
                 ),
             );
+            self.end.surface_dig = Some(c);
             return Some(Task::Dig(Dig::new(w, c, tick)));
         }
         // None in reach: the next ground is the mining's level again.
         self.end.surface_y = None;
-        // None in reach: a few cells on toward the fountain, the island's middle.
+        // None in reach: on to the next ground outside the fountain's 40.
         self.end.surface_walks += 1;
         if self.end.surface_walks > SURFACE_WALKS {
             self.end.handed_back = false;
@@ -1570,15 +1650,18 @@ impl Plan {
             );
             return None;
         }
-        let body = w.body?;
-        let d = flat_to_fountain(body.pos).max(1.0);
-        let step = SURFACE_STEP.min(d - BUNKER_MIN).max(1.0);
-        #[allow(clippy::cast_possible_truncation)]
-        let target = (
-            (body.pos[0] - (body.pos[0] - FOUNTAIN[0]) / d * step).floor() as i32,
-            feet.1,
-            (body.pos[2] - (body.pos[2] - FOUNTAIN[1]) / d * step).floor() as i32,
-        );
+        // The next ground: exposed end stone at `MINE_FROM_FOUNTAIN` or more from the fountain,
+        // nearest first (race 46063334187 lanes 3 and 6: a walk toward the fountain to inside 40,
+        // then "out to mine" again, 25 times, 0 mined in 2,900 ticks).
+        let Some(target) = mine_ground(w, feet, &self.end.mine_tried) else {
+            self.end.surface_walks = SURFACE_WALKS + 1;
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return None;
+        };
+        self.end.mine_tried.push(target);
+        if self.end.mine_tried.len() > MINE_TRIED_KEPT {
+            self.end.mine_tried.remove(0);
+        }
         let mut walk = Walk::new(
             target,
             Goal::Near {
@@ -1639,14 +1722,30 @@ impl Plan {
             return Some(t);
         }
         // <<< E8
+        // Wooden pickaxes from the wood carried, under the reserve (race 46071506005 lanes 2 and
+        // 3 down to 2 and 9 uses at about 16,800 with a table, a log, 6 planks and 4 sticks held:
+        // wood mines end stone; the stone swords do not).
+        if let Some(t) = self.end_wood_picks(w, feet, tick) {
+            return Some(t);
+        }
         let stone = pillar_blocks(w);
         // What the next pillar needs, no more (race 45994686575 lane 5: three stone pickaxes worn
         // out by 49,600, 44 held against the last pillar's 49, the End has no wood): at most the
         // tallest pillar and its walls; a hand-back for blocks mines again.
-        let want = self
-            .next_pillar_need(w)
-            .unwrap_or(STOCK_ENOUGH)
-            .min(STOCK_ENOUGH);
+        let want = self.blocks_wanted(w, tick);
+        // Short again (the next pillar wants more than the last, or blocks were spent): the stock
+        // reopens, marked over or not (race 46055289196: "surface stock over (29 … (29 wanted))"
+        // then E4's "too few blocks (29 held, 37 wanted)" 60 times, no progress to 5,700 ticks;
+        // the old reopen asked a hand-back of none, and E4's hold is a task).
+        if self.end.open_stock_over && stone < want {
+            self.end.open_stock_over = false;
+            self.end.surface_walks = 0;
+            self.note(
+                tick,
+                "end: surface stock again".to_owned(),
+                format!("{stone} blocks held, {want} wanted for the next pillar"),
+            );
+        }
         if stone < want && self.end.surface_walks <= SURFACE_WALKS && !self.end.open_stock_over {
             if let Some(t) = self.surface_mine(w, feet, tick) {
                 return Some(t);
@@ -1660,7 +1759,7 @@ impl Plan {
             self.note(
                 tick,
                 "end: surface stock over".to_owned(),
-                format!("{stone} end stone held ({want} wanted), mined in the open"),
+                format!("{stone} blocks held ({want} wanted), mined in the open"),
             );
         }
         let next = if crystals_alive(w) > 0 {
@@ -1679,6 +1778,51 @@ impl Plan {
             self.end.handoffs += 1;
         }
         next
+    }
+
+    /// A run of wooden pickaxes at a crafting table placed where the bot stands (way home's
+    /// `TRIP_WOOD_STEPS`; `arrival_table` places the carried one and takes it back after), begun
+    /// with the pickaxe uses under `PICK_RESERVE`, two or more logs and planks held, on the ground
+    /// under the sky with no cloud near and the dragon in a lull; at most `WOOD_RUNS`. Noted.
+    fn end_wood_picks(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
+        let picking = self.base.steps == crate::home::TRIP_WOOD_STEPS.to_vec() && !self.base.over;
+        if !picking {
+            let uses = crate::endermen::pickaxe_uses_left(w);
+            let wood = crate::base::logs_held(w) + crate::base::planks_held(w);
+            let body = w.body?;
+            let calm = world::stage::open_sky(w)
+                && body.on_ground
+                && cloud_on(w, &[feet]).is_none()
+                && fire_near(w, feet, STAIR_CLEAR).is_none()
+                && lull(w);
+            if uses >= PICK_RESERVE || wood < 2 || self.end.wood_runs >= WOOD_RUNS || !calm {
+                return None;
+            }
+            self.end.wood_runs += 1;
+            self.base = crate::base::BaseState {
+                steps: crate::home::TRIP_WOOD_STEPS.to_vec(),
+                ..crate::base::BaseState::default()
+            };
+            self.note(
+                tick,
+                format!("end: wooden pickaxes at a placed table ({})", self.end.wood_runs),
+                format!(
+                    "pickaxe uses {uses} under {PICK_RESERVE}; {} logs, {} planks, {} sticks, {} tables",
+                    crate::base::logs_held(w),
+                    crate::base::planks_held(w),
+                    craft::count(w, ItemKind::Stick),
+                    craft::count(w, ItemKind::CraftingTable)
+                ),
+            );
+        }
+        let running = self.base.steps == crate::home::TRIP_WOOD_STEPS.to_vec() && !self.base.over;
+        if let Some(t) = self.arrival_table(w, tick, running) {
+            return Some(t);
+        }
+        if running {
+            return self.base_task(w, tick);
+        }
+        None
     }
 
     /// Up out of a mining pit onto the flat at `level`: a walk to a standable cell there beside.
@@ -1727,6 +1871,27 @@ impl Plan {
             format!("{MINE_FROM_FOUNTAIN} or more from the fountain; {d:.0} now"),
         );
         Some(Task::Explore(walk))
+    }
+
+    /// The blocks the next pillar wants, as the crystals' own check counts them: E4's
+    /// `spikes::blocks_wanted`, else `next_pillar_need` (at most `STOCK_ENOUGH`); E4's last "too few
+    /// blocks (… N wanted …)" note within `WANTED_RECENT` ticks raises it, a backstop.
+    pub fn blocks_wanted(&self, w: &World, tick: u64) -> i32 {
+        let asked = self
+            .events
+            .iter()
+            .rev()
+            .take_while(|e| tick.saturating_sub(e.tick) <= WANTED_RECENT)
+            .find(|e| e.what.starts_with("spikes:") && e.what.contains("too few blocks"))
+            .and_then(|e| wanted_in(&e.what).or_else(|| wanted_in(&e.why)));
+        // E4's exact number first (`spikes::blocks_wanted`: the next pillar's height plus its
+        // spare); with no crystal to work, the estimate.
+        let ours = crate::spikes::blocks_wanted(self, w).unwrap_or_else(|| {
+            self.next_pillar_need(w)
+                .unwrap_or(STOCK_ENOUGH)
+                .min(STOCK_ENOUGH)
+        });
+        asked.map_or(ours, |a| a.max(ours))
     }
 
     /// The next pillar's blocks: from the nearest crystal's spike, its top over the ground beside it
@@ -2014,7 +2179,7 @@ impl Plan {
 
     /// One tick of E3's own steps in the End (the bridge, a work, an eat) while no task runs, or
     /// the choice of the next (`end_task`). `None` outside the End or while a task runs.
-    pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if !in_end(w) {
             return None;
         }
@@ -2030,6 +2195,22 @@ impl Plan {
                 self.note(
                     tick,
                     "end: work dropped for a cloud on the feet".to_owned(),
+                    "the breath rule walks the bot out".to_owned(),
+                );
+            }
+            // A surface dig of E3's under way: cut too (the same race: the dig went on with the
+            // cloud on the feet until the bot died).
+            let cut = if let Task::Dig(d) = &self.task {
+                (self.end.surface_dig == Some(d.target)).then_some(d.target)
+            } else {
+                None
+            };
+            if let Some(c) = cut {
+                self.task = Task::Idle;
+                self.end.surface_dig = None;
+                self.note(
+                    tick,
+                    format!("end: surface dig at {c:?} cut for a cloud on the feet"),
                     "the breath rule walks the bot out".to_owned(),
                 );
             }
@@ -2692,6 +2873,93 @@ impl Plan {
         (f.0 == b.0 && f.2 == b.2 && (b.1..=b.1 + 3).contains(&f.1))
             || door_cells.contains(&f)
             || door_cells.contains(&(f.0, f.1 - 1, f.2))
+    }
+
+    /// The drowning guard (race 46045482138 lane 5: a breath notch, E4's clutch water left in it,
+    /// 8 drown hits in 140 ticks sitting idle in water at (42, 51, 74), dead at 34,900; nothing
+    /// reacted to the air running out). In the End, with the eye in water and the air under full,
+    /// or a drown hit within `DROWN_RECENT` ticks: the head out at once. Up when the cell over the
+    /// eye is open (a swim up, pressing into the side whose top is free for the bank's lift); with
+    /// it shut, that cell dug. Every task but a live fireball dodge (E5's) waits on it.
+    pub(crate) fn drown_guard(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) || self.dragon.dodge_walk.is_some() {
+            return None;
+        }
+        let body = w.body?;
+        #[allow(clippy::cast_possible_truncation)]
+        let eye = (
+            body.pos[0].floor() as i32,
+            (body.pos[1] + physics::EYE_HEIGHT).floor() as i32,
+            body.pos[2].floor() as i32,
+        );
+        let wet = kind(w, eye) == Some(BlockKind::Water);
+        let now = w.session.server_ticks;
+        let hit = w.hits.iter().any(|h| {
+            h.damage_type.contains("drown") && now.saturating_sub(h.at_tick) <= DROWN_RECENT
+        });
+        let short = w.player.air.is_some_and(|a| a < FULL_AIR);
+        if !((wet && short) || hit) {
+            self.end.drown_dig = None;
+            self.end.drowning = false;
+            return None;
+        }
+        if !self.end.drowning {
+            self.end.drowning = true;
+            self.end.drown_guards += 1;
+            self.note(
+                tick,
+                format!("end: head out of the water at {eye:?}"),
+                format!(
+                    "air {:?} of {FULL_AIR}, drown hit {hit}; guard {}",
+                    w.player.air, self.end.drown_guards
+                ),
+            );
+        }
+        // A dig in hand over the head: on with it.
+        if let Some(mut d) = self.end.drown_dig.take() {
+            let (c, act, status) = d.step(w, tick);
+            self.acts.extend(act);
+            if matches!(status, DigStatus::Running) {
+                self.end.drown_dig = Some(d);
+            }
+            return Some(Controls { jump: true, ..c });
+        }
+        let over = (eye.0, eye.1 + 1, eye.2);
+        let roofed = solid(w, over);
+        if roofed {
+            self.note(
+                tick,
+                format!("end: dig up out of the water at {over:?}"),
+                "the cell over the head shut".to_owned(),
+            );
+            let mut d = Dig::new(w, over, tick);
+            let (c, act, _) = d.step(w, tick);
+            self.acts.extend(act);
+            self.end.drown_dig = Some(d);
+            return Some(Controls { jump: true, ..c });
+        }
+        // Up, pressing into a side whose cell over the eye is open (the bank's lift out).
+        let bank = SIDES
+            .iter()
+            .find(|(dx, dz)| {
+                solid(w, (eye.0 + dx, eye.1, eye.2 + dz))
+                    && !solid(w, (eye.0 + dx, eye.1 + 1, eye.2 + dz))
+            })
+            .or_else(|| {
+                SIDES
+                    .iter()
+                    .find(|(dx, dz)| !solid(w, (eye.0 + dx, eye.1 + 1, eye.2 + dz)))
+            });
+        let yaw = bank.map_or(f64::from(w.player.yaw), |(dx, dz)| {
+            f64::from(-*dx).atan2(f64::from(*dz)).to_degrees()
+        });
+        Some(Controls {
+            forward: bank.is_some(),
+            jump: true,
+            sneak: false,
+            yaw,
+            pitch: Some(crate::endermen::EYES_DOWN),
+        })
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes

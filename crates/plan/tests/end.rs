@@ -1543,3 +1543,191 @@ fn surface_mining_keeps_off_the_perch_and_holds_for_a_landing_dragon() {
     );
     assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
 }
+
+#[test]
+fn in_a_two_deep_water_pit_with_air_running_out_the_head_comes_out() {
+    // Race 46045482138 lane 5: 8 drown hits sitting idle in water in a pit, dead at 34,900.
+    // A pit two deep at (50, 62 to 63, 0) full of water, the bot at its bottom, the eye in water.
+    let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+    for y in 62..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Water);
+    }
+    w.player.air = Some(200);
+    let mut p = racer();
+    p.end.bridged = true;
+    let c = p.step(&w);
+    assert!(c.jump, "{c:?}");
+    assert!(c.forward, "pressing into a side whose top is free: {c:?}");
+    assert!(
+        noted(&p, "end: head out of the water at (50, 63, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    // Roofed over the head: dug up.
+    let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+    for y in 62..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Water);
+    }
+    set(&mut w, (50, 64, 0), BlockKind::EndStone);
+    w.player.air = Some(200);
+    w.held = 2;
+    let mut p = racer();
+    p.end.bridged = true;
+    let mut acts = Vec::new();
+    for _ in 0..3 {
+        p.step(&w);
+        acts.extend(p.take_acts());
+    }
+    assert!(
+        noted(&p, "end: dig up out of the water at (50, 64, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        acts.iter()
+            .any(|a| matches!(a, Act::Dig { pos, .. } if *pos == world::BlockPos::new(50, 64, 0))),
+        "{acts:?}"
+    );
+    // Full air, no hit: nothing.
+    let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+    for y in 62..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Water);
+    }
+    w.player.air = Some(300);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.step(&w);
+    assert!(!noted(&p, "end: head out of the water"), "{:?}", notes(&p));
+}
+
+#[test]
+fn a_pillar_wanting_more_than_the_stock_held_reopens_it() {
+    // Frontier race 46055289196: "surface stock over (29 … (29 wanted))", then E4's "too few
+    // blocks (29 blocks held, 37 wanted …)" 60 times, no progress to 5,700 ticks.
+    assert_eq!(
+        plan::end::wanted_in("29 blocks held, 37 wanted for the pillar at (33, 58, -21)"),
+        Some(37)
+    );
+    let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    w.inventory.slots.insert(40, (ItemKind::EndStone, 29));
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.open_stock_over = true;
+    p.events.push(plan::PlanEvent {
+        tick: 0,
+        what: "spikes: no walk to the foot: too few blocks".to_owned(),
+        why: "29 blocks held, 37 wanted for the pillar at (33, 58, -21)".to_owned(),
+    });
+    assert!(p.blocks_wanted(&w, 0) >= 37);
+    let t = p.end_task(&w, 0);
+    assert!(noted(&p, "end: surface stock again"), "{:?}", notes(&p));
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("dig"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn the_walk_for_surface_end_stone_stays_out_of_the_fountains_forty() {
+    // Race 46063334187 lanes 3 and 6: "out to mine" and a walk back inside 40 took turns 25 times,
+    // 0 mined. The bot at (41, 64, 0), the blocks round its feet dug out (holes one deep).
+    let mut w = world(4, 0..=7, [41.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    for c in [(40, 63, 0), (42, 63, 0), (41, 63, 1), (41, 63, -1)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    assert_eq!(plan::end::surface_cell(&w, (41, 64, 0)), None);
+    let g = plan::end::mine_ground(&w, (41, 64, 0), &[]).unwrap_or_else(|| panic!("no ground"));
+    let d = ((f64::from(g.0) + 0.5).powi(2) + (f64::from(g.2) + 0.5 - 0.5).powi(2)).sqrt();
+    assert!(d >= plan::end::MINE_FROM_FOUNTAIN, "{g:?} {d}");
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(
+        noted(&p, &format!("end: walk for surface end stone to {g:?}")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: out to mine at"), "{:?}", notes(&p));
+}
+
+#[test]
+fn a_cloud_cuts_a_surface_dig_and_a_trench_floor_is_no_ground_to_dig_under() {
+    // Race 46066925064 lane 0: mining in a pit 8 below the surface, the dig went on with a cloud
+    // on the feet until it died.
+    let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0).unwrap_or(plan::Task::Idle);
+    assert_eq!(t.name(), "dig", "{:?}", notes(&p));
+    p.task = t;
+    with_entity(&mut w, 13, EntityKind::AreaEffectCloud, [50.5, 64.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&13) {
+        e.metadata.insert(8, MetaValue::Float(3.0));
+    }
+    let _ = p.end_step(&w, 0);
+    assert_eq!(p.task.name(), "idle", "{:?}", notes(&p));
+    assert!(noted(&p, "end: surface dig at"), "{:?}", notes(&p));
+    assert!(
+        p.events
+            .iter()
+            .any(|e| e.what.contains("cut for a cloud on the feet")),
+        "{:?}",
+        notes(&p)
+    );
+    // The floor of a trench 3 wide, one deep: open beside, but walls within 2: no dig one under.
+    let mut w = world(4, 0..=7, [50.5, 63.0, 0.5]);
+    for x in 49..=51 {
+        for z in -1..=1 {
+            set(&mut w, (x, 63, z), BlockKind::Air);
+        }
+    }
+    assert_eq!(plan::end::surface_cell_at(&w, (50, 63, 0), true), None);
+}
+
+#[test]
+fn under_the_pickaxe_reserve_wooden_pickaxes_are_made_from_the_wood_carried() {
+    // Race 46071506005 lanes 2 and 3: 2 and 9 pickaxe uses left at about 16,800 with a crafting
+    // table, an oak log, 6 planks and 4 sticks carried.
+    let mut w = world(4, 0..=7, [50.5, 64.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    w.inventory.wear.insert(
+        38,
+        protocol::slot::Wear {
+            damage: Some(122),
+            max_damage: Some(131),
+        },
+    );
+    w.inventory.slots.insert(9, (ItemKind::CraftingTable, 1));
+    w.inventory.slots.insert(10, (ItemKind::OakLog, 1));
+    w.inventory.slots.insert(11, (ItemKind::OakPlanks, 6));
+    w.inventory.slots.insert(12, (ItemKind::Stick, 4));
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0);
+    assert!(
+        noted(&p, "end: wooden pickaxes at a placed table (1)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(t.is_some(), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
+    // With the dragon on its perch near (no lull): not begun.
+    dragon_at(&mut w, [30.0, 66.0, 0.0], 6);
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(!noted(&p, "end: wooden pickaxes"), "{:?}", notes(&p));
+}

@@ -340,6 +340,9 @@ pub const CRYSTALS_NEAR: f64 = 60.0;
 pub const CRYSTALS_LEFT_5: usize = 5;
 /// `crystals_1`: crystals left alive, at most (`[crystals] left_1`).
 pub const CRYSTALS_LEFT_1: usize = 1;
+/// `grounded`: full cells beside the block under the feet, at least (`[crystals]
+/// ground_sides`: 3 of 4, so a stand beside a spike, 1, is not ground).
+pub const GROUND_SIDES: usize = 3;
 /// The ten spikes' centre columns, this seed (probe 45863427332; `[[spike]]` in
 /// config/end.toml). Geography, Bridger's ruling: the End's layout is fixed by the seed.
 pub const SPIKES: [[i32; 2]; 10] = [
@@ -483,6 +486,34 @@ pub fn crystals_left(w: &World) -> Option<usize> {
     })
 }
 
+/// The feet on the ground, not on a pillar or a spike's top: on ground, on end stone (a spike's
+/// top is obsidian and bedrock), and at least `GROUND_SIDES` of the four cells beside the block
+/// under the feet loaded and full. A 1x1 pillar has none of them, a stand beside a spike one,
+/// the island's surface four. A checkpoint
+/// taken on a stand resumes stranded: race 46059621531, from `crystals_5` taken at the 5th
+/// strike on (-33, 79, 27), 7 of 10 lanes "stranded on a spike's top" and dead in 3,460 ticks.
+pub fn grounded(w: &World) -> bool {
+    let Some(body) = w.body.filter(|b| b.on_ground) else {
+        return false;
+    };
+    let (x, y, z) = (
+        body.pos[0].floor() as i32,
+        (body.pos[1] - 0.01).floor() as i32,
+        body.pos[2].floor() as i32,
+    );
+    let full = |dx: i32, dz: i32| {
+        w.state_at(crate::BlockPos::new(x + dx, y, z + dz))
+            .is_some()
+            && w.solid(x + dx, y, z + dz) == Some(1.0)
+    };
+    w.block_at(crate::BlockPos::new(x, y, z)) == Some(data::BlockKind::EndStone)
+        && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .filter(|(dx, dz)| full(*dx, *dz))
+            .count()
+            >= GROUND_SIDES
+}
+
 /// Every spike's crystal seen destroyed, in the End (`crystals_left`). It was once "none alive
 /// near the fountain with every spike loaded", which a resume's re-send of the crystals could
 /// satisfy for a tick.
@@ -566,7 +597,8 @@ pub enum Stage {
     /// The feet on the main island's end stone within `ISLAND_NEAR` of the fountain (issue 20).
     Island,
     /// `crystals_left` at most `CRYSTALS_LEFT_5` (issue 20 part 2's checkpoint, Bridger
-    /// 2026-11-27): a bot half through the spikes is saved, not replayed from the island. Accreted
+    /// 2026-11-27): a bot half through the spikes is saved, not replayed from the island. Only
+    /// with the feet on the ground (`grounded`), so the snapshot is not on a stand. Accreted
     /// between `island` and `crystals` so `Ord` stays the ladder (stages go by name in files).
     Crystals5,
     /// `crystals_left` at most `CRYSTALS_LEFT_1` (issue 20 part 2): the last spike's attempts
@@ -713,8 +745,12 @@ impl Stage {
             }
             Stage::End => dim == Some("minecraft:the_end"),
             Stage::Island => on_island(w),
-            Stage::Crystals5 => crystals_left(w).is_some_and(|n| n <= CRYSTALS_LEFT_5),
-            Stage::Crystals1 => crystals_left(w).is_some_and(|n| n <= CRYSTALS_LEFT_1),
+            Stage::Crystals5 => {
+                crystals_left(w).is_some_and(|n| n <= CRYSTALS_LEFT_5) && grounded(w)
+            }
+            Stage::Crystals1 => {
+                crystals_left(w).is_some_and(|n| n <= CRYSTALS_LEFT_1) && grounded(w)
+            }
             Stage::Crystals => crystals_gone(w),
             Stage::Win => w.won && w.dragon_dead.is_some(),
         }
