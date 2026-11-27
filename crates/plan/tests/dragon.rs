@@ -1101,12 +1101,14 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
     let mut w = end_at([12.5, 64.0, 0.5]);
     cloud(&mut w, 50, [12.5, 64.0, 0.5], 3.0);
     let mut p = Plan::new(Aim::Race);
-    p.bunker = Some([15, FLOOR, 0]);
+    // A bunker 4 down: clear of the cloud on the surface.
+    p.bunker = Some([15, FLOOR - 4, 0]);
+    p.end.door = Some((1, 0));
     assert!(p.breath_step(&w, 0).is_some());
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == format!("breath: into the bunker at {:?}", [15, FLOOR, 0])),
+            .any(|e| e.what == format!("breath: into the bunker at {:?}", [15, FLOOR - 4, 0])),
         "{:?}",
         p.events_since(0)
     );
@@ -1133,4 +1135,405 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
     q.dragon.notch_from = Some([12, 64, 0]);
     let c = q.breath_step(&down, 20).expect("held in the notch");
     assert!(c.sneak && !c.forward);
+}
+
+#[test]
+fn a_notch_with_no_step_out_is_risen_out_of_a_block_at_a_jump() {
+    // Race 45918669138 lane 1: 2 under the bunker's floor, no step to dig, "no walk to the
+    // bunker" for 3,000 ticks.
+    let mut w = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    for c in [(13, 64, 0), (11, 64, 0), (12, 64, 1), (12, 64, -1)] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::EndStone),
+        }));
+    }
+    assert_eq!(dragon::notch_step(&w, [12, 64, 0]), None, "walled round");
+    w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
+    w.held = 0;
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.breath_notch = true;
+    p.dragon.notch_from = Some([12, 64, 0]);
+    let c = p.breath_step(&w, 0).expect("rising");
+    assert!(c.jump, "a jump from the notch's floor");
+    assert_eq!(p.dragon.notch_rise_to, Some(64));
+    // In the air over the cell it left: the block under it.
+    w.body = Some(physics::Body {
+        pos: [12.5, 63.2, 0.5],
+        on_ground: false,
+        ..physics::Body::default()
+    });
+    let _ = p.breath_step(&w, 10);
+    assert!(p.take_acts().contains(&Act::UseOn {
+        pos: world::BlockPos::new(12, 61, 0),
+        face: 1
+    }));
+}
+
+#[test]
+fn in_the_bunker_under_a_breath_the_bot_stays_there() {
+    // Race 45918669138 lane 2: in and out of the bunker 40 times at the stair's top, 20 to dead.
+    let mut w = end_at([12.5, 60.0, 0.5]);
+    cloud(&mut w, 50, [12.5, 64.0, 0.5], 3.0);
+    assert!(
+        dragon::breath_on(&breaths(&w), [12.5, 60.0, 0.5]).is_none(),
+        "under it"
+    );
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([12, 60, 0]);
+    assert!(
+        p.breath_step(&w, 0).is_none(),
+        "nothing in hand: the End's own rows keep it shut"
+    );
+    p.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    let c = p
+        .breath_step(&w, 0)
+        .expect("a task in hand: held in the bunker");
+    assert!(c.sneak && !c.forward);
+}
+
+#[test]
+fn out_of_cover_at_a_perch_by_a_shaft_up_never_under_a_breath() {
+    // Race 45918669138 lane 1: held covered the whole race, 0 strikes.
+    let roofed = || {
+        let mut w = end_at([12.5, 64.0, 0.5]);
+        for c in [
+            (12, 66, 0),
+            (13, 64, 0),
+            (11, 64, 0),
+            (12, 64, 1),
+            (12, 64, -1),
+        ] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: c,
+                state: state(BlockKind::EndStone),
+            }));
+        }
+        with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 90.0);
+        w
+    };
+    let w = roofed();
+    let mut p = Plan::new(Aim::Race);
+    p.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    p.dragon.climb_out = true;
+    p.step(&w);
+    assert!(
+        p.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Dig { pos, .. } if *pos == world::BlockPos::new(12, 66, 0))),
+        "the roof over the head dug first"
+    );
+    // A breath over the shaft's top: no dig, held in cover.
+    let mut b = roofed();
+    cloud(&mut b, 50, [12.5, 67.0, 0.5], 3.0);
+    let mut q = Plan::new(Aim::Race);
+    q.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    q.dragon.climb_out = true;
+    let c = q.step(&b);
+    assert!(c.sneak && !c.forward, "held in cover");
+    assert!(
+        !q.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "no dig under a breath"
+    );
+}
+
+#[test]
+fn near_the_head_stand_but_out_of_reach_the_bot_steps_onto_its_middle() {
+    // Race 45924968115 lane 1: 0.7 off the stand's middle, 3.2 from the head's box, "no head stand
+    // open" every turn.
+    let mut w = end_at([10.3, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, 68.5, 0.5], 7, 90.0);
+    let a = Ask {
+        stand: Some([9, FLOOR, 0]),
+        ..ask()
+    };
+    assert_eq!(decide(&w, &a), Want::Centre([9, FLOOR, 0]));
+    let mut there = end_at([9.5, 64.0, 0.5]);
+    with_dragon(&mut there, [0.5, 68.5, 0.5], 7, 90.0);
+    assert!(matches!(
+        decide(&there, &a),
+        Want::Strike { head: true, .. }
+    ));
+}
+
+#[test]
+fn a_strafe_is_met_in_sight_by_a_notch_dug_beside() {
+    // Dev race 45937087645: hidden in a notch, the strafe held 11,000 ticks (its fireball needs the
+    // bot in sight, DragonStrafePlayerPhase) and the dragon never perched. Frontier race
+    // 45924970608: on open ground with no notch, the cloud was on the bot before one was dug.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    assert!(dragon::strafing_at(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    // A bunker made, far off (with none yet, E3's own dig waits for the dragon).
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    let c = p.charge_step(&w, 0).expect("held");
+    assert!(!c.forward);
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: a notch dug beside at [13, 64, 0], stood by in sight"),
+        "{:?}",
+        p.events_since(0)
+    );
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "the notch beside dug now"
+    );
+    assert!(!p.dragon.charging, "not hidden");
+    // Both blocks dug: stood by it in sight, nothing dug and no shelter taken.
+    let dug = |w: &mut World| {
+        for y in [62, 63] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (13, y, 0),
+                state: state(BlockKind::Air),
+            }));
+        }
+    };
+    dug(&mut w);
+    let c = p.charge_step(&w, 40).expect("stood by");
+    assert!(!c.forward && c.sneak);
+    assert!(p.take_acts().is_empty());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: stood by the notch at [13, 64, 0] in sight")
+    );
+    assert!(
+        !p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: shelter before the fireball"))
+    );
+    // The fireball comes: stepped into the notch, not sneaking (a sneak keeps to the edge).
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
+    let c = p.charge_step(&w, 41).expect("in");
+    assert!(c.forward && !c.sneak, "{c:?}");
+    assert!((c.yaw + 90.0).abs() < 1.0, "toward +x: {}", c.yaw);
+    // Down in it: the notch is the shelter, and roofed (the side block first).
+    let mut down = end_at([13.5, 62.0, 0.5]);
+    with_dragon(&mut down, [-30.5, 80.0, 0.5], 1, 90.0);
+    dug(&mut down);
+    add(
+        &mut down,
+        51,
+        EntityKind::DragonFireball,
+        [-10.5, 74.0, 0.5],
+    );
+    down.inventory
+        .slots
+        .insert(36, (data::ItemKind::EndStone, 64));
+    down.held = 0;
+    let c = p.charge_step(&down, 50).expect("in the notch");
+    assert!(c.sneak && !c.forward);
+    assert_eq!(p.dragon.notch_from, Some([13, 64, 0]));
+    assert!(p.dragon.charging);
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: into the notch at [13, 64, 0]")
+    );
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::UseOn { .. })),
+        "roofed"
+    );
+    // The strafe over with a cloud still within reach: stayed in.
+    let mut after = end_at([13.5, 62.0, 0.5]);
+    dug(&mut after);
+    with_dragon(&mut after, [-30.5, 80.0, 0.5], 0, 90.0);
+    cloud(&mut after, 50, [13.5, 64.0, 0.5], 3.0);
+    let c = p.charge_step(&after, 60).expect("stays sheltered");
+    assert!(c.sneak && !c.forward);
+    // A charge is never met in the open: hidden at once (a notch where the feet are).
+    let mut charge = end_at(feet);
+    with_dragon(&mut charge, [-17.5, 64.0, 0.5], 8, 90.0);
+    let mut q = Plan::new(Aim::Race);
+    assert!(q.charge_step(&charge, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: dig a notch at [12, 63, 0]")
+    );
+    // Far off: no shelter.
+    let mut far = end_at(feet);
+    with_dragon(&mut far, [-80.5, 80.0, 0.5], 1, 90.0);
+    assert!(dragon::strafing_at(&far, feet).is_none());
+}
+
+#[test]
+fn hidden_through_a_strafe_the_bot_comes_out_to_be_seen_after_the_cap() {
+    // Dev race 45937087645: the strafe never ends while the bot is out of the dragon's sight.
+    let hidden = |extra: &dyn Fn(&mut World)| {
+        let mut w = end_at([12.5, 62.0, 0.5]);
+        for y in [62, 63] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (12, y, 0),
+                state: state(BlockKind::Air),
+            }));
+        }
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, 64, 0),
+            state: state(BlockKind::EndStone),
+        }));
+        extra(&mut w);
+        let mut p = Plan::new(Aim::Race);
+        p.bunker = Some([60, FLOOR - 4, 60]);
+        p.dragon.notch_from = Some([12, 64, 0]);
+        p.dragon.notch_roof = Some([12, 64, 0]);
+        p.dragon.charging = true;
+        (w, p)
+    };
+    let out = |p: &Plan| {
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: out of the notch to be seen"))
+    };
+    let (w, mut p) = hidden(&|w| with_dragon(w, [-30.5, 80.0, 0.5], 1, 90.0));
+    let c = p.charge_step(&w, 100).expect("hidden");
+    assert!(c.sneak && !c.forward);
+    let _ = p.charge_step(&w, 100 + dragon::STRAFE_HIDE_TICKS - 1);
+    assert!(!out(&p), "within the cap");
+    assert!(p.take_acts().is_empty());
+    let _ = p.charge_step(&w, 100 + dragon::STRAFE_HIDE_TICKS);
+    assert!(out(&p), "{:?}", p.events_since(0));
+    assert_eq!(
+        p.dragon.notch_rise_to,
+        Some(64),
+        "risen out a block at a jump"
+    );
+    assert_eq!(p.dragon.notch_from, None);
+    assert!(!p.dragon.charging);
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "the roof dug back first"
+    );
+    // A cloud within reach: never out, past the cap too.
+    let off = 3.0 + dragon::BREATH_MARGIN + 0.5;
+    let (w, mut p) = hidden(&|w| {
+        with_dragon(w, [-30.5, 80.0, 0.5], 1, 90.0);
+        cloud(w, 50, [12.5 + off, 64.0, 0.5], 3.0);
+    });
+    let _ = p.charge_step(&w, 0);
+    let c = p
+        .charge_step(&w, dragon::STRAFE_HIDE_TICKS + 50)
+        .expect("hidden");
+    assert!(c.sneak && !c.forward);
+    assert!(!out(&p));
+    // A charge: never out either.
+    let (w, mut p) = hidden(&|w| with_dragon(w, [-17.5, 64.0, 0.5], 8, 90.0));
+    let _ = p.charge_step(&w, 0);
+    let _ = p.charge_step(&w, dragon::STRAFE_HIDE_TICKS + 50);
+    assert!(!out(&p));
+    assert_eq!(p.dragon.notch_rise_to, None);
+}
+
+#[test]
+fn the_low_stand_for_the_takeoff_strike_is_dug_through_the_flame() {
+    // Race 45931228063 lane 2: the takeoff count at 44, "no head stand open" every turn, the
+    // dragon at 156 for 9,000 ticks.
+    let mut w = end_at([-8.5, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, 67.0, 0.5], 5, 90.0);
+    let a = Ask {
+        sat_damage: 45.0,
+        ..ask()
+    };
+    let v = dragon::view(&w).unwrap().1;
+    let c = dragon::low_prep_cell(&w, &v, [-8.5, 64.0, 0.5]).expect("a cell behind it");
+    assert!(
+        dragon::ahead(&v, feet_of(c)).0 <= 0.0,
+        "away from the head: {c:?}"
+    );
+    assert_eq!(decide(&w, &a), Want::Dig([-9, FLOOR - 1, 0]));
+    // Not the crossing strike: out of the flame's way as before.
+    assert!(matches!(
+        decide(&w, &ask()),
+        Want::Go(_, "out of the flame's way") | Want::Hold("out of the flame's way")
+    ));
+}
+
+#[test]
+fn a_fireball_in_flight_is_sheltered_from_after_its_strafe() {
+    // Frontier race 45931225605 lane 0: the strafe over, the fireball 40 ticks in the air.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-40.5, 80.0, 0.5], 0, 90.0);
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
+    assert!(dragon::fireball_at(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: shelter before the fireball (a notch)")
+    );
+}
+
+#[test]
+fn an_open_bunker_is_no_shelter_from_a_strafe_or_a_breath() {
+    // Frontier race 45931225605 lane 1: sheltered in the open bunker, the fireball came in.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    // Its fireball in flight, no notch beside dug: the shelter as it was.
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
+    // The bunker 4 down at (16, 60, 0), its roof (16, 62, 0) dug open.
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (16, 62, 0),
+        state: state(BlockKind::Air),
+    }));
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([16, FLOOR - 4, 0]);
+    p.end.door = Some((1, 0));
+    assert!(!p.bunker_shut(&w));
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: shelter before the fireball (a notch)"),
+        "{:?}",
+        p.events_since(0)
+    );
+    // Shut: into it.
+    let mut shut = end_at(feet);
+    with_dragon(&mut shut, [-30.5, 80.0, 0.5], 1, 90.0);
+    add(
+        &mut shut,
+        51,
+        EntityKind::DragonFireball,
+        [-10.5, 74.0, 0.5],
+    );
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([16, FLOOR - 4, 0]);
+    q.end.door = Some((1, 0));
+    assert!(q.bunker_shut(&shut));
+    assert!(q.charge_step(&shut, 0).is_some());
+    assert!(q.events_since(0).iter().any(|e| {
+        e.what
+            .starts_with("strafe: shelter before the fireball (the bunker at")
+    }));
+    // And a breath on the feet by the open bunker: a notch, not the bunker.
+    let mut b = end_at(feet);
+    b.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (16, 62, 0),
+        state: state(BlockKind::Air),
+    }));
+    cloud(&mut b, 50, [12.5, 64.0, 0.5], 3.0);
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([16, FLOOR - 4, 0]);
+    r.end.door = Some((1, 0));
+    let _ = r.breath_step(&b, 0);
+    assert!(
+        !r.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("breath: into the bunker")),
+        "{:?}",
+        r.events_since(0)
+    );
 }

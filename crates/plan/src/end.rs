@@ -319,6 +319,27 @@ pub fn fire_near(w: &World, c: Cell, range: f64) -> Option<(EntityKind, [f64; 3]
         .map(|e| (e.kind, e.pos))
 }
 
+/// A strafe or a fireball in flight this near keeps the bunker sealed (the coordinator, wall 14).
+pub const STRAFE_RANGE: f64 = 64.0;
+/// The dragon's strafe phase (`EnderDragonPhase.STRAFE_PLAYER`, 1).
+pub const STRAFE_PHASE: i32 = 1;
+
+/// The dragon strafing within `STRAFE_RANGE` of the bot, or a dragon fireball in flight within it:
+/// its kind and place (frontier race 45931225605 lane 1: the fireball aimed at the bot came into
+/// its open bunker, the cloud 0.0 off it).
+pub fn strafe_threat(w: &World) -> Option<(EntityKind, [f64; 3])> {
+    let body = w.body?;
+    w.entities
+        .values()
+        .filter(|e| !e.dead && dist(e.pos, body.pos) <= STRAFE_RANGE)
+        .find(|e| {
+            e.kind == EntityKind::DragonFireball
+                || (e.kind == EntityKind::EnderDragon
+                    && matches!(e.metadata.get(&DRAGON_PHASE_INDEX), Some(MetaValue::Int(p)) if *p == STRAFE_PHASE))
+        })
+        .map(|e| (e.kind, e.pos))
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -722,6 +743,27 @@ impl Plan {
         let (_, roof, door_cells) = bunker_cells(b, door);
         let inside = feet == b;
         let sealed = !open(w, roof) && !open(w, door_cells[0]);
+        // Down a notch under the bunker (E5's breath rule digs one; race 45918666403 lane 2: the
+        // bot dug to (14, 56, 0) under its bunker at (14, 58, 0) and every way out from there was
+        // refused to the cap): back up into the bunker once no fire is by its stair.
+        if feet.0 == b.0
+            && feet.2 == b.2
+            && feet.1 < b.1
+            && feet.1 >= b.1 - 3
+            && body.on_ground
+            && fire_near(w, door_cells[6], STAIR_CLEAR).is_none()
+        {
+            let rises = b.1 - feet.1;
+            self.note(
+                tick,
+                format!("end: up out of the notch to the bunker from {feet:?}"),
+                format!("{rises} up into {b:?}"),
+            );
+            let mut ops = vec![Op::Centre];
+            ops.extend((0..rises).map(|_| Op::Rise));
+            self.end.work = Some(Work::new(WorkKind::Pillar, ops, tick));
+            return None;
+        }
         // Up a pillar or a spike, or a pillar of E4's still standing: the crystals' task brings
         // the bot down first, crystals left or not (E6's closed loop: the last crystal gone, the
         // bot stayed 18 up and asked for walks to the bunker 24 times).
@@ -863,6 +905,8 @@ impl Plan {
             // Out from under the end stone first: from the tunnel back to the bunker, then its
             // roof and stair dug; the task is chosen again once the sky is over the head.
             let shut = !open(w, roof) || !open(w, door_cells[0]);
+            // Opened only part way (an open cut short): open again, skipping the cells dug.
+            let opened = open(w, roof) && door_cells.iter().all(|c| open(w, *c));
             if !world::stage::open_sky(w) && !inside && !open(w, door_cells[0]) {
                 let mut probe = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
                 if found(&mut probe, w, tick) || self.end.out_runs >= OUT_RUNS {
@@ -884,7 +928,7 @@ impl Plan {
                 st.dry = true;
                 return Some(Task::Stairs(Box::new(st)));
             }
-            if inside && shut {
+            if inside && (shut || (!opened && !self.end.exit_up)) {
                 // Out of the bunker first, the task chosen again once the door is open.
                 self.note(
                     tick,
@@ -1364,7 +1408,40 @@ impl Plan {
     /// One tick of E3's own steps in the End (the bridge, a work, an eat) while no task runs, or
     /// the choice of the next (`end_task`). `None` outside the End or while a task runs.
     pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
-        if !in_end(w) || !matches!(self.task, Task::Idle) {
+        if !in_end(w) {
+            return None;
+        }
+        // In the bunker under a strafe or a fireball in flight: sealed, whatever task brought the
+        // bot in or would take it out (wall 14).
+        if let (Some([x, y, z]), Some(door), Some(body)) = (self.bunker, self.end.door, w.body) {
+            let b = (x, y, z);
+            let (_, roof, door_cells) = bunker_cells(b, door);
+            let sealed = !open(w, roof) && !open(w, door_cells[0]);
+            let sealing = self
+                .end
+                .work
+                .as_ref()
+                .is_some_and(|wk| wk.kind == WorkKind::Seal);
+            if path::stand_cell(w, body.pos) == b
+                && !sealed
+                && !sealing
+                && let Some((kind, at)) = strafe_threat(w)
+            {
+                self.task = Task::Idle;
+                self.end.work = None;
+                self.end.exit_walk = false;
+                self.note(
+                    tick,
+                    format!("end: the bunker sealed for a {kind:?}"),
+                    format!(
+                        "at {:.0}, {:.0}, {:.0}; the bot stays in until it is over",
+                        at[0], at[1], at[2]
+                    ),
+                );
+                self.begin_seal(w, b, door, tick);
+            }
+        }
+        if !matches!(self.task, Task::Idle) {
             return None;
         }
         let hold = Controls {
@@ -1378,6 +1455,27 @@ impl Plan {
             }
             self.retry_at = tick;
             return Some(hold);
+        }
+        // An open with fire coming by the stair: cut, the bunker sealed again (race 45918666403
+        // lane 2: a fireball on the half-dug stair).
+        if let (Some(work), Some([x, y, z]), Some(door)) =
+            (&self.end.work, self.bunker, self.end.door)
+            && work.kind == WorkKind::Open
+        {
+            let b = (x, y, z);
+            let (_, _, door_cells) = bunker_cells(b, door);
+            if fire_near(w, door_cells[6], STAIR_CLEAR)
+                .or_else(|| strafe_threat(w))
+                .is_some()
+            {
+                self.end.work = None;
+                self.note(
+                    tick,
+                    "end: the open cut for fire by the stair".to_owned(),
+                    format!("the bunker {b:?} sealed again"),
+                );
+                self.begin_seal(w, b, door, tick);
+            }
         }
         if let Some(mut work) = self.end.work.take() {
             match self.work_tick(w, tick, &mut work) {
@@ -1909,7 +2007,8 @@ impl Plan {
     /// bunker is not left (race 45910659261 lane 1: a fireball on the stair, its cloud reached
     /// the bot under the end stone at 6 a second, 20 to dead in 4 s). Noted once a wait.
     fn fire_at_stair(&mut self, w: &World, top: Cell, tick: u64) -> bool {
-        let Some((kind, at)) = fire_near(w, top, STAIR_CLEAR) else {
+        let threat = fire_near(w, top, STAIR_CLEAR).or_else(|| strafe_threat(w));
+        let Some((kind, at)) = threat else {
             self.end.fire_waiting = false;
             return false;
         };

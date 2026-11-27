@@ -523,6 +523,10 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Blocks beyond a breath's reach on the plane that the way into the bunker is kept, and the bot
+/// held in it.
+pub const BUNKER_HOLD: f64 = 2.0;
+
 /// Blocks on the plane from the bunker a breath on the body sends the bot into it.
 pub const BUNKER_NEAR: f64 = 6.0;
 
@@ -531,6 +535,10 @@ pub const ENDER_BUNKER_REACH: f64 = 24.0;
 
 /// Ticks a fight whose walk failed in cover waits before it plans again.
 pub const COVERED_RETRY_TICKS: u64 = 200;
+
+/// Blocks the feet rise over the cell a jump left before its block goes in (clojurecraft
+/// `dragon/clear-rise`).
+pub const RISE_CLEAR: f64 = 1.05;
 
 /// Ticks between the notch roof's clicks, and the clicks it may take in all.
 pub const ROOF_CLICK_TICKS: u64 = 6;
@@ -590,6 +598,47 @@ pub fn notch_step_except(w: &World, from: [i32; 3], side: Option<[i32; 3]>) -> O
             .then_some(s)
         })
 }
+
+/// The distance of the dragon when it is strafing (phase 1) within `STRAFE_RANGE` of `feet`:
+/// `DragonStrafePlayerPhase` fires its fireball at a player in sight within 64.
+pub fn strafing_at(w: &World, feet: [f64; 3]) -> Option<f64> {
+    let (_, v) = view(w)?;
+    if v.phase() != Some(Phase::Strafe) {
+        return None;
+    }
+    let d = ((v.pos[0] - feet[0]).powi(2)
+        + (v.pos[1] - feet[1]).powi(2)
+        + (v.pos[2] - feet[2]).powi(2))
+    .sqrt();
+    (d <= STRAFE_RANGE).then_some(d)
+}
+
+/// The distance of the nearest dragon fireball in flight within `FIREBALL_RANGE` of `feet`.
+pub fn fireball_at(w: &World, feet: [f64; 3]) -> Option<f64> {
+    w.entities
+        .values()
+        .filter(|e| e.kind == EntityKind::DragonFireball)
+        .map(|e| {
+            ((e.pos[0] - feet[0]).powi(2)
+                + (e.pos[1] - feet[1]).powi(2)
+                + (e.pos[2] - feet[2]).powi(2))
+            .sqrt()
+        })
+        .filter(|d| *d <= FIREBALL_RANGE)
+        .min_by(f64::total_cmp)
+}
+
+/// Blocks from the feet a fireball in flight is sheltered from.
+pub const FIREBALL_RANGE: f64 = 64.0;
+
+/// Ticks of a strafe the bot stays hidden before it comes out to be seen. A strafe ends only by
+/// its fireball, which needs the bot in sight (`DragonStrafePlayerPhase`; dev race 45937087645:
+/// hidden in a notch, the strafe held 11,000 ticks and the dragon never perched). 200 is the
+/// coordinator's cap (10 s), well over the 5 ticks in sight the fireball's charge needs.
+pub const STRAFE_HIDE_TICKS: u64 = 200;
+
+/// Blocks the strafing dragon fires within (`DragonStrafePlayerPhase`; E4's `THREAT_NEAR`).
+pub const STRAFE_RANGE: f64 = 64.0;
 
 /// The distance of the dragon when it is charging (phase 8) within `CHARGE_RANGE` of `feet` with
 /// its facing on the line to them (its yaw unsaid: taken as on it), else `None`.
@@ -758,6 +807,40 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
 /// Server ticks after a blow a takeoff counts as the blow's: the server resets its count then.
 pub const TAKEOFF_AFTER_BLOW: u64 = 20;
 
+/// The cell a low stand is made in through the flame: a ground cell `HEAD_OUT + HEAD_HALF +
+/// HEAD_STAND_OFF` from the body on a bearing at least a right angle off the head's, out of the
+/// flame's reach and every breath's, under the wings' sweep or one dig of end stone from it; the
+/// nearest the feet.
+pub fn low_prep_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i32; 3]> {
+    let clouds = breaths(w);
+    let h = head_point(v);
+    let out = HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF;
+    let fy = feet[1].floor() as i32;
+    let mut best: Option<(f64, [i32; 3])> = None;
+    for k in 0..ESCAPE_WAYS {
+        let a = f64::from(k) * std::f64::consts::TAU / f64::from(ESCAPE_WAYS);
+        let x = (v.pos[0] + out * a.cos()).floor() as i32;
+        let z = (v.pos[2] + out * a.sin()).floor() as i32;
+        let Some(c) = ground(w, x, z, fy) else {
+            continue;
+        };
+        let p = mid(c);
+        if ahead(v, p).0 > 0.0
+            || flat(p, h) < FLAME_CLEAR
+            || breath_on(&clouds, p).is_some()
+            || !(under_wings(v, f64::from(c[1]))
+                || (under_wings(v, f64::from(c[1] - 1)) && notch_diggable(w, c)))
+        {
+            continue;
+        }
+        let d = flat(feet, p);
+        if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
+            best = Some((d, c));
+        }
+    }
+    best.map(|(_, c)| c)
+}
+
 /// Would the next strike make the dragon take off (`PERCH_TAKEOFF`)?
 pub fn crossing(sat_damage: f32) -> bool {
     sat_damage + STRIKE_DAMAGE + STRIKE_MARGIN > PERCH_TAKEOFF
@@ -815,6 +898,9 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
 /// Blocks from the fountain every way out keeps to while the dragon scans: inside the 20 it looks
 /// for a player in before it charges one, past the head's sweep (8) and the turn's stand (9).
 pub const SCAN_KEEP: f64 = 12.0;
+
+/// Blocks on the plane from a stand's middle the feet step onto it from.
+pub const CENTRE_NEAR: f64 = 0.25;
 
 /// Ticks of the scanning phase the bot waits for the head to turn onto it at `scan_stand`
 /// (the turn takes about 20, `DragonSittingScanningPhase`).
@@ -1104,6 +1190,8 @@ pub enum Want {
     Eat,
     /// Dig the block under the feet (a stand one lower, under the wings' sweep).
     Dig([i32; 3]),
+    /// Step onto a stand's middle.
+    Centre([i32; 3]),
     /// Stand where the feet are, looking down, and why.
     Hold(&'static str),
 }
@@ -1240,6 +1328,22 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         Some(_) | None => false,
     };
     if sat && flame {
+        // The strike that makes it take off wants a stand under the wings, and one dig in the
+        // turn's window is too slow (race 45931228063 lane 2: the count at 44, "no head stand
+        // open" every turn, the dragon at 156 for 9,000 ticks). It is dug through the flame: a
+        // notch 9 out from the body on the side away from the head, out of the flame's reach;
+        // the scanning turn brings the head to it.
+        if crossing(ask.sat_damage)
+            && let Some(c) = low_prep_cell(w, &v, feet)
+        {
+            if flat(feet, mid(c)) > STAND_NEAR {
+                return Want::Go(c, "to a low stand, through the flame");
+            }
+            if body.on_ground && !under_wings(&v, feet[1]) && notch_diggable(w, feet_cell) {
+                return Want::Dig([feet_cell[0], feet_cell[1] - 1, feet_cell[2]]);
+            }
+            return Want::Hold("in the low stand, the flame burning");
+        }
         return match flame_clear_cell(w, &v, feet) {
             Some(c) if flat(feet, mid(c)) > STAND_NEAR => Want::Go(c, "out of the flame's way"),
             Some(_) => Want::Hold("out of the flame's way"),
@@ -1315,6 +1419,12 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         }
         if flat(feet, mid(hs)) > STAND_NEAR {
             return Want::Go(hs, "to the head stand");
+        }
+        // Near the stand but not in reach from where the feet are (race 45924968115 lane 1: 0.7
+        // off its middle, 3.2 from the head's box, "no head stand open" every turn): onto its
+        // middle.
+        if flat(feet, mid(hs)) > CENTRE_NEAR {
+            return Want::Centre(hs);
         }
     }
     // Landing, not yet sat, or no head stand open: the bunker (under every sweep: race
@@ -1461,6 +1571,14 @@ pub struct DragonState {
     /// The notch's dig failed: crouched where the feet are, no dig tried again.
     #[serde(default)]
     pub notch_failed: bool,
+    /// The height a notch is risen out to, a block at a jump, and the cell the last jump left.
+    #[serde(default)]
+    pub notch_rise_to: Option<i32>,
+    /// Out of cover by a shaft up, the dragon on its perch.
+    #[serde(default)]
+    pub climb_out: bool,
+    #[serde(default)]
+    pub rise_from: Option<[i32; 3]>,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -1499,6 +1617,14 @@ pub struct DragonState {
     pub first_skips: u64,
     #[serde(default)]
     pub first_noted_at: u64,
+    /// In a strafe: the surface cell of the notch dug beside the bot, which it stands by in the
+    /// dragon's sight until a fireball comes; the tick it was first hidden in this strafe.
+    #[serde(default)]
+    pub strafe_notch: Option<[i32; 3]>,
+    #[serde(default)]
+    pub hidden_since: Option<u64>,
+    #[serde(default)]
+    pub strafe_seen_noted: bool,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -1733,6 +1859,39 @@ impl Plan {
                 .phase_at
                 .map_or(0, |at| w.session.server_ticks.saturating_sub(at)),
         };
+        // Out of cover by a shaft up, the dragon on its perch: the block over the head dug, else
+        // a block put under the feet at a jump, until the sky is over the head.
+        if self.dragon.climb_out {
+            if world::stage::open_sky(w) || !view(w).is_some_and(|(_, v)| grounded(&v)) {
+                self.dragon.climb_out = false;
+                self.dragon.rise_from = None;
+                self.note(
+                    tick,
+                    "dragon: out of cover".to_owned(),
+                    format!("at {:?}", w.body.map(|b| cell_of(b.pos))),
+                );
+            } else if let Some(body) = w.body
+                && breathed(&breaths(w), body.pos, 0.0)
+            {
+                // A breath over the shaft's top: stay in cover until it clears.
+                return Controls {
+                    sneak: true,
+                    ..looking_down(w)
+                };
+            } else if let Some(body) = w.body {
+                let fc = cell_of(body.pos);
+                let head = [fc[0], fc[1] + 2, fc[2]];
+                let solid = w
+                    .block_at(world::BlockPos::new(head[0], head[1], head[2]))
+                    .is_some_and(|k| k != BlockKind::Air);
+                if solid && body.on_ground {
+                    return self
+                        .charge_dig_step(w, tick, head)
+                        .unwrap_or_else(|| looking_down(w));
+                }
+                return self.rise_step(w, tick, body);
+            }
+        }
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {
             return Controls::default();
@@ -1756,6 +1915,7 @@ impl Plan {
             Want::Strike { head, .. } => format!("strike {}", if *head { "head" } else { "body" }),
             Want::Eat => "eat".to_owned(),
             Want::Dig(c) => format!("dig down at {c:?} for a stand under the wings"),
+            Want::Centre(c) => format!("onto the middle of {c:?}"),
             Want::Hold(why) => format!("hold {why}"),
         };
         let changed = f.said != key;
@@ -1790,7 +1950,12 @@ impl Plan {
             Want::Go(..) => {
                 self.dragon.way = None;
             }
-            Want::Exit(_) | Want::Strike { .. } | Want::Eat | Want::Dig(_) | Want::Hold(_) => {
+            Want::Exit(_)
+            | Want::Strike { .. }
+            | Want::Eat
+            | Want::Dig(_)
+            | Want::Centre(_)
+            | Want::Hold(_) => {
                 self.dragon.way = None;
                 self.dragon.way_done = None;
             }
@@ -1933,6 +2098,17 @@ impl Plan {
                 );
                 looking_down(w)
             }
+            Want::Centre(c) => {
+                let feet = w.body.map_or([0.0; 3], |b| b.pos);
+                let to = mid(c);
+                Controls {
+                    forward: true,
+                    sneak: true,
+                    yaw: crate::walk::yaw_to(feet, to),
+                    pitch: Some(90.0),
+                    ..Controls::default()
+                }
+            }
             Want::Exit(c) => {
                 let feet = w.body.map_or([0.0; 3], |b| b.pos);
                 if from_fountain(feet) <= RIM {
@@ -1989,6 +2165,18 @@ impl Plan {
             // Sealed in cover, a walk out has no way: the next choice waits a while, the End's
             // own rows (the pocket's, the bunker's) open it.
             let covered = crate::end::covered(w);
+            // In cover with the dragon on its perch: out by a shaft straight up, the roof dug and a
+            // block put under the feet at each jump (race 45918669138 lane 1: held covered from an
+            // angry enderman the whole race, 0 strikes in 24,000 ticks).
+            if covered && view(w).is_some_and(|(_, v)| grounded(&v)) {
+                self.dragon.climb_out = true;
+                self.note(
+                    tick,
+                    format!("dragon walk to {cell:?} failed: {e:?}"),
+                    "in cover with the dragon on its perch: out by a shaft up".to_owned(),
+                );
+                return Controls::default();
+            }
             self.note(
                 tick,
                 format!("dragon walk to {cell:?} failed: {e:?}"),
@@ -2071,6 +2259,41 @@ impl Plan {
             if let Some(c) = self.notch_exit_step(w, tick) {
                 return Some(c);
             }
+            // The way into the bunker kept to the end while a breath lies near on the plane, and
+            // in it the bot stays while one lies over it: the body's height at the stair's top is
+            // in and out of the cloud from tick to tick (race 45918669138 lane 2: "into the
+            // bunker" and "out of the breath" 40 times each, the stair climbed back into the cloud
+            // between, 20 to dead).
+            // Not through the strike window: with the dragon scanning or attacking on its perch the
+            // fight goes (race 45924968115 lane 2: held in the bunker 7,320 ticks by the clouds the
+            // dragon kept sending, the dragon at 200).
+            let window = view(w).is_some_and(|(_, v)| {
+                matches!(
+                    v.phase(),
+                    Some(Phase::SittingScanning | Phase::SittingAttacking)
+                )
+            });
+            if let Some(b) = self.bunker
+                && !window
+                && breathed(&clouds, feet, BUNKER_HOLD)
+            {
+                // With nothing in hand the End's own rows keep the bunker shut (E3's "stays
+                // shut for a … near its stair"); a task in hand is held.
+                if cell_of(feet) == b {
+                    if matches!(self.task, Task::Idle) {
+                        return None;
+                    }
+                    return Some(crouch);
+                }
+                if self
+                    .dragon
+                    .breath_walk
+                    .as_ref()
+                    .is_some_and(|wk| wk.target == (b[0], b[1], b[2]))
+                {
+                    return self.breath_walk_step(w, tick, b);
+                }
+            }
             self.dragon.breath_refused.clear();
             self.dragon.breath_noted = None;
             self.dragon.breath_wall = None;
@@ -2095,8 +2318,12 @@ impl Plan {
         // Shelter near (the bunker within `BUNKER_NEAR`): into it, down, never out sideways
         // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
         // NoPath, then dead). In it with the breath still on: a notch from there.
+        // Only a bunker clear of every breath (on the plane and in height); else a notch here.
+        // And only a bunker shut, roof and door: an open one lets the fireball in (frontier race
+        // 45931225605 lane 1: sheltered in it, the cloud on the bot inside it).
         if let Some(b) = self.bunker
             && flat(feet, mid(b)) <= BUNKER_NEAR
+            && (cell_of(feet) == b || (clear_of_breath(&clouds, mid(b)) && self.bunker_shut(w)))
         {
             if cell_of(feet) == b {
                 self.dragon.breath_notch = true;
@@ -2251,8 +2478,32 @@ impl Plan {
             return None;
         }
         let body = w.body?;
-        let Some(d) = charging_at(w, body.pos) else {
+        // A charge, or a strafe: a fireball comes only in the strafe, at a player in sight, so
+        // the shelter is taken before it (frontier race 45924970608: two bots died of breath on
+        // open ground, the cloud already on them before the notch was dug).
+        let charge = charging_at(w, body.pos);
+        // A fireball in flight counts as the strafe that sent it: the strafe may end, or start
+        // beyond 64, before it lands (frontier race 45931225605 lane 0: the strafe 56 off at its
+        // end, the fireball 40 ticks in the air with the phase holding, the cloud on the bot).
+        let fireball = fireball_at(w, body.pos);
+        let strafe = charge
+            .is_none()
+            .then(|| strafing_at(w, body.pos).or(fireball))
+            .flatten();
+        let Some(d) = charge.or(strafe) else {
+            self.dragon.strafe_notch = None;
+            self.dragon.hidden_since = None;
+            self.dragon.strafe_seen_noted = false;
             if self.dragon.charging {
+                // Stayed in until no cloud lies within reach.
+                if breathed(&breaths(w), body.pos, 0.0) {
+                    return Some(Controls {
+                        sneak: true,
+                        yaw: f64::from(w.player.yaw),
+                        pitch: Some(90.0),
+                        ..Controls::default()
+                    });
+                }
                 self.dragon.charging = false;
                 self.dragon.charge_walk = None;
                 self.dragon.charge_dig = None;
@@ -2265,11 +2516,42 @@ impl Plan {
             }
             return self.notch_exit_step(w, tick);
         };
-        if !world::stage::open_sky(w) || breath_on(&breaths(w), body.pos).is_some() {
+        let clouds = breaths(w);
+        if breath_on(&clouds, body.pos).is_some() {
             return None;
         }
+        // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
+        if self.spikes_up_high(w) {
+            return None;
+        }
+        // E3's bunker in the making answers a strafe itself: no bunker yet (its dig waits for
+        // the dragon) or its shaft being dug, roofed as it goes (E3's test
+        // a_flying_dragon_near_holds_the_bunker_shaft).
+        if strafe.is_some()
+            && (self.bunker.is_none()
+                || self
+                    .end
+                    .work
+                    .as_ref()
+                    .is_some_and(|wk| wk.kind == crate::end::WorkKind::Build))
+        {
+            return None;
+        }
+        // A strafe is met in the dragon's sight, by a notch dug beside, and the notch taken when
+        // its fireball comes or a cloud is within reach: hidden, the strafe never ends.
+        if charge.is_none() {
+            let threat = fireball.is_some() || breathed(&clouds, body.pos, OUT_SLACK);
+            if let Some(c) = self.strafe_seen_step(w, tick, body, threat) {
+                return c;
+            }
+        }
+        if !world::stage::open_sky(w) {
+            return None;
+        }
+        // For a strafe only a bunker shut (roof and door): an open one lets the fireball in.
+        let shut = strafe.is_none() || self.bunker_shut(w);
         let bunker = self.bunker.filter(|b| {
-            flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
+            shut && flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
                 && (body.pos[1] - f64::from(b[1])).abs() <= 5.0
         });
         if !self.dragon.charging {
@@ -2278,9 +2560,13 @@ impl Plan {
             self.dragon.roof_tries = 0;
             self.note(
                 tick,
-                match bunker {
-                    Some(b) => format!("charge: hold in the bunker at {b:?}"),
-                    None => "charge: hold crouched where the feet are".to_owned(),
+                match (bunker, strafe.is_some()) {
+                    (Some(b), true) => {
+                        format!("strafe: shelter before the fireball (the bunker at {b:?})")
+                    }
+                    (None, true) => "strafe: shelter before the fireball (a notch)".to_owned(),
+                    (Some(b), false) => format!("charge: hold in the bunker at {b:?}"),
+                    (None, false) => "charge: hold crouched where the feet are".to_owned(),
                 },
                 format!(
                     "the dragon charging {d:.0} off; task {}; health {:.1}; {} charges in the run",
@@ -2345,6 +2631,142 @@ impl Plan {
         Some(c)
     }
 
+    /// One tick of a strafe met in sight (no charge): `threat` is a fireball in flight or a cloud
+    /// within reach. Hidden in its notch the bot stays `STRAFE_HIDE_TICKS`, then rises out; in the
+    /// open with no threat it digs a notch two deep beside the feet and stands by it, seen; with a
+    /// threat it steps into that notch and roofs it. `None` leaves the tick to the shelter as it
+    /// was (no notch beside ready at a threat, none to be dug, or a dig failed).
+    fn strafe_seen_step(
+        &mut self,
+        w: &World,
+        tick: u64,
+        body: physics::Body,
+        threat: bool,
+    ) -> Option<Option<Controls>> {
+        let fc = cell_of(body.pos);
+        let crouch = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        let air = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+        };
+        // Hidden in its notch.
+        if self.dragon.notch_from.is_some_and(|f| fc[1] <= f[1] - 2) {
+            if threat {
+                return Some(Some(self.notch_dig_step(w, tick, crouch, "strafe")));
+            }
+            let since = *self.dragon.hidden_since.get_or_insert(tick);
+            if tick < since + STRAFE_HIDE_TICKS {
+                return Some(Some(crouch));
+            }
+            let from = self.dragon.notch_from.take();
+            self.dragon.notch_side = None;
+            self.dragon.notch_step = None;
+            self.dragon.notch_rise_to = from.map(|f| f[1]);
+            self.dragon.charging = false;
+            self.dragon.hidden_since = None;
+            self.note(
+                tick,
+                format!("strafe: out of the notch to be seen at {fc:?}"),
+                format!(
+                    "hidden {} ticks in the strafe; risen out a block at a jump",
+                    tick - since
+                ),
+            );
+            return Some(self.notch_exit_step(w, tick));
+        }
+        // On the way out of a notch (its roof, its step, the rise).
+        if (self.dragon.notch_rise_to.is_some()
+            || self.dragon.notch_step.is_some()
+            || self.dragon.notch_roof.is_some_and(|r| !air(r)))
+            && let Some(c) = self.notch_exit_step(w, tick)
+        {
+            return Some(Some(c));
+        }
+        if !world::stage::open_sky(w) || self.dragon.notch_failed {
+            return None;
+        }
+        let ready = |n: [i32; 3]| air([n[0], n[1] - 1, n[2]]) && air([n[0], n[1] - 2, n[2]]);
+        if threat {
+            let n = self.dragon.strafe_notch.filter(|n| ready(*n))?;
+            if fc[0] == n[0] && fc[2] == n[2] {
+                if self.dragon.notch_from != Some(n) {
+                    self.dragon.notch_from = Some(n);
+                    self.dragon.roof_tries = 0;
+                    self.dragon.charging = true;
+                    self.dragon.charges += 1;
+                    self.note(
+                        tick,
+                        format!("strafe: into the notch at {n:?}"),
+                        format!(
+                            "a fireball in flight or a cloud within reach; health {:.1}",
+                            w.player.health.unwrap_or(0.0)
+                        ),
+                    );
+                }
+                return Some(Some(self.notch_dig_step(w, tick, crouch, "strafe")));
+            }
+            let to = mid(n);
+            return Some(Some(Controls {
+                forward: true,
+                yaw: (-(to[0] - body.pos[0]))
+                    .atan2(to[2] - body.pos[2])
+                    .to_degrees(),
+                ..Controls::default()
+            }));
+        }
+        // No threat: a notch beside, dug from the surface, and stood by in the dragon's sight.
+        if self
+            .dragon
+            .strafe_notch
+            .is_none_or(|n| (n[0] - fc[0]).abs() + (n[2] - fc[2]).abs() != 1 || n[1] != fc[1])
+        {
+            self.dragon.strafe_notch = None;
+            if !body.on_ground {
+                return None;
+            }
+            let n = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .find_map(|(dx, dz)| {
+                    let n = [fc[0] + dx, fc[1], fc[2] + dz];
+                    (air(n)
+                        && air([n[0], n[1] + 1, n[2]])
+                        && notch_diggable(w, n)
+                        && notch_diggable(w, [n[0], n[1] - 1, n[2]]))
+                    .then_some(n)
+                })?;
+            self.dragon.strafe_notch = Some(n);
+            self.note(
+                tick,
+                format!("strafe: a notch dug beside at {n:?}, stood by in sight"),
+                format!("from {fc:?}; the strafe's fireball needs the bot seen"),
+            );
+        }
+        let n = self.dragon.strafe_notch?;
+        for y in [n[1] - 1, n[1] - 2] {
+            let c = [n[0], y, n[2]];
+            if !air(c) {
+                return Some(Some(self.charge_dig_step(w, tick, c).unwrap_or(crouch)));
+            }
+        }
+        if !self.dragon.strafe_seen_noted {
+            self.dragon.strafe_seen_noted = true;
+            self.note(
+                tick,
+                format!("strafe: stood by the notch at {n:?} in sight"),
+                format!("at {fc:?}; into it when the fireball comes"),
+            );
+        }
+        Some(Some(Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            ..Controls::default()
+        }))
+    }
+
     /// One tick of the notch two deep where the feet are: the end stone under them dug, twice,
     /// then roofed (`notch_roof_step`); crouched still when there is nothing more to dig. Begun
     /// where the feet are the first time; `why` names it in the notes.
@@ -2392,12 +2814,16 @@ impl Plan {
             return;
         };
         let side = self.dragon.notch_side.take();
-        self.dragon.notch_step = self
-            .dragon
-            .notch_from
-            .take()
+        let from = self.dragon.notch_from.take();
+        self.dragon.notch_step = from
             .filter(|f| cell_of(body.pos)[1] <= f[1] - 2)
             .and_then(|f| notch_step_except(w, f, side));
+        // With no step to dig (the bunker's floor, walls all round: race 45918669138 lane 1 stood
+        // 2 under the bunker 3,000 ticks, "no walk to the bunker" every tick), it rises out by a
+        // block put under the feet at each jump.
+        self.dragon.notch_rise_to = from
+            .filter(|f| cell_of(body.pos)[1] < f[1] && self.dragon.notch_step.is_none())
+            .map(|f| f[1]);
     }
 
     /// The way out of a notch, a tick at a time: the roof dug back (the jump needs the head
@@ -2410,6 +2836,20 @@ impl Plan {
             return self.charge_dig_step(w, tick, r);
         }
         self.dragon.notch_roof = None;
+        if let Some(top) = self.dragon.notch_rise_to {
+            let body = w.body?;
+            let fc = cell_of(body.pos);
+            if fc[1] >= top {
+                self.dragon.notch_rise_to = None;
+                self.note(
+                    tick,
+                    format!("notch: risen out at {fc:?}"),
+                    "on with the task".to_owned(),
+                );
+                return None;
+            }
+            return Some(self.rise_step(w, tick, body));
+        }
         if let Some(s) = self.dragon.notch_step {
             if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
                 self.dragon.notch_step = None;
@@ -2424,6 +2864,48 @@ impl Plan {
             return self.charge_dig_step(w, tick, s);
         }
         None
+    }
+
+    /// One tick of a rise by a block under the feet: the block held, a jump from the ground, and
+    /// once the feet are `RISE_CLEAR` over the cell they left, the block clicked onto the top of
+    /// the one under it.
+    fn rise_step(&mut self, w: &World, tick: u64, body: physics::Body) -> Controls {
+        let down = Controls {
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        let Some(item) = crate::spikes::pillar_item(w) else {
+            return down;
+        };
+        match hold::toward(w, item) {
+            Hold::Held => {}
+            Hold::Act(a) => {
+                if self.acts.is_empty() {
+                    self.acts.push(a);
+                }
+                return down;
+            }
+            Hold::Wait | Hold::Missing => return down,
+        }
+        let left = self.dragon.rise_from.unwrap_or_else(|| cell_of(body.pos));
+        if body.on_ground {
+            self.dragon.rise_from = Some(cell_of(body.pos));
+            return Controls { jump: true, ..down };
+        }
+        if body.pos[1] >= f64::from(left[1]) + RISE_CLEAR
+            && w.block_at(world::BlockPos::new(left[0], left[1], left[2])) == Some(BlockKind::Air)
+            && self.acts.is_empty()
+            && w.click.is_none()
+            && tick >= self.dragon.roof_click_at + ROOF_CLICK_TICKS
+        {
+            self.dragon.roof_click_at = tick;
+            self.acts.push(Act::UseOn {
+                pos: world::BlockPos::new(left[0], left[1] - 1, left[2]),
+                face: 1,
+            });
+        }
+        down
     }
 
     /// The notch's roof over the head at `roof`: a block on a side of it first when nothing holds
@@ -2490,6 +2972,20 @@ impl Plan {
             Hold::Wait | Hold::Missing => {}
         }
         Some(crouch)
+    }
+
+    /// Is the bunker shut: its roof and the first cell of its door solid (E3's own test of it,
+    /// `end::bunker_cells`)? False with no bunker or no door known.
+    pub fn bunker_shut(&self, w: &World) -> bool {
+        let (Some(b), Some(door)) = (self.bunker, self.end.door) else {
+            return false;
+        };
+        let (_, roof, cells) = crate::end::bunker_cells((b[0], b[1], b[2]), door);
+        let solid = |c: Cell| {
+            w.block_at(world::BlockPos::new(c.0, c.1, c.2))
+                .is_some_and(|k| !matches!(k, BlockKind::Air | BlockKind::Water))
+        };
+        solid(roof) && solid(cells[0])
     }
 
     /// One tick of a dig for the notch (or its step out), crouched, looking down.

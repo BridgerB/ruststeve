@@ -869,6 +869,32 @@ impl World {
     fn move_body(&mut self, body: Body) -> Vec<Effect> {
         let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
         if !self.columns.contains_key(&at) {
+            // >>> E3 (issue 20e): a look asked for goes out though the ground is not loaded yet.
+            // The server judges an enderman's stare by the look it holds, and after a teleport
+            // that is the one it set (pitch 0 on arriving in the End) until a look packet comes;
+            // with no column under the feet none was sent (E5's race 45913296602 lane 1: an
+            // enderman angered at tick 60 of the arrival, the bot killed fighting it).
+            if let Some(pitch) = self.controls.pitch {
+                #[allow(clippy::cast_possible_truncation)]
+                let look = (self.controls.yaw as f32, pitch);
+                if self.sent_look != Some(look) {
+                    self.sent_look = Some(look);
+                    self.sent_pos = Some(body.pos);
+                    self.sent_tick = self.ticks;
+                    self.player.yaw = look.0;
+                    self.player.pitch = look.1;
+                    let [x, y, z] = body.pos;
+                    return vec![Effect::Send(C2s::MovePlayerPosRot {
+                        x,
+                        y,
+                        z,
+                        yaw: look.0,
+                        pitch: look.1,
+                        flags: u8::from(body.on_ground),
+                    })];
+                }
+            }
+            // <<< E3
             // No physics without the ground, but still the once-a-second status: the server
             // re-centres a player's chunks only when the client reports a move (handleMovePlayer
             // calls ServerChunkCache.move), so a teleport far from the loaded columns would

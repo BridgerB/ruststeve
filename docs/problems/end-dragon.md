@@ -181,5 +181,75 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Wall 17: an enderman fought in the open** (lane 1, ticks 140 to 260). Angry from a stare at the arrival ("near miss"), with no bunker yet, it was struck 6 times for 26. It hit back for 7, 6.6 and 6.9 (20 → 2.3), and the bot died with the enderman at 13.6.
   - **Fix:** with no bunker near, a notch two deep where the feet are, roofed ("end: no pocket for enderman N (a notch down, no bunker near)"). An enderman can neither enter nor see into it. Out by the roof and the step once it is calm.
 
+### Race 45918669138 (d7f7a01, dev, 3 lanes, cap 24,000), read mid-run (lane 1's evidence)
+**Wall 18: no way out of a notch under the bunker.**
+- Wall 16's answer worked: "breath: into the bunker", then "a notch down" at tick 880, and "out of the notch" at 1,500.
+- But the notch was 2 under the bunker's floor, walled all round. No step out was found, and E3's retreat said "no walk to the bunker" every tick from 1,700 on.
+- **Fix:** with no step to dig, the notch is risen out of, a block put under the feet at each jump (`rise_step`), to the height it was begun from. Notes: "notch: risen out at …".
+
+### Race 45918669138 in full (d7f7a01): went backwards
+- **Wall 19: the way into the bunker flapped.**
+  - Lane 2 stood at the bunker's stair top (13, 58..59, -1) under a flame's cloud. The body's height put it in and out of the cloud from tick to tick: "into the bunker" and "out of the breath" 40 times each. Between them the fight's own walk climbed the stair back into the cloud, 3.0 a time, 20 to dead.
+  - Lane 0 died the same way after 7 strikes (dragon at 168).
+  - **Fix:**
+    - The way into the bunker is kept to its end while a breath lies within its reach plus 2 on the plane.
+    - In the bunker the bot stays, crouched, while one does.
+    - A bunker not clear of every breath (on the plane and in height) is not gone to; the notch where the bot stands is dug instead.
+- **Wall 20: held in cover while the dragon sat.**
+  - Lane 1 was in its notch under the bunker (wall 18), and "end: covered" from an angry enderman ran the whole race: 0 strikes.
+  - **Fix:** a fight walk that fails NoPath in cover while the dragon is grounded climbs out by a shaft straight up: the block over the head dug, a block put under the feet at each jump, until the sky is over the head. Never while a breath lies over the shaft on the plane: it stays in cover until the cloud clears. Notes: "out by a shaft up", "dragon: out of cover". Unit-tested.
+
+**Wall 21: near the head stand, out of reach** (dev race 45924968115 lane 1). The bot stood 0.7 off the stand's middle, inside "at the stand" (1.0) but 3.2 from the head's box: "no head stand open" every turn.
+- **Fix:** within 1.0 of the stand but over 0.25 off its middle, the bot steps onto the middle (`Want::Centre`).
+
+**Wall 22: the bunker's breath hold through the strike window** (the same race, lane 2). The clouds the dragon kept sending held the bot in the bunker for 7,320 ticks, and the dragon stayed at 200.
+- **Fix:** the hold yields while the dragon is scanning or attacking on its perch.
+
+**Wall 23: every breath death in the real chain began in a strafe.** In the last three frontier races (45910659261, 45913263506, 45924970608) six bots died of breath, and all six followed the same sequence:
+- a dragon phase change 1 → 0 (strafe over, the fireball out);
+- its splash 20 ticks later;
+- the first fatal hit 20 ticks after that.
+
+| race | lane | strafe ended | splash | first fatal hit |
+|---|---|---|---|---|
+| 45910659261 | 1 | 12,100 | 12,140 | 12,160 |
+| 45913263506 | 0 | 19,580 | 19,600 | 19,620 |
+| 45913263506 | 1 | 12,420 | 12,460 | 12,480 |
+| 45913263506 | 2 | 18,960 | 18,980 | 19,000 |
+| 45924970608 | 1 | 9,760 | 9,780 | 9,800 |
+| 45924970608 | 2 | 15,040 | 15,060 | 15,080 |
+
+A strafe lasts about 180 ticks, time for a notch. Answering after the cloud lands is too late.
+
+**Fix:** `charge_step` takes the strafe as it takes the charge (`strafing_at`: phase 1 within 64).
+- On open ground (not in the bunker, a roofed notch, or up a pillar or spike, where E4's holds answer), the bot shelters before the fireball: the bunker within 12, else a roofed notch dug now.
+- It stays until the phase has left the strafe and no cloud lies within reach.
+- Notes: "strafe: shelter before the fireball (the bunker at … | a notch)".
+
+**Wall 24: the strike that makes it take off never came** (dev race 45931228063 lane 2). The count stood at 44, so every strike was the crossing one and wanted a stand under the wings. One dig in the scanning and attacking window (about 60 ticks) was too slow: "no head stand open" every turn, and the dragon sat at 156 for 9,000 ticks.
+- **Fix:** the low stand is dug through the flame. It is a notch 9 out from the body, on a bearing at least a right angle off the head, out of the flame's reach (`low_prep_cell`). The scanning turn then brings the head to it.
+
+### Frontier race 45931225605 (8ef101e): the strafe shelter on the island
+- **Firings:** "strafe: shelter before the fireball" fired 4 times in lane 0 and 11 in lane 1. Both died of breath all the same.
+- **Lane 0:** the strafe began 69 off and ended 56 off. The fireball flew 40 ticks with the phase already holding, so the shelter never fired for it.
+  - **Fix:** a dragon fireball in flight within 64 counts as the strafe (`fireball_at`).
+- **Lane 1:** sheltered in the bunker at [14, 58, 0], and the fireball came into the bunker (the cloud at 0.0 off, the bot at 14.7, 58.2, 0.7). The bunker was open: E3's stair and door. **Fix (E5):** the strafe shelter and every breath answer skip a bunker that is not shut (roof and the door's first cell solid: `Plan::bunker_shut`, E3's own test), and dig the roofed notch instead. E3 seals the bunker on a strafe.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
+
+### Dev race 45937087645 (0783310, dev-end-no-crystals, 3 lanes, cap 24,000), read mid-run: the strafe shelter was wrong
+**Wall 25: hidden for the whole strafe, the strafe never ended.** The dragon was at 200 in all three lanes and was never struck.
+- **Lane 0:** the strafe began at tick 780 and "strafe: shelter before the fireball (a notch)" fired. The bot sat in its roofed notch at (13, 57, 3). The phase was still strafe at tick 11,900, with no change in the ledger in between. The fight handed back at 1,820 with 0 strikes, E3's stairs out failed (dig `Refused`) twice and stalled, and the bot was idle in the notch from 3,840 on.
+- **Lane 2:** the same, from 660. **Lane 1:** the strafe held from 900 to 4,700.
+- **Why the rule was wrong** (the 26.1.2 jar, `javap` of `DragonStrafePlayerPhase.doServerTick`, probe 45938702513): a strafe ends only one of two ways.
+  - It fires: `fireballCharge` goes up 1 a tick only while the player is within 64 (`distanceToSqr < 4096`) and `dragon.hasLineOfSight(target)`, and goes down 1 a tick otherwise. At 5 or more, with the target within 10 degrees of the dragon's facing, it fires and sets `HOLDING_PATTERN`.
+  - It has no target (`attackTarget == null`), and sets `HOLDING_PATTERN`.
+  - Out of sight, the charge never builds, so the dragon circles in the strafe and never goes back to the holding pattern it perches from. Sheltering for the whole strafe (walls 23 and the 3f0d5be rule) turned the fireball's danger into a fight that never starts.
+- **Fix:** the strafe is met in the dragon's sight (`Plan::strafe_seen_step`, called from `charge_step` when there is no charge).
+  - With no threat, the bot digs a notch two deep in the cell beside the feet and stands by it, sneaking. Notes: "strafe: a notch dug beside at …, stood by in sight" and "strafe: stood by the notch at … in sight".
+  - With a threat, it steps into the notch (not sneaking) and roofs it ("strafe: into the notch at …"). A threat is a fireball in flight within 64 (`fireball_at`) or a cloud within reach and `OUT_SLACK`.
+  - Hidden in its notch through a strafe with no threat, it stays `STRAFE_HIDE_TICKS` (200), then digs the roof back and rises out a block at a jump to be seen ("strafe: out of the notch to be seen at …").
+  - A charge is still hidden from at once, and a cloud within reach still holds it in.
+  - With no notch beside ready at a threat, the shelter is as before (a shut bunker within 12, else a notch where the feet are).
+- **Unproven:** whether 200 ticks is right, and whether the step in beats the fireball. The fireball spawns at the head and flies about 30 to 40 blocks; the step is one block and a 2-block drop. E3's seal-on-strafe for the bunker hides the bot the same way and will hold the strafe too unless it is capped.

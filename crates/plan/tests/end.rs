@@ -772,3 +772,102 @@ fn the_bunker_is_not_left_while_a_fireball_or_cloud_lies_by_its_stair() {
     p.step(&w);
     assert!(noted(&p, "end: open the bunker"), "{:?}", notes(&p));
 }
+
+#[test]
+fn down_a_notch_under_the_bunker_the_bot_climbs_back_into_it() {
+    // Race 45918666403 lane 2: a breath notch dug to (14, 56, 0) under the bunker at (14, 58, 0).
+    let mut w = world(4, 0..=7, [12.5, 58.0, 0.5]);
+    for y in 58..=61 {
+        set(&mut w, (12, y, 0), BlockKind::Air);
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.step(&w);
+    assert!(
+        noted(
+            &p,
+            "end: up out of the notch to the bunker from (12, 58, 0)"
+        ),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn an_open_with_fire_coming_by_the_stair_is_cut_and_the_bunker_sealed() {
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [(12, 60, 0), (12, 61, 0), (12, 62, 0)] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 13, EntityKind::DragonFireball, [8.5, 66.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.end.work = Some(plan::end::Work::new(
+        plan::end::WorkKind::Open,
+        vec![plan::end::Op::Dig((11, 61, 0))],
+        0,
+    ));
+    p.step(&w);
+    // The fireball in flight seals the bunker (wall 14) before the fire cut (wall 13) is needed:
+    // either way the open is cut and the bunker sealed.
+    assert!(
+        noted(&p, "end: the open cut for fire by the stair")
+            || noted(&p, "end: the bunker sealed for a DragonFireball"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(noted(&p, "end: seal the bunker"), "{:?}", notes(&p));
+    assert!(
+        p.end
+            .work
+            .as_ref()
+            .is_none_or(|wk| wk.kind != plan::end::WorkKind::Open),
+        "{:?}",
+        p.end.work
+    );
+}
+
+#[test]
+fn in_an_open_bunker_under_a_strafe_the_bunker_is_sealed() {
+    // Frontier race 45931225605 lane 1: the fireball aimed at the bot came into its open bunker.
+    let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 7, EntityKind::EnderDragon, [40.0, 80.0, 0.0]);
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.metadata.insert(16, MetaValue::Int(1));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.step(&w);
+    assert!(
+        noted(&p, "end: the bunker sealed for a EnderDragon"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(noted(&p, "end: seal the bunker at"), "{:?}", notes(&p));
+    // Sealed, the strafe still on: no open.
+    for c in [(12, 62, 0), (11, 61, 0)] {
+        set(&mut w, c, BlockKind::EndStone);
+    }
+    p.end.work = None;
+    p.retry_at = 0;
+    p.step(&w);
+    assert!(!noted(&p, "end: open the bunker"), "{:?}", notes(&p));
+}

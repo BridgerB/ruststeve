@@ -2059,3 +2059,534 @@ report = true
 fill = [["air", -1, -21, -3, 6, 2, 3], ["end_stone", 0, -24, 0, 0, -1, 0], ["stone", 1, -23, -3, 6, -22, 3]]
 watch = [[2, -21, 0], [3, -21, 0]]
 
+
+# Issue 20's e09 sweep (E4's water clutch, races 14 and 45927433568 lane 0: a pour sent 3 ticks
+# before the predicted landing, 3.31 over the ground falling 1.16 a tick, died of the fall). e06's
+# walk off an end stone pillar, looking down, onto end stone from D = 8, 15, 25, 40, 60:
+# - e09-pour-D-K: one use of the water bucket (`pour:270:5:K`) on the tick the body's own prediction
+#   lands K ticks on (1: the move that lands);
+# - e09-pour-D-reach: one use on the first tick the eye is within the bucket's 4.5 of the ground;
+# - e09-pour-D-drop: no bucket (the control).
+# The report (real.end) says, per row: the use's tick, the position it was sent from (the last
+# the server heard: a tick's acts go out before its move), the eye over the ground there, the
+# landing's tick, when the watched cells turned to water, and the health lost.
+
+[[moment]]
+id = "e09-pour-8-1"
+landing = 1
+dx = -56
+dz = -28
+lift = 8
+script = "pour:270:5:1"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-8-2"
+landing = 1
+dx = -56
+dz = -16
+lift = 8
+script = "pour:270:5:2"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-8-3"
+landing = 1
+dx = -56
+dz = -4
+lift = 8
+script = "pour:270:5:3"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-8-4"
+landing = 1
+dx = -56
+dz = 8
+lift = 8
+script = "pour:270:5:4"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-8-5"
+landing = 1
+dx = -56
+dz = 20
+lift = 8
+script = "pour:270:5:5"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-8-reach"
+landing = 1
+dx = -56
+dz = 32
+lift = 8
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-8-drop"
+landing = 1
+dx = -56
+dz = 44
+lift = 8
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -8, -3, 6, 2, 3], ["end_stone", 0, -11, 0, 0, -1, 0], ["end_stone", 1, -10, -3, 6, -9, 3]]
+watch = [[1, -8, 0], [2, -8, 0], [3, -8, 0]]
+
+[[moment]]
+id = "e09-pour-15-1"
+landing = 1
+dx = -44
+dz = -28
+lift = 15
+script = "pour:270:5:1"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-15-2"
+landing = 1
+dx = -44
+dz = -16
+lift = 15
+script = "pour:270:5:2"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-15-3"
+landing = 1
+dx = -44
+dz = -4
+lift = 15
+script = "pour:270:5:3"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-15-4"
+landing = 1
+dx = -44
+dz = 8
+lift = 15
+script = "pour:270:5:4"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-15-5"
+landing = 1
+dx = -44
+dz = 20
+lift = 15
+script = "pour:270:5:5"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-15-reach"
+landing = 1
+dx = -44
+dz = 32
+lift = 15
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-15-drop"
+landing = 1
+dx = -44
+dz = 44
+lift = 15
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -15, -3, 6, 2, 3], ["end_stone", 0, -18, 0, 0, -1, 0], ["end_stone", 1, -17, -3, 6, -16, 3]]
+watch = [[1, -15, 0], [2, -15, 0], [3, -15, 0]]
+
+[[moment]]
+id = "e09-pour-25-1"
+landing = 1
+dx = -32
+dz = -28
+lift = 25
+script = "pour:270:5:1"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-25-2"
+landing = 1
+dx = -32
+dz = -16
+lift = 25
+script = "pour:270:5:2"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-25-3"
+landing = 1
+dx = -32
+dz = -4
+lift = 25
+script = "pour:270:5:3"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-25-4"
+landing = 1
+dx = -32
+dz = 8
+lift = 25
+script = "pour:270:5:4"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-25-5"
+landing = 1
+dx = -32
+dz = 20
+lift = 25
+script = "pour:270:5:5"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-25-reach"
+landing = 1
+dx = -32
+dz = 32
+lift = 25
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-25-drop"
+landing = 1
+dx = -32
+dz = 44
+lift = 25
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -25, -3, 6, 2, 3], ["end_stone", 0, -28, 0, 0, -1, 0], ["end_stone", 1, -27, -3, 6, -26, 3]]
+watch = [[1, -25, 0], [2, -25, 0], [3, -25, 0]]
+
+[[moment]]
+id = "e09-pour-40-1"
+landing = 1
+dx = -20
+dz = -28
+lift = 40
+script = "pour:270:5:1"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-40-2"
+landing = 1
+dx = -20
+dz = -16
+lift = 40
+script = "pour:270:5:2"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-40-3"
+landing = 1
+dx = -20
+dz = -4
+lift = 40
+script = "pour:270:5:3"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-40-4"
+landing = 1
+dx = -20
+dz = 8
+lift = 40
+script = "pour:270:5:4"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-40-5"
+landing = 1
+dx = -20
+dz = 20
+lift = 40
+script = "pour:270:5:5"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-40-reach"
+landing = 1
+dx = -20
+dz = 32
+lift = 40
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-40-drop"
+landing = 1
+dx = -20
+dz = 44
+lift = 40
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -40, -3, 6, 2, 3], ["end_stone", 0, -43, 0, 0, -1, 0], ["end_stone", 1, -42, -3, 6, -41, 3]]
+watch = [[1, -40, 0], [2, -40, 0], [3, -40, 0]]
+
+[[moment]]
+id = "e09-pour-60-1"
+landing = 1
+dx = -8
+dz = -28
+lift = 60
+script = "pour:270:5:1"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
+
+[[moment]]
+id = "e09-pour-60-2"
+landing = 1
+dx = -8
+dz = -16
+lift = 60
+script = "pour:270:5:2"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
+
+[[moment]]
+id = "e09-pour-60-3"
+landing = 1
+dx = -8
+dz = -4
+lift = 60
+script = "pour:270:5:3"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
+
+[[moment]]
+id = "e09-pour-60-4"
+landing = 1
+dx = -8
+dz = 8
+lift = 60
+script = "pour:270:5:4"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
+
+[[moment]]
+id = "e09-pour-60-5"
+landing = 1
+dx = -8
+dz = 20
+lift = 60
+script = "pour:270:5:5"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
+
+[[moment]]
+id = "e09-pour-60-reach"
+landing = 1
+dx = -8
+dz = 32
+lift = 60
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+give = ["water_bucket 1"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
+
+[[moment]]
+id = "e09-pour-60-drop"
+landing = 1
+dx = -8
+dz = 44
+lift = 60
+script = "pour:270:5:0"
+ticks = 100
+difficulty = "normal"
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -1, -60, -3, 6, 2, 3], ["end_stone", 0, -63, 0, 0, -1, 0], ["end_stone", 1, -62, -3, 6, -61, 3]]
+watch = [[1, -60, 0], [2, -60, 0], [3, -60, 0]]
