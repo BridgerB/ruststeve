@@ -1137,9 +1137,14 @@ arrows = 32
 # and no sticks) and a 4th stone pickaxe (the armed snapshot holds 3 and 90 cobblestone).
 bow_sticks = 16
 bow_pickaxes = 4
-# A whole day: the armed snapshot is at dusk, so the night's hut comes first.
-bow_ticks = 24000
+# The night (the armed snapshot is at dusk, so its hut comes first) and the morning: over by
+# about noon, so the walk back to the stairs is by day (race 46060386538 lane 2: over at the next
+# dusk 245 off the stairs, hutted there to the cap).
+bow_ticks = 18000
 bow_fails = 24
 # Chickens and spiders hunted within 48 (the forest base's stem_radius, as log_reach).
 bow_radius = 48.0
+# Look points 60 out round the stairs' top (1608, -32), north, east, south, west, then 100 out:
+# the wood points went to 190 off and the way back was lost (race 46060386538).
+bow_points = [[1608, -92], [1668, -32], [1608, 28], [1548, -32], [1608, -132], [1708, -32], [1608, 68], [1508, -32]]
 # <<< E8

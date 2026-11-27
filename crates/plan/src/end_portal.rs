@@ -96,6 +96,8 @@ pub struct EndKitRules {
     pub bow_fails: u32,
     /// Chickens and spiders hunted within this of the feet.
     pub bow_radius: f64,
+    /// The look points (x, z) for chickens and spiders, in turn (`wood_points` when empty).
+    pub bow_points: Vec<[i32; 2]>,
     // <<< E8
 }
 
@@ -148,6 +150,7 @@ impl Default for EndKitRules {
             bow_ticks: 24_000,
             bow_fails: 24,
             bow_radius: 48.0,
+            bow_points: Vec::new(),
         }
     }
 }
@@ -1144,7 +1147,7 @@ impl Plan {
     fn bow_room_task(&mut self, w: &World, tick: u64) -> Option<Task> {
         const WEB_REACH: i32 = 40;
         const WEB_RISE: i32 = 12;
-        const WEB_TRIES: u32 = 16;
+        const WEB_TRIES: u32 = 48;
         let r = self.end_rules();
         if !r.bow || self.end_portal.room_bow_over || !overworld(w) {
             return None;
@@ -1230,6 +1233,29 @@ impl Plan {
             return Some(Task::ToLog(walk));
         }
         self.expanded += walk.expanded;
+        // No walk (race 46060386538 lane 1: sixteen webs in reach, none walked to): dug toward
+        // through the stronghold's walls, a step at a time, the walk asked again after each.
+        let why = format!("no walk to it (route {:?})", walk.route);
+        if let Some(t) = self.dig_toward(w, c, true, ("the cobweb", &why), tick) {
+            let line = bow_line(w);
+            self.note(
+                tick,
+                format!("end kit: dig toward the cobweb at {c:?}"),
+                format!(
+                    "{why}; try {} of {WEB_TRIES}; {line}",
+                    self.end_portal.web_tries
+                ),
+            );
+            return Some(t);
+        }
+        self.note(
+            tick,
+            format!("end kit: cobweb at {c:?} refused"),
+            format!(
+                "{why}, no dig toward it; try {} of {WEB_TRIES}",
+                self.end_portal.web_tries
+            ),
+        );
         self.refuse(c, tick);
         Some(Task::Idle)
     }
@@ -1376,7 +1402,12 @@ impl Plan {
             self.refused_prey.push(id);
         }
         // None in sight: the overland's legs to the next look point.
-        let Some(p) = r.wood_points.get(self.end_portal.bow_point).copied() else {
+        let points = if r.bow_points.is_empty() {
+            &r.wood_points
+        } else {
+            &r.bow_points
+        };
+        let Some(p) = points.get(self.end_portal.bow_point).copied() else {
             let line = bow_line(w);
             self.end_kit_advance(
                 w,
