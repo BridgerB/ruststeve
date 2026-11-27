@@ -419,6 +419,24 @@ pub fn dragon_down_or_charging(w: &World) -> bool {
 pub const FULL_AIR: i32 = 300;
 pub const DROWN_RECENT: u64 = 40;
 
+/// E4's "too few blocks" notes count this many ticks back.
+pub const WANTED_RECENT: u64 = 200;
+
+/// The number before " wanted" in a note ("29 blocks held, 37 wanted for the pillar …" gives 37).
+pub fn wanted_in(text: &str) -> Option<i32> {
+    let at = text.find(" wanted")?;
+    let head = text.get(..at)?;
+    let digits: String = head
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    digits.parse().ok()
+}
+
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -1648,10 +1666,20 @@ impl Plan {
         // What the next pillar needs, no more (race 45994686575 lane 5: three stone pickaxes worn
         // out by 49,600, 44 held against the last pillar's 49, the End has no wood): at most the
         // tallest pillar and its walls; a hand-back for blocks mines again.
-        let want = self
-            .next_pillar_need(w)
-            .unwrap_or(STOCK_ENOUGH)
-            .min(STOCK_ENOUGH);
+        let want = self.blocks_wanted(w, tick);
+        // Short again (the next pillar wants more than the last, or blocks were spent): the stock
+        // reopens, marked over or not (race 46055289196: "surface stock over (29 … (29 wanted))"
+        // then E4's "too few blocks (29 held, 37 wanted)" 60 times, no progress to 5,700 ticks;
+        // the old reopen asked a hand-back of none, and E4's hold is a task).
+        if self.end.open_stock_over && stone < want {
+            self.end.open_stock_over = false;
+            self.end.surface_walks = 0;
+            self.note(
+                tick,
+                "end: surface stock again".to_owned(),
+                format!("{stone} blocks held, {want} wanted for the next pillar"),
+            );
+        }
         if stone < want && self.end.surface_walks <= SURFACE_WALKS && !self.end.open_stock_over {
             if let Some(t) = self.surface_mine(w, feet, tick) {
                 return Some(t);
@@ -1665,7 +1693,7 @@ impl Plan {
             self.note(
                 tick,
                 "end: surface stock over".to_owned(),
-                format!("{stone} end stone held ({want} wanted), mined in the open"),
+                format!("{stone} blocks held ({want} wanted), mined in the open"),
             );
         }
         let next = if crystals_alive(w) > 0 {
@@ -1732,6 +1760,24 @@ impl Plan {
             format!("{MINE_FROM_FOUNTAIN} or more from the fountain; {d:.0} now"),
         );
         Some(Task::Explore(walk))
+    }
+
+    /// The blocks the next pillar wants, as the crystals' own check counts them: E4's last "too few
+    /// blocks (… N wanted …)" note within `WANTED_RECENT` ticks as a backstop, else
+    /// `next_pillar_need`, else `STOCK_ENOUGH`; at most `STOCK_ENOUGH` unless E4 asks for more.
+    pub fn blocks_wanted(&self, w: &World, tick: u64) -> i32 {
+        let asked = self
+            .events
+            .iter()
+            .rev()
+            .take_while(|e| tick.saturating_sub(e.tick) <= WANTED_RECENT)
+            .find(|e| e.what.starts_with("spikes:") && e.what.contains("too few blocks"))
+            .and_then(|e| wanted_in(&e.what).or_else(|| wanted_in(&e.why)));
+        let ours = self
+            .next_pillar_need(w)
+            .unwrap_or(STOCK_ENOUGH)
+            .min(STOCK_ENOUGH);
+        asked.map_or(ours, |a| a.max(ours))
     }
 
     /// The next pillar's blocks: from the nearest crystal's spike, its top over the ground beside it
