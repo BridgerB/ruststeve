@@ -2742,7 +2742,7 @@ fn caged_on_a_spikes_top_the_bot_breaks_out_and_steps_off() {
 
 #[test]
 fn a_climb_goes_on_through_the_holding_pattern_40_off_or_more() {
-    // The orchestrator's rule after race 46071506005: start holding, 40 off or more, not closing;
+    // The orchestrator's rule after races 46071506005 and 46079924222: start holding, 40 off or more;
     // go on while holding 40 off or more; stop on any other phase or nearer.
     // Half way up, holding 50 off and not closing: on.
     let mut w = world(2, [8.5, 65.0, 5.5]);
@@ -2763,12 +2763,12 @@ fn a_climb_goes_on_through_the_holding_pattern_40_off_or_more() {
         p.spikes.doing,
         notes(&p)
     );
-    // At the foot, the same dragon closing: no start.
+    // At the foot, holding but nearer than 40: no start. (No closing test since race
+    // 46079924222: a holding circle closes on part of every arc, and 13 of 14 climbs stopped.)
     let mut w = world(2, [8.5, 64.0, 5.5]);
     water(&mut w);
-    dragon(&mut w, [8.5, 64.0, 55.5], 0);
+    dragon(&mut w, [8.5, 64.0, 35.5], 0);
     let mut p = Plan::new(Aim::Race);
-    p.end.dragon_dists = vec![(80, 70.0)];
     p.spikes_task(&w, 100);
     assert!(
         notes(&p).iter().any(|n| n == "spikes: no climb"),
