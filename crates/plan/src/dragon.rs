@@ -4434,7 +4434,10 @@ impl Plan {
             let (yaw, pitch) = look(target);
             match hold::toward(w, ItemKind::Bucket) {
                 Hold::Held => {
-                    if self.acts.is_empty() && tick >= self.dragon.ender_water_at + BUCKET_RETRY {
+                    if self.acts.is_empty()
+                        && (self.dragon.ender_water_at == 0
+                            || tick >= self.dragon.ender_water_at + BUCKET_RETRY)
+                    {
                         self.dragon.ender_water_at = tick;
                         self.acts.push(Act::UseItem);
                         self.note(
@@ -4492,7 +4495,10 @@ impl Plan {
         let (yaw, pitch) = look(target);
         match hold::toward(w, ItemKind::WaterBucket) {
             Hold::Held => {
-                if self.acts.is_empty() && tick >= self.dragon.ender_water_at + BUCKET_RETRY {
+                if self.acts.is_empty()
+                    && (self.dragon.ender_water_at == 0
+                        || tick >= self.dragon.ender_water_at + BUCKET_RETRY)
+                {
                     self.dragon.ender_water_at = tick;
                     self.acts.push(Act::UseItem);
                 }
