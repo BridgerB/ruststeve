@@ -71,6 +71,11 @@ pub struct Hunt {
     pub swings: u32,
     pub kills_before: u64,
     pub started: u64,
+    // >>> E8 (issue 20, the bow line): drops picked up besides the meat (a chicken's feathers, a
+    // spider's string; race 46047707279: the collect looked only for meat).
+    #[serde(default)]
+    pub extra: Vec<ItemKind>,
+    // <<< E8
 }
 
 /// The foods a kind of animal drops that are safe, or cook into a safe one (a chicken's: never
@@ -172,6 +177,7 @@ impl Hunt {
             swings: 0,
             kills_before: w.kills,
             started: tick,
+            extra: Vec::new(),
         }
     }
 
@@ -222,7 +228,8 @@ impl Hunt {
         let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
         match self.stage {
             HuntStage::Collect { at, since } => {
-                let foods = meat(self.kind, rules);
+                let mut foods = meat(self.kind, rules);
+                foods.extend(self.extra.iter().copied());
                 let drop = w
                     .entities
                     .values()

@@ -401,7 +401,7 @@ spare_pickaxes = 2
 # could not be held for the cast). 64 cobblestone and deepslate cover stone tools, stairs' floors,
 # seals and the cast's placed blocks; gravel is kept for flint; nothing else here is ever used.
 junk = [
-  ["cobblestone", 64], ["cobbled_deepslate", 64], ["dirt", 16], ["gravel", 8],
+  ["cobblestone", 64], ["cobbled_deepslate", 64], ["dirt", 16], ["gravel", 16],
   ["andesite", 0], ["diorite", 0], ["granite", 0], ["tuff", 0], ["calcite", 0],
   ["smooth_basalt", 0], ["raw_copper", 0], ["lapis_lazuli", 0], ["glow_ink_sac", 0],
   ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
@@ -409,8 +409,13 @@ junk = [
   # leather and three colours of wool when it filled and its crafts failed). Leather is kept (4
   # items, one slot): dropped, it came back 167 times to a bot standing still (race 45703184922
   # lane 0) and still while walking (45714294764).
-  ["egg", 0], ["feather", 0], ["string", 0], ["white_wool", 0],
+  # >>> E8 (issue 20, the bow line): feathers and string are the bow's (race 46047707279 lane 1
+  # dropped every feather of four chickens, "fewer than 6 main slots free"); gravel kept to 16
+  # for the flint redig (the armed pack's 15). The pack's other leftovers go instead.
+  ["egg", 0], ["feather", 16], ["string", 8], ["white_wool", 0],
   ["light_gray_wool", 0], ["gray_wool", 0], ["black_wool", 0], ["brown_wool", 0],
+  ["magma_block", 0], ["oak_sapling", 0], ["red_mushroom", 0], ["chicken", 0],
+  # <<< E8
 ]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
 # Wither skeletons were here from 2026-11-20 (8 a hit and the wither effect killed 5 of 7 bare bots,

@@ -1181,8 +1181,52 @@ impl Plan {
             self.end_kit_advance(w, tick, &format!("the bow kit as far as it goes: {line}"));
             return None;
         }
-        // The nearest chicken or spider seen, with a walk to it.
         let body = w.body?;
+        // Feathers or string lying in sight (a defend's kill drops them and moves on: race
+        // 46047707279 lane 2 killed a spider in a defend and walked off): picked up first.
+        let wanted: Vec<ItemKind> = [
+            (want_feathers, ItemKind::Feather),
+            (want_string, ItemKind::String),
+        ]
+        .into_iter()
+        .filter(|x| x.0)
+        .map(|x| x.1)
+        .collect();
+        let lying = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.item().is_some_and(|(k, _)| wanted.contains(&k)))
+            .map(|e| e.pos)
+            .filter(|p| {
+                (0..3)
+                    .map(|i| (p[i] - body.pos[i]).powi(2))
+                    .sum::<f64>()
+                    .sqrt()
+                    <= 24.0
+            })
+            .min_by(|a, b| {
+                let d = |p: &[f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>();
+                d(a).total_cmp(&d(b))
+            });
+        if let Some(p) = lying {
+            let c = path::feet_cell(p);
+            if !self.refused_now(c, tick) {
+                let mut walk = Walk::new(c, Goal::Near { pos: c, range: 0.8 }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    let line = bow_line(w);
+                    self.note(
+                        tick,
+                        format!("end kit: pick up the bow's drop at {c:?}"),
+                        line,
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+                self.refuse(c, tick);
+            }
+        }
+        // The nearest chicken or spider seen, with a walk to it.
         let kinds: Vec<(EntityKind, &str)> = [
             (want_feathers, EntityKind::Chicken, "feathers"),
             (want_string, EntityKind::Spider, "string"),
@@ -1213,6 +1257,7 @@ impl Plan {
         prey.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
         for (dist, id, kind, item) in prey.into_iter().take(crate::hunt::CANDIDATES) {
             let mut h = crate::hunt::Hunt::new(w, id, kind, tick);
+            h.extra = vec![ItemKind::Feather, ItemKind::String];
             if h.reachable(w, tick) {
                 let line = bow_line(w);
                 self.note(
