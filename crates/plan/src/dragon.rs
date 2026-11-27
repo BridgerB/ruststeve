@@ -824,6 +824,9 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
 /// for a player in before it charges one, past the head's sweep (8) and the turn's stand (9).
 pub const SCAN_KEEP: f64 = 12.0;
 
+/// Blocks on the plane from a stand's middle the feet step onto it from.
+pub const CENTRE_NEAR: f64 = 0.25;
+
 /// Ticks of the scanning phase the bot waits for the head to turn onto it at `scan_stand`
 /// (the turn takes about 20, `DragonSittingScanningPhase`).
 pub const SCAN_WAIT_TICKS: u64 = 40;
@@ -1112,6 +1115,8 @@ pub enum Want {
     Eat,
     /// Dig the block under the feet (a stand one lower, under the wings' sweep).
     Dig([i32; 3]),
+    /// Step onto a stand's middle.
+    Centre([i32; 3]),
     /// Stand where the feet are, looking down, and why.
     Hold(&'static str),
 }
@@ -1323,6 +1328,12 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         }
         if flat(feet, mid(hs)) > STAND_NEAR {
             return Want::Go(hs, "to the head stand");
+        }
+        // Near the stand but not in reach from where the feet are (race 45924968115 lane 1: 0.7
+        // off its middle, 3.2 from the head's box, "no head stand open" every turn): onto its
+        // middle.
+        if flat(feet, mid(hs)) > CENTRE_NEAR {
+            return Want::Centre(hs);
         }
     }
     // Landing, not yet sat, or no head stand open: the bunker (under every sweep: race
@@ -1805,6 +1816,7 @@ impl Plan {
             Want::Strike { head, .. } => format!("strike {}", if *head { "head" } else { "body" }),
             Want::Eat => "eat".to_owned(),
             Want::Dig(c) => format!("dig down at {c:?} for a stand under the wings"),
+            Want::Centre(c) => format!("onto the middle of {c:?}"),
             Want::Hold(why) => format!("hold {why}"),
         };
         let changed = f.said != key;
@@ -1839,7 +1851,12 @@ impl Plan {
             Want::Go(..) => {
                 self.dragon.way = None;
             }
-            Want::Exit(_) | Want::Strike { .. } | Want::Eat | Want::Dig(_) | Want::Hold(_) => {
+            Want::Exit(_)
+            | Want::Strike { .. }
+            | Want::Eat
+            | Want::Dig(_)
+            | Want::Centre(_)
+            | Want::Hold(_) => {
                 self.dragon.way = None;
                 self.dragon.way_done = None;
             }
@@ -1981,6 +1998,17 @@ impl Plan {
                     ),
                 );
                 looking_down(w)
+            }
+            Want::Centre(c) => {
+                let feet = w.body.map_or([0.0; 3], |b| b.pos);
+                let to = mid(c);
+                Controls {
+                    forward: true,
+                    sneak: true,
+                    yaw: crate::walk::yaw_to(feet, to),
+                    pitch: Some(90.0),
+                    ..Controls::default()
+                }
             }
             Want::Exit(c) => {
                 let feet = w.body.map_or([0.0; 3], |b| b.pos);

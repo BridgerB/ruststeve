@@ -1241,3 +1241,22 @@ fn out_of_cover_at_a_perch_by_a_shaft_up_never_under_a_breath() {
         "no dig under a breath"
     );
 }
+
+#[test]
+fn near_the_head_stand_but_out_of_reach_the_bot_steps_onto_its_middle() {
+    // Race 45924968115 lane 1: 0.7 off the stand's middle, 3.2 from the head's box, "no head stand
+    // open" every turn.
+    let mut w = end_at([9.4, 64.0, 0.5]);
+    with_dragon(&mut w, [0.5, 69.0, 0.5], 7, 90.0);
+    let a = Ask {
+        stand: Some([8, FLOOR, 0]),
+        ..ask()
+    };
+    assert_eq!(decide(&w, &a), Want::Centre([8, FLOOR, 0]));
+    let mut there = end_at([8.5, 64.0, 0.5]);
+    with_dragon(&mut there, [0.5, 69.0, 0.5], 7, 90.0);
+    assert!(matches!(
+        decide(&there, &a),
+        Want::Strike { head: true, .. }
+    ));
+}
