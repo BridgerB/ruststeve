@@ -2492,3 +2492,94 @@ fn the_clutchs_water_is_found_a_little_further_out() {
         "the nearest first"
     );
 }
+
+#[test]
+fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
+    // E5's read of race 46063334187 lane 5: "climb on through (the dragon 63 off in phase 0)",
+    // struck off 3 under its stand at (42, 91, 19), a fatal fall.
+    // Up, holding 50 off and closing (70 off 5 ticks ago): the climb stops and the bot comes
+    // down by the clutch (the test spike's stand is 3 over, so only the closing denies the
+    // near-stand exception here; `the_one_exception_near_the_stand_holding_and_not_closing`
+    // covers the rest).
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    water(&mut w);
+    dragon(&mut w, [8.5, 67.0, 55.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.dragon_seen = Some((95, 70.0));
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    let n = notes(&p);
+    assert!(
+        !n.iter().any(|n| n.starts_with("spikes: climb on")),
+        "{n:?}"
+    );
+    assert!(
+        n.iter().any(|n| n == "spikes: clutch down from (8, 67, 5)"),
+        "{n:?}"
+    );
+    // Not holding (strafing 70 off, past the strafe's reach): stopped and down, near the stand
+    // or not.
+    dragon(&mut w, [8.5, 67.0, 75.5], 1);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    p.spikes_task(&w, 100);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: clutch down from (8, 67, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    // No water bucket: held, not on.
+    dragon(&mut w, [8.5, 67.0, 55.5], 0);
+    w.inventory.slots.remove(&44);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.dragon_seen = Some((95, 70.0));
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: climb stopped, held"),
+        "{:?}",
+        notes(&p)
+    );
+}
+
+#[test]
+fn the_one_exception_near_the_stand_holding_and_not_closing() {
+    let holding = |dist: f64, phase: i32| spikes::DragonNear {
+        id: DRAGON,
+        dist,
+        phase: Some(phase),
+    };
+    assert!(spikes::climb_on_near_stand(
+        Some(&holding(50.0, 0)),
+        false,
+        3
+    ));
+    assert!(spikes::climb_on_near_stand(None, false, 5));
+    assert!(
+        !spikes::climb_on_near_stand(Some(&holding(50.0, 0)), false, 6),
+        "too far under"
+    );
+    assert!(
+        !spikes::climb_on_near_stand(Some(&holding(50.0, 0)), true, 3),
+        "closing"
+    );
+    assert!(
+        !spikes::climb_on_near_stand(Some(&holding(50.0, 1)), false, 3),
+        "strafing"
+    );
+}
