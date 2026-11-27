@@ -791,7 +791,10 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
         vec![Act::UseItem],
         "landed: the water taken back"
     );
+    // Taken back: the bucket full and the source gone from its cell (wall 33: the bucket alone
+    // is no sign).
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    set(&mut w, (8, 64, 5), BlockKind::Air);
     assert!(p.spikes_clutch(&w, 105).is_none());
     assert!(
         notes(&p)
