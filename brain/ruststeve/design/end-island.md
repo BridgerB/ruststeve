@@ -37,6 +37,9 @@ Issue 20e (agent E3, `docs/problems/end-island.md`). `Plan::end_step` runs ahead
 ## Gaze
 Every look still leaves through `keep_look` ([[way-home]]'s endermen rules). In the End a look no act asked for is straight down (`end_gaze`, ahead of `keep_look` in `Plan::step`); `end_look` sends a wanted look only when it stares at no enderman within 64 from the standing or the crouching eye.
 
+## The first look
+The server judges a stare by the look it holds; after the teleport into the End that is pitch 0 until a look packet arrives. `world::World::move_body` sends a look the controls ask for even with no column loaded under the feet (it sent only the status before), and `end_gaze` asks for pitch 90 from the first End tick.
+
 ## The void
 `void_column`: a cell and everything under it to the dimension's floor loaded and clear. `void_edge` is the walk's edge in the End ([[walk-and-watchdog]]); `home::rail_wanted` and the idle sneak count it too.
 

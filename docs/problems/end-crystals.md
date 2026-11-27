@@ -231,3 +231,34 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - With none, the pool refills one; with no pool, no pillar is climbed.
   - A pool is begun only with both its buckets in hand.
   - Unit test `no_climb_begins_without_a_water_bucket_in_the_hotbar`. E6's sim crystal runs are given a water bucket (fenced E4 in `crates/bot/tests/end_loop.rs`).
+
+## Tenth race: 45912100302 (dev-end-island, e67f786, development only), read at tick ~4,700
+
+### Wall 16: the escape out of water took the bot off its waterfall (fixed)
+- **What happened** (lane 1, ticks 1,220 to 1,340):
+  - After the caged (42, 0) it poured the waterfall at (39, 82, 0) and stepped off (-1, 0).
+  - Mid-ride, at y 77, the always-row "escape-water (trapped in water)" walked it to dry land: (41, 82, 0), the spike's top.
+  - There the pillar's watered top read as no way down: "stranded on a spike's top" from 1,340 to the cap.
+- **The fix:**
+  - While a waterfall is ridden (in its water, not on the ground) the crystals hold the controls ahead of every row ("riding the waterfall"; the same call site as the clutch).
+  - A pillar's top holding water counts as a way back.
+  - Unit test `the_waterfall_ride_is_kept_and_its_pour_is_no_bar_to_the_way_back`.
+- **No pool in race 10, read from the ledger:** lane 1's ledger has no pool note at all. The only chance was tick 680, at the bunker stair's top (11, 60, -2), and the pool was looked for only beside the feet.
+  - **The fix:** every refusal is now noted ("no pool: buckets", "no pool: no site" with each axis's first reason, "no pool: no way to its site").
+  - The site is looked for within 3 columns (`pool_site`) and walked to ("to the pool site at").
+  - Unit test `no_pool_site_says_why`.
+
+## Eleventh race: 45916169323 (dev-end-island, 966d029, development only)
+- **Lane 1:**
+  - The pool was made at (9, 61, 1) and (8, 61, 1) ("water pool at", 3 refills). The bunker's own floor had refused it first, which "no pool: no site" said; the site search found it 1 off at the stair's top.
+  - Then the caged crystal, the waterfall poured, and the ride. The ride went 82 to 72 in 400 ticks in the falling water, the eye under all the way, and the bot drowned (`death.attack.drown`, tick 1,980).
+- **Lane 0:** 1 crystal, then a fall after a blow (the clutch began).
+
+### Wall 17: a waterfall too slow to ride (fixed: a landing pool instead)
+- **The cause:** water's drag holds a body to about 0.03 blocks a tick, and a 23-block ride outlasts the air.
+- **The fix:**
+  - Before the climb, at the pillar's foot, the landing water is poured in the cell beside it with clear air up past the top ("landing water poured at"; two buckets held, one stays for the clutch).
+  - At the top after the strike, the bot steps off that side and falls straight into it ("waterfall down from"; a fall into water does no harm).
+  - Landed ("waterfall down to"), the water is taken back ("landing water taken back at").
+  - The pour on the pillar's top is gone.
+  - Unit test `the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top`.
