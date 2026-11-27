@@ -1861,3 +1861,61 @@ fn no_climb_begins_without_the_blocks_for_the_whole_pillar() {
     );
     assert!(p.spikes.pillars.is_empty(), "no pillar begun");
 }
+
+#[test]
+fn a_clutch_over_an_edge_pours_on_the_column_the_body_lands_on() {
+    // Frontier race 45964846590 lane 3: flung off by the dragon, the bot came down on an edge, the
+    // column under its centre open to the void: no ground known, no pour, dead of the fall.
+    let mut w = world(2, [20.85, 80.0, 20.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    for y in 0..=63 {
+        set(&mut w, (20, y, 20), BlockKind::Air);
+    }
+    assert_eq!(spikes::ground_under(&w, [20.85, 66.4, 20.5]), None);
+    assert_eq!(
+        spikes::landing_ground(&w, [20.85, 66.4, 20.5], [0.0, -1.2, 0.0]),
+        Some(((21, 20), 64.0))
+    );
+    // Flung sideways over the open column: the ground it is going to, a tick on.
+    assert_eq!(
+        spikes::landing_ground(&w, [20.5, 66.4, 20.5], [0.0, -1.2, 0.0]),
+        None
+    );
+    assert_eq!(
+        spikes::landing_ground(&w, [20.5, 66.4, 20.5], [0.6, -1.2, 0.0]),
+        Some(((21, 20), 64.0))
+    );
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    w.held = 1;
+    let fall = |w: &mut World, y: f64| {
+        at(w, [20.85, y, 20.5]);
+        if let Some(b) = w.body.as_mut() {
+            b.on_ground = false;
+            b.vel = [0.0, -1.2, 0.0];
+        }
+    };
+    fall(&mut w, 80.0);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.spikes_clutch(&w, 100).is_some(), "the clutch begun");
+    p.take_acts();
+    fall(&mut w, 66.4);
+    let ctl = p.spikes_clutch(&w, 101).expect("held");
+    assert!(
+        p.take_acts().contains(&Act::UseItem),
+        "the pour over the edge: {:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: clutch pour sent"),
+        "{:?}",
+        notes(&p)
+    );
+    // Looking at the landing column's top, toward +x of straight down.
+    assert_eq!(
+        spikes::landing_aim([20.85, 66.4, 20.5], (21, 20), 64.0),
+        [21.1, 64.0, 20.5]
+    );
+    assert!(ctl.pitch.is_some_and(|p| p > 60.0), "{ctl:?}");
+}

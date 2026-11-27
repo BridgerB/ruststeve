@@ -457,3 +457,19 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - No climb begins at the foot without the end stone for the whole pillar plus `PILLAR_SPARE` (4: the two wall blocks and two for a lost click). Short of that it notes "no climb: too few blocks" and hands back (`None`) with no pillar begun, so E3's stock can run again.
   - Unit test `no_climb_begins_without_the_blocks_for_the_whole_pillar`.
   - E3's side: the stock should resume when the crystals hand back for blocks with it over or paused.
+
+## Frontier race 45964846590 (25c4f49, 8 lanes): 8 of 8 dead
+
+### Wall 31: a clutch with no ground to pour on (lane 3, `death.fell.assist ender_dragon`; the cause is the knock-off)
+- **What happened:**
+  - At 4,880 the bot was walking out of a breath cloud by the fountain (E5's breath walk, to (5, 62, -3), about 10 off the fountain). Two dragon `mob_attack` hits came in its takeoff, at health 20 to 13.5.
+  - By 4,920 it was at (90, 92, -20), flung about 85 east. "Crystal gone (far)" at 4,900 to 4,940 confirms the bot really was far out.
+  - The clutch began with the bucket in slot 16, not the hotbar (it wasn't up high), and "0.0 under the feet": no ground known under its column.
+  - `why` at 4,959 (probe 45968933624): the player at (94.52, 46.93, -20.00), standing on air. Every cell from x 82 to 106, z -32 to -8, y 30 to 40 is air in the bot's world (loaded).
+  - So the fall was over the void past the island's edge, about 54 blocks from y 92. The bot died at 4,960 at y 38; the server's "fall" hit at y 38 isn't explained by the client's world.
+- **Why the clutch didn't save it:** there was no ground to pour on. Pour timing, the bucket and the edge were not the cause. The cure is not being knocked off: the breath walk ending next to the fountain during the takeoff is E5's.
+- **What changed anyway (robustness, not this death's cure):**
+  - The clutch's ground is now the highest ground under any column its box overlaps, now and a tick on along its sideways velocity (`landing_ground`), not only the column under its centre.
+  - The pour looks at that column's top (`landing_aim`), so a body coming down on an edge, or flung onto ground beside it, pours where it lands.
+  - The "clutch pour sent" note names the column and says when it's beside the feet's.
+  - Unit test `a_clutch_over_an_edge_pours_on_the_column_the_body_lands_on`.

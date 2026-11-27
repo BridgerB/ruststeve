@@ -1178,6 +1178,43 @@ pub fn ground_under(w: &World, pos: [f64; 3]) -> Option<f64> {
         .map(|cy| f64::from(cy + 1))
 }
 
+/// Half the body's width: the columns a falling body's box overlaps are those under its centre
+/// plus or minus this.
+pub const BODY_HALF: f64 = 0.3;
+
+/// The column a falling body lands on and its ground's top: of the columns its box overlaps now
+/// and a tick on (the velocity on the plane: a body flung sideways lands where it is going), the
+/// one with the highest ground within `GROUND_SEARCH` under the feet (frontier race 45964846590
+/// lane 3: flung about 85 off the island by the dragon, no ground was ever known under the
+/// column of its centre, no pour went, and it died of the fall).
+pub fn landing_ground(w: &World, pos: [f64; 3], vel: [f64; 3]) -> Option<((i32, i32), f64)> {
+    let y = path::feet_cell(pos).1;
+    let span = |c: f64, v: f64| {
+        let (lo, hi) = (c.min(c + v) - BODY_HALF, c.max(c + v) + BODY_HALF);
+        (lo.floor() as i32)..=(hi.floor() as i32)
+    };
+    let zs = span(pos[2], vel[2]);
+    span(pos[0], vel[0])
+        .flat_map(|x| zs.clone().map(move |z| (x, z)))
+        .filter_map(|(x, z)| {
+            (y - GROUND_SEARCH..=y)
+                .rev()
+                .find(|cy| full(kind(w, (x, *cy, z))))
+                .map(|cy| ((x, z), f64::from(cy + 1)))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
+}
+
+/// Where the pour looks: the landing column's top face, at the point of it nearest under the
+/// body's centre (so the use's ray from the eye meets that column, not the void beside it).
+pub fn landing_aim(pos: [f64; 3], (x, z): (i32, i32), ground: f64) -> [f64; 3] {
+    [
+        pos[0].clamp(f64::from(x) + 0.1, f64::from(x) + 0.9),
+        ground,
+        pos[2].clamp(f64::from(z) + 0.1, f64::from(z) + 0.9),
+    ]
+}
+
 /// Feet over the ground at which a fall is caught (e06: a fall from a pillar's top; the clutch is
 /// for more than a stumble), and at or under which the bucket is used, every tick until it pours
 /// (e06's `above` 4.0 and 2.0 both poured; the use reaches 4.5 from the eye).
@@ -2270,7 +2307,24 @@ impl Plan {
             );
             return Some(down);
         }
-        let ground = ground_under(w, body.pos);
+        let landing = landing_ground(w, body.pos, body.vel);
+        let ground = landing.map(|(_, g)| g);
+        let column = landing.map_or(
+            {
+                let f = path::feet_cell(body.pos);
+                (f.0, f.2)
+            },
+            |(c, _)| c,
+        );
+        // The pour looks at the landing column's top (straight down over its centre).
+        let aim = landing.map_or(down, |(col, g)| {
+            let (yaw, pitch) = crate::walk::look_at(eye(&body), landing_aim(body.pos, col, g));
+            Controls {
+                yaw,
+                pitch: Some(pitch),
+                ..Controls::default()
+            }
+        });
         let height = ground.map(|g| body.pos[1] - g);
         let Some(mut c) = self.spikes.clutch.take() else {
             let falling = !body.on_ground && !body.in_water && body.vel[1] < 0.0;
@@ -2364,12 +2418,9 @@ impl Plan {
                 None
             }
             None => {
-                let ctl = self.spikes_clutch_hold(w, ItemKind::WaterBucket, down);
+                let ctl = self.spikes_clutch_hold(w, ItemKind::WaterBucket, aim);
                 if crate::dig::held_item(w) == Some(ItemKind::Bucket) {
-                    let cell = ground.map(|g| {
-                        let f = path::feet_cell(body.pos);
-                        (f.0, g as i32, f.2)
-                    });
+                    let cell = ground.map(|g| (column.0, g as i32, column.1));
                     c.poured = cell.or(Some(path::feet_cell(body.pos)));
                     self.note(
                         tick,
@@ -2387,20 +2438,21 @@ impl Plan {
                     // it shows), never once it is there: a use of the emptied bucket would take
                     // it back up.
                     && ground.is_some_and(|g| {
-                        let f = path::feet_cell(body.pos);
-                        kind(w, (f.0, g as i32, f.2)) != Some(BlockKind::Water)
+                        kind(w, (column.0, g as i32, column.1)) != Some(BlockKind::Water)
                     })
                     && pour_now_at(body.pos[1], body.vel[1], ground, None)
                     && self.acts.is_empty()
                 {
                     let land = ground.map(|g| ticks_to_land(body.pos[1], body.vel[1], g));
+                    let f = path::feet_cell(body.pos);
                     self.note(
                         tick,
                         "spikes: clutch pour sent".to_owned(),
                         format!(
-                            "{:.2} over the ground, falling {:.2}; sent at tick {tick}, landing predicted in {land:?} ticks",
+                            "{:.2} over the ground, falling {:.2}; sent at tick {tick}, landing predicted in {land:?} ticks; on the column {column:?}{}",
                             height.unwrap_or(0.0),
-                            body.vel[1]
+                            body.vel[1],
+                            if column == (f.0, f.2) { "" } else { ", beside the feet's (an edge)" }
                         ),
                     );
                     c.sent_at = Some(tick);
