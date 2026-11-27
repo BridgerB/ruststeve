@@ -845,6 +845,14 @@ impl Plan {
             self.end.work = Some(Work::new(WorkKind::Exit, ops, tick));
             return None;
         }
+        // Shut in the bunker with fire by its stair: no hand-off is asked (once asked, the
+        // crystals' task holds the bot in its own wait), the bunker stays shut.
+        if inside
+            && (!open(w, roof) || !open(w, door_cells[0]))
+            && self.fire_at_stair(w, door_cells[6], tick)
+        {
+            return None;
+        }
         // 5. The hand-offs: the crystals while one is alive, then the dragon.
         let next = if crystals_alive(w) > 0 {
             self.end_spikes(w, tick)
@@ -877,9 +885,6 @@ impl Plan {
                 return Some(Task::Stairs(Box::new(st)));
             }
             if inside && shut {
-                if self.fire_at_stair(w, door_cells[6], tick) {
-                    return None;
-                }
                 // Out of the bunker first, the task chosen again once the door is open.
                 self.note(
                     tick,
