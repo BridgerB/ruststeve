@@ -199,5 +199,32 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
   - Lane 1 was in its notch under the bunker (wall 18), and "end: covered" from an angry enderman ran the whole race: 0 strikes.
   - **Fix:** a fight walk that fails NoPath in cover while the dragon is grounded climbs out by a shaft straight up: the block over the head dug, a block put under the feet at each jump, until the sky is over the head. Never while a breath lies over the shaft on the plane: it stays in cover until the cloud clears. Notes: "out by a shaft up", "dragon: out of cover". Unit-tested.
 
+**Wall 21: near the head stand, out of reach** (dev race 45924968115 lane 1). The bot stood 0.7 off the stand's middle, inside "at the stand" (1.0) but 3.2 from the head's box: "no head stand open" every turn.
+- **Fix:** within 1.0 of the stand but over 0.25 off its middle, the bot steps onto the middle (`Want::Centre`).
+
+**Wall 22: the bunker's breath hold through the strike window** (the same race, lane 2). The clouds the dragon kept sending held the bot in the bunker for 7,320 ticks, and the dragon stayed at 200.
+- **Fix:** the hold yields while the dragon is scanning or attacking on its perch.
+
+**Wall 23: every breath death in the real chain began in a strafe.** In the last three frontier races (45910659261, 45913263506, 45924970608) six bots died of breath, and all six followed the same sequence:
+- a dragon phase change 1 → 0 (strafe over, the fireball out);
+- its splash 20 ticks later;
+- the first fatal hit 20 ticks after that.
+
+| race | lane | strafe ended | splash | first fatal hit |
+|---|---|---|---|---|
+| 45910659261 | 1 | 12,100 | 12,140 | 12,160 |
+| 45913263506 | 0 | 19,580 | 19,600 | 19,620 |
+| 45913263506 | 1 | 12,420 | 12,460 | 12,480 |
+| 45913263506 | 2 | 18,960 | 18,980 | 19,000 |
+| 45924970608 | 1 | 9,760 | 9,780 | 9,800 |
+| 45924970608 | 2 | 15,040 | 15,060 | 15,080 |
+
+A strafe lasts about 180 ticks, time for a notch. Answering after the cloud lands is too late.
+
+**Fix:** `charge_step` takes the strafe as it takes the charge (`strafing_at`: phase 1 within 64).
+- On open ground (not in the bunker, a roofed notch, or up a pillar or spike, where E4's holds answer), the bot shelters before the fireball: the bunker within 12, else a roofed notch dug now.
+- It stays until the phase has left the strafe and no cloud lies within reach.
+- Notes: "strafe: shelter before the fireball (the bunker at … | a notch)".
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

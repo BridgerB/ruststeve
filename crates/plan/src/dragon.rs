@@ -599,6 +599,23 @@ pub fn notch_step_except(w: &World, from: [i32; 3], side: Option<[i32; 3]>) -> O
         })
 }
 
+/// The distance of the dragon when it is strafing (phase 1) within `STRAFE_RANGE` of `feet`:
+/// `DragonStrafePlayerPhase` fires its fireball at a player in sight within 64.
+pub fn strafing_at(w: &World, feet: [f64; 3]) -> Option<f64> {
+    let (_, v) = view(w)?;
+    if v.phase() != Some(Phase::Strafe) {
+        return None;
+    }
+    let d = ((v.pos[0] - feet[0]).powi(2)
+        + (v.pos[1] - feet[1]).powi(2)
+        + (v.pos[2] - feet[2]).powi(2))
+    .sqrt();
+    (d <= STRAFE_RANGE).then_some(d)
+}
+
+/// Blocks the strafing dragon fires within (`DragonStrafePlayerPhase`; E4's `THREAT_NEAR`).
+pub const STRAFE_RANGE: f64 = 64.0;
+
 /// The distance of the dragon when it is charging (phase 8) within `CHARGE_RANGE` of `feet` with
 /// its facing on the line to them (its yaw unsaid: taken as on it), else `None`.
 pub fn charging_at(w: &World, feet: [f64; 3]) -> Option<f64> {
@@ -823,6 +840,9 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
 /// Blocks from the fountain every way out keeps to while the dragon scans: inside the 20 it looks
 /// for a player in before it charges one, past the head's sweep (8) and the turn's stand (9).
 pub const SCAN_KEEP: f64 = 12.0;
+
+/// Blocks on the plane from a stand's middle the feet step onto it from.
+pub const CENTRE_NEAR: f64 = 0.25;
 
 /// Ticks of the scanning phase the bot waits for the head to turn onto it at `scan_stand`
 /// (the turn takes about 20, `DragonSittingScanningPhase`).
@@ -1112,6 +1132,8 @@ pub enum Want {
     Eat,
     /// Dig the block under the feet (a stand one lower, under the wings' sweep).
     Dig([i32; 3]),
+    /// Step onto a stand's middle.
+    Centre([i32; 3]),
     /// Stand where the feet are, looking down, and why.
     Hold(&'static str),
 }
@@ -1323,6 +1345,12 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
         }
         if flat(feet, mid(hs)) > STAND_NEAR {
             return Want::Go(hs, "to the head stand");
+        }
+        // Near the stand but not in reach from where the feet are (race 45924968115 lane 1: 0.7
+        // off its middle, 3.2 from the head's box, "no head stand open" every turn): onto its
+        // middle.
+        if flat(feet, mid(hs)) > CENTRE_NEAR {
+            return Want::Centre(hs);
         }
     }
     // Landing, not yet sat, or no head stand open: the bunker (under every sweep: race
@@ -1805,6 +1833,7 @@ impl Plan {
             Want::Strike { head, .. } => format!("strike {}", if *head { "head" } else { "body" }),
             Want::Eat => "eat".to_owned(),
             Want::Dig(c) => format!("dig down at {c:?} for a stand under the wings"),
+            Want::Centre(c) => format!("onto the middle of {c:?}"),
             Want::Hold(why) => format!("hold {why}"),
         };
         let changed = f.said != key;
@@ -1839,7 +1868,12 @@ impl Plan {
             Want::Go(..) => {
                 self.dragon.way = None;
             }
-            Want::Exit(_) | Want::Strike { .. } | Want::Eat | Want::Dig(_) | Want::Hold(_) => {
+            Want::Exit(_)
+            | Want::Strike { .. }
+            | Want::Eat
+            | Want::Dig(_)
+            | Want::Centre(_)
+            | Want::Hold(_) => {
                 self.dragon.way = None;
                 self.dragon.way_done = None;
             }
@@ -1981,6 +2015,17 @@ impl Plan {
                     ),
                 );
                 looking_down(w)
+            }
+            Want::Centre(c) => {
+                let feet = w.body.map_or([0.0; 3], |b| b.pos);
+                let to = mid(c);
+                Controls {
+                    forward: true,
+                    sneak: true,
+                    yaw: crate::walk::yaw_to(feet, to),
+                    pitch: Some(90.0),
+                    ..Controls::default()
+                }
             }
             Want::Exit(c) => {
                 let feet = w.body.map_or([0.0; 3], |b| b.pos);
@@ -2137,7 +2182,17 @@ impl Plan {
             // in and out of the cloud from tick to tick (race 45918669138 lane 2: "into the
             // bunker" and "out of the breath" 40 times each, the stair climbed back into the cloud
             // between, 20 to dead).
+            // Not through the strike window: with the dragon scanning or attacking on its perch the
+            // fight goes (race 45924968115 lane 2: held in the bunker 7,320 ticks by the clouds the
+            // dragon kept sending, the dragon at 200).
+            let window = view(w).is_some_and(|(_, v)| {
+                matches!(
+                    v.phase(),
+                    Some(Phase::SittingScanning | Phase::SittingAttacking)
+                )
+            });
             if let Some(b) = self.bunker
+                && !window
                 && breathed(&clouds, feet, BUNKER_HOLD)
             {
                 // With nothing in hand the End's own rows keep the bunker shut (E3's "stays
@@ -2339,8 +2394,22 @@ impl Plan {
             return None;
         }
         let body = w.body?;
-        let Some(d) = charging_at(w, body.pos) else {
+        // A charge, or a strafe: a fireball comes only in the strafe, at a player in sight, so
+        // the shelter is taken before it (frontier race 45924970608: two bots died of breath on
+        // open ground, the cloud already on them before the notch was dug).
+        let charge = charging_at(w, body.pos);
+        let strafe = charge.is_none().then(|| strafing_at(w, body.pos)).flatten();
+        let Some(d) = charge.or(strafe) else {
             if self.dragon.charging {
+                // Stayed in until no cloud lies within reach.
+                if breathed(&breaths(w), body.pos, 0.0) {
+                    return Some(Controls {
+                        sneak: true,
+                        yaw: f64::from(w.player.yaw),
+                        pitch: Some(90.0),
+                        ..Controls::default()
+                    });
+                }
                 self.dragon.charging = false;
                 self.dragon.charge_walk = None;
                 self.dragon.charge_dig = None;
@@ -2356,6 +2425,23 @@ impl Plan {
         if !world::stage::open_sky(w) || breath_on(&breaths(w), body.pos).is_some() {
             return None;
         }
+        // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
+        if self.spikes_up_high(w) {
+            return None;
+        }
+        // E3's bunker in the making answers a strafe itself: no bunker yet (its dig waits for
+        // the dragon) or its shaft being dug, roofed as it goes (E3's test
+        // a_flying_dragon_near_holds_the_bunker_shaft).
+        if strafe.is_some()
+            && (self.bunker.is_none()
+                || self
+                    .end
+                    .work
+                    .as_ref()
+                    .is_some_and(|wk| wk.kind == crate::end::WorkKind::Build))
+        {
+            return None;
+        }
         let bunker = self.bunker.filter(|b| {
             flat(body.pos, mid(*b)) <= CHARGE_BUNKER_REACH
                 && (body.pos[1] - f64::from(b[1])).abs() <= 5.0
@@ -2366,9 +2452,13 @@ impl Plan {
             self.dragon.roof_tries = 0;
             self.note(
                 tick,
-                match bunker {
-                    Some(b) => format!("charge: hold in the bunker at {b:?}"),
-                    None => "charge: hold crouched where the feet are".to_owned(),
+                match (bunker, strafe.is_some()) {
+                    (Some(b), true) => {
+                        format!("strafe: shelter before the fireball (the bunker at {b:?})")
+                    }
+                    (None, true) => "strafe: shelter before the fireball (a notch)".to_owned(),
+                    (Some(b), false) => format!("charge: hold in the bunker at {b:?}"),
+                    (None, false) => "charge: hold crouched where the feet are".to_owned(),
                 },
                 format!(
                     "the dragon charging {d:.0} off; task {}; health {:.1}; {} charges in the run",
