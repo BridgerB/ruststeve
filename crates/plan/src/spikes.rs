@@ -671,6 +671,9 @@ pub struct SpikeState {
     pub pool: Option<[Cell; 2]>,
     /// The pool's whole 2 by 2 square (`pool` holds its two diagonal corners, poured).
     pub pool_square: Option<[Cell; 4]>,
+    /// Digs begun for the pool's cells, and whether the pool was given up.
+    pub pool_digs: u32,
+    pub pool_off: bool,
     pub pool_stand: Option<Cell>,
     pub pool_made: bool,
     pub waterfalls: u32,
@@ -729,6 +732,8 @@ impl Default for SpikeState {
             box_blow_at: None,
             pool: None,
             pool_square: None,
+            pool_digs: 0,
+            pool_off: false,
             pool_stand: None,
             pool_made: false,
             waterfalls: 0,
@@ -1224,6 +1229,8 @@ pub const POOL_SITE: i32 = 8;
 /// its stair runs four out from it (E3: three down and a step), so no misplaced pour runs into
 /// the shelter (race 45930464018 lane 0 drowned in a bunker its pool's water had run into).
 pub const POOL_KEEP: i32 = 5;
+/// Digs for the pool's four cells before it is given up (four, and room for a few refused).
+pub const POOL_DIGS: u32 = 8;
 
 /// The nearest standable cell within `POOL_SITE` of the feet (a floor under it, room over it)
 /// with a pool's two cells beside it, and those cells.
@@ -2227,6 +2234,7 @@ impl Plan {
         }
         // The pool by the bunker: two cells dug one deep and both buckets poured in.
         if !self.spikes.pool_made
+            && !self.spikes.pool_off
             && let Some(b) = self.bunker
             && (b[0] - feet.0).abs().max((b[2] - feet.2).abs()) <= POOL_NEAR
         {
@@ -2278,8 +2286,47 @@ impl Plan {
             }
             if let Some([c0, c1]) = self.spikes.pool {
                 let square = self.spikes.pool_square.unwrap_or([c0, c1, c0, c1]);
+                // The pool is worked from its stand only (race 45934621769 lane 0: back in its
+                // bunker 6 off, the dig of a pool cell was refused 25 times to the cap).
+                let stand = self.spikes.pool_stand.unwrap_or(feet);
+                if feet != stand
+                    && square
+                        .iter()
+                        .any(|c| full(kind(w, *c)) || open(kind(w, *c)))
+                {
+                    let mut walk = Walk::new(stand, Goal::Block { pos: stand }, Arrive::Goal, tick);
+                    if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                        self.spikes_note(
+                            tick,
+                            format!("spikes: to the pool site at {stand:?}"),
+                            format!("from {feet:?}, to work the pool"),
+                        );
+                        return Some(Task::Explore(walk));
+                    }
+                    self.expanded += walk.expanded;
+                    self.spikes.pool_off = true;
+                    self.note(
+                        tick,
+                        "spikes: no pool: given up".to_owned(),
+                        format!("no way from {feet:?} to its stand {stand:?}"),
+                    );
+                    return None;
+                }
                 for c in square {
                     if full(kind(w, c)) {
+                        self.spikes.pool_digs += 1;
+                        if self.spikes.pool_digs > POOL_DIGS {
+                            self.spikes.pool_off = true;
+                            self.note(
+                                tick,
+                                "spikes: no pool: given up".to_owned(),
+                                format!(
+                                    "{} digs for its four cells; {c:?} still there",
+                                    self.spikes.pool_digs
+                                ),
+                            );
+                            return None;
+                        }
                         self.spikes_note(
                             tick,
                             format!("spikes: water pool dug at {c:?}"),

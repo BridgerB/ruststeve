@@ -319,6 +319,27 @@ pub fn fire_near(w: &World, c: Cell, range: f64) -> Option<(EntityKind, [f64; 3]
         .map(|e| (e.kind, e.pos))
 }
 
+/// A strafe or a fireball in flight this near keeps the bunker sealed (the coordinator, wall 14).
+pub const STRAFE_RANGE: f64 = 64.0;
+/// The dragon's strafe phase (`EnderDragonPhase.STRAFE_PLAYER`, 1).
+pub const STRAFE_PHASE: i32 = 1;
+
+/// The dragon strafing within `STRAFE_RANGE` of the bot, or a dragon fireball in flight within it:
+/// its kind and place (frontier race 45931225605 lane 1: the fireball aimed at the bot came into
+/// its open bunker, the cloud 0.0 off it).
+pub fn strafe_threat(w: &World) -> Option<(EntityKind, [f64; 3])> {
+    let body = w.body?;
+    w.entities
+        .values()
+        .filter(|e| !e.dead && dist(e.pos, body.pos) <= STRAFE_RANGE)
+        .find(|e| {
+            e.kind == EntityKind::DragonFireball
+                || (e.kind == EntityKind::EnderDragon
+                    && matches!(e.metadata.get(&DRAGON_PHASE_INDEX), Some(MetaValue::Int(p)) if *p == STRAFE_PHASE))
+        })
+        .map(|e| (e.kind, e.pos))
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -1387,7 +1408,40 @@ impl Plan {
     /// One tick of E3's own steps in the End (the bridge, a work, an eat) while no task runs, or
     /// the choice of the next (`end_task`). `None` outside the End or while a task runs.
     pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
-        if !in_end(w) || !matches!(self.task, Task::Idle) {
+        if !in_end(w) {
+            return None;
+        }
+        // In the bunker under a strafe or a fireball in flight: sealed, whatever task brought the
+        // bot in or would take it out (wall 14).
+        if let (Some([x, y, z]), Some(door), Some(body)) = (self.bunker, self.end.door, w.body) {
+            let b = (x, y, z);
+            let (_, roof, door_cells) = bunker_cells(b, door);
+            let sealed = !open(w, roof) && !open(w, door_cells[0]);
+            let sealing = self
+                .end
+                .work
+                .as_ref()
+                .is_some_and(|wk| wk.kind == WorkKind::Seal);
+            if path::stand_cell(w, body.pos) == b
+                && !sealed
+                && !sealing
+                && let Some((kind, at)) = strafe_threat(w)
+            {
+                self.task = Task::Idle;
+                self.end.work = None;
+                self.end.exit_walk = false;
+                self.note(
+                    tick,
+                    format!("end: the bunker sealed for a {kind:?}"),
+                    format!(
+                        "at {:.0}, {:.0}, {:.0}; the bot stays in until it is over",
+                        at[0], at[1], at[2]
+                    ),
+                );
+                self.begin_seal(w, b, door, tick);
+            }
+        }
+        if !matches!(self.task, Task::Idle) {
             return None;
         }
         let hold = Controls {
@@ -1410,7 +1464,10 @@ impl Plan {
         {
             let b = (x, y, z);
             let (_, _, door_cells) = bunker_cells(b, door);
-            if fire_near(w, door_cells[6], STAIR_CLEAR).is_some() {
+            if fire_near(w, door_cells[6], STAIR_CLEAR)
+                .or_else(|| strafe_threat(w))
+                .is_some()
+            {
                 self.end.work = None;
                 self.note(
                     tick,
@@ -1950,7 +2007,8 @@ impl Plan {
     /// bunker is not left (race 45910659261 lane 1: a fireball on the stair, its cloud reached
     /// the bot under the end stone at 6 a second, 20 to dead in 4 s). Noted once a wait.
     fn fire_at_stair(&mut self, w: &World, top: Cell, tick: u64) -> bool {
-        let Some((kind, at)) = fire_near(w, top, STAIR_CLEAR) else {
+        let threat = fire_near(w, top, STAIR_CLEAR).or_else(|| strafe_threat(w));
+        let Some((kind, at)) = threat else {
             self.end.fire_waiting = false;
             return false;
         };
