@@ -363,3 +363,6 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **No climb begins** with a dragon fireball in flight within 64 ("no climb": "a fireball in flight").
 - **Up a pillar when one comes:** the climb stops ("climb stopped by a fireball"), and the bot goes down at once ("down from a fireball"). It drops into the landing water when that is poured and the feet are at the top, else digs.
 - Unit test `a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down`.
+- **The landing water from another bucket:**
+  - The landing pour uses a water bucket other than the clutch's (the hotbar's highest water slot): another hotbar one, else one from the main slots swapped into a hotbar slot that is not the clutch's (`pour_hold`).
+  - So the clutch's stays in the hotbar, with no "no climb: no water" pass after the pour (race 45942992471 lane 1 lost 40 ticks to it).

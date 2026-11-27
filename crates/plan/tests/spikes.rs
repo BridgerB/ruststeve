@@ -1525,3 +1525,27 @@ fn a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down() {
             .any(|n| n == "spikes: down from a fireball at (8, 67, 5)")
     );
 }
+
+#[test]
+fn the_landing_water_is_poured_from_a_bucket_other_than_the_clutchs() {
+    // Race 45942992471 lane 1: the landing pour took the clutch's bucket from the hotbar.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(12, (ItemKind::WaterBucket, 1));
+    assert_eq!(
+        spikes::pour_hold(&w),
+        plan::hold::Hold::Act(Act::Click {
+            slot: 12,
+            button: 0,
+            mode: 2
+        }),
+        "the main slot's bucket into the hotbar, not over the clutch's"
+    );
+    w.inventory.slots.remove(&12);
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    assert_eq!(
+        spikes::pour_hold(&w),
+        plan::hold::Hold::Act(Act::Hold { slot: 1 }),
+        "the other hotbar bucket"
+    );
+}

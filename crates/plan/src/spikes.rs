@@ -279,6 +279,46 @@ pub fn fireball_near(w: &World, pos: [f64; 3]) -> Option<f64> {
         .min_by(f64::total_cmp)
 }
 
+/// The hold step toward a water bucket that is not the clutch's: another hotbar one, else one
+/// from the main slots swapped into a hotbar slot that is not the clutch's.
+pub fn pour_hold(w: &World) -> hold::Hold {
+    if w.click.is_some() || w.window.is_some() || w.inventory.carried.is_some() {
+        return hold::Hold::Wait;
+    }
+    let water = |s: &i16| {
+        w.inventory
+            .slots
+            .get(s)
+            .is_some_and(|(k, _)| *k == ItemKind::WaterBucket)
+    };
+    let hot: Vec<i16> = (36i16..=44).filter(|s| water(s)).collect();
+    let clutch = hot.iter().max().copied();
+    let held = 36 + i16::from(w.held);
+    if let Some(other) = hot.iter().copied().find(|s| Some(*s) != clutch) {
+        if other == held {
+            return hold::Hold::Held;
+        }
+        return hold::Hold::Act(Act::Hold {
+            slot: u8::try_from(other - 36).unwrap_or(0),
+        });
+    }
+    match (9i16..=35).find(|s| water(s)) {
+        Some(m) => {
+            let button = (0i8..=8)
+                .find(|b| Some(36 + i16::from(*b)) != clutch)
+                .unwrap_or(0);
+            hold::Hold::Act(Act::Click {
+                slot: m,
+                button,
+                mode: 2,
+            })
+        }
+        // Only the clutch's: it is poured (the landing still catches the drop).
+        None if clutch == Some(held) => hold::Hold::Held,
+        None => hold::toward(w, ItemKind::WaterBucket),
+    }
+}
+
 /// Is the cell a water source by the server's word (its block state's level 0)?
 pub fn source(w: &World, c: Cell) -> bool {
     w.fluid(c.0, c.1, c.2)
@@ -2767,7 +2807,16 @@ impl Plan {
                     return None;
                 }
                 let (yaw, pitch) = crate::walk::look_at(eye(&body), *look);
-                match hold::toward(w, *item) {
+                // The landing water is poured from a bucket other than the clutch's (the one in
+                // the hotbar's highest water slot), so the clutch's stays in the hotbar
+                // (race 45942992471 lane 1: the landing pour took it, and "no climb: no water"
+                // cost a pass).
+                let step = if why == "the landing water's pour" {
+                    pour_hold(w)
+                } else {
+                    hold::toward(w, *item)
+                };
+                match step {
                     hold::Hold::Held => {
                         if self.acts.is_empty()
                             && last.is_none_or(|l| tick.saturating_sub(l) >= BUCKET_EVERY)
