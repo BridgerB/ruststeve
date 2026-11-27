@@ -2135,10 +2135,10 @@ fn with_no_way_out_and_no_block_the_wall_toward_the_open_is_dug() {
 }
 
 #[test]
-fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
-    // Race 45994686575: three bots at 1 crystal left, the dragon at 200 through 37 perches
-    // (lane 5), the fight waiting for every crystal. EnderDragon.checkCrystals heals only from
-    // the nearest in its box grown by 32 (per axis: 40 across), 8 of 10 spikes in it from the perch.
+fn no_perch_is_fought_while_a_crystal_stands() {
+    // Wall 45, dev race 46050674145 lane 0: with only the far crystals standing, 28 strikes and
+    // every perch refilled to 200 in flight (EnderDragon.checkCrystals: the nearest in its box
+    // grown by 32 heals it 1 every 10 ticks, its holding pattern passing within 40 of them).
     let feet = [9.5, 64.0, 0.5];
     let sat = |crystals: &[[f64; 3]]| {
         let mut w = end_at(feet);
@@ -2150,49 +2150,27 @@ fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
     };
     let spike = [42.5, 83.0, 0.5];
     let other = [12.5, 77.0, 39.5];
-    // Two standing, one ((12, 39)) able to heal it at the perch: not fought (race 46040826241
-    // lane 1: struck to 190.8, healed back to 200); the other alone: fought.
-    assert!(dragon::fight_with_crystals(&sat(&[spike, other])).is_none());
-    assert_eq!(
-        dragon::fight_with_crystals(&sat(&[spike])).map(|(n, _)| n),
-        Some(1)
-    );
-    // Three standing, one ((12, 39)) in the heal's box from the perch: not fought.
     assert!(dragon::heals_from(dragon::PERCH_POINT, other));
     assert!(
         !dragon::heals_from(dragon::PERCH_POINT, spike),
         "(42, 0): 42 on x, past 40"
     );
-    assert!(
-        dragon::fight_with_crystals(&sat(&[spike, other, [-34.5, 80.0, 24.5]])).is_none(),
-        "3 left, a heal in reach"
-    );
-    // Three standing, none in reach of a heal: fought.
-    assert!(
-        dragon::fight_with_crystals(&sat(&[spike, [-41.5, 89.0, -0.5], [50.5, 80.0, 50.5]]))
-            .is_some()
-    );
-    // One standing out of heal reach, the dragon sitting: the fight begun, the task cut.
-    let w = sat(&[spike]);
+    for crystals in [
+        &[spike][..],
+        &[spike, other][..],
+        &[spike, [-41.5, 89.0, -0.5]][..],
+    ] {
+        let w = sat(crystals);
+        assert!(dragon::fight_with_crystals(&w).is_none(), "{crystals:?}");
+        let mut p = Plan::new(Aim::Race);
+        p.perch_fight_step(&w, 0);
+        assert!(matches!(p.task, plan::Task::Idle), "{crystals:?}");
+        assert!(p.dragon_task(&w, 0).is_none(), "{crystals:?}");
+    }
+    // None standing: the fight is the task.
     let mut p = Plan::new(Aim::Race);
-    p.perch_fight_step(&w, 0);
-    assert!(matches!(p.task, plan::Task::Dragon(_)));
-    assert!(
-        p.events_since(0)
-            .iter()
-            .any(|e| e.what == "dragon: the perch fought with 1 crystals standing")
-    );
-    assert!(p.dragon_task(&w, 0).is_some());
-    // Flying: never begun.
-    let mut fly = end_at(feet);
-    with_dragon(&mut fly, [0.5, 90.0, 40.5], 0, 0.0);
-    add(&mut fly, 80, EntityKind::EndCrystal, spike);
-    let mut q = Plan::new(Aim::Race);
-    q.perch_fight_step(&fly, 0);
-    assert!(matches!(q.task, plan::Task::Idle));
-    assert!(q.dragon_task(&fly, 0).is_none());
+    assert!(p.dragon_task(&sat(&[]), 0).is_some());
 }
-
 #[test]
 fn a_heal_is_written_to_the_ledger_and_a_meal_waits_for_the_dragon_far_off() {
     let feet = [12.5, 64.0, 0.5];
