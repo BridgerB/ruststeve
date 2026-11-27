@@ -2279,13 +2279,43 @@ impl Plan {
                 }
                 for c in [c0, c1] {
                     if open(kind(w, c)) && water > 0 {
+                        // Centred on the stand first, and aimed at the far side of the cell's
+                        // floor: race 45930464018 lane 0 stood at x 10.8 off its stand's centre,
+                        // the ray met the stand's own floor, the water went in the stand's cell
+                        // and down the bunker's stair, and the bot drowned in its bunker.
+                        let stand = self.spikes.pool_stand.unwrap_or(feet);
+                        let off = (f64::from(stand.0) + 0.5 - body.pos[0])
+                            .abs()
+                            .max((f64::from(stand.2) + 0.5 - body.pos[2]).abs());
+                        if off > STEP_NEAR {
+                            self.spikes_note(
+                                tick,
+                                format!("spikes: centre on the pool's stand at {stand:?}"),
+                                format!("{off:.2} off before the pour"),
+                            );
+                            self.spikes.doing = Some(Doing::Step {
+                                to: stand,
+                                sneak: true,
+                                until: tick + STEP_TICKS,
+                            });
+                            self.retry_at = tick + 1;
+                            return Some(Task::Idle);
+                        }
+                        let (sx, sz) = (
+                            f64::from((c.0 - stand.0).signum()),
+                            f64::from((c.2 - stand.2).signum()),
+                        );
                         self.spikes_note(
                             tick,
                             format!("spikes: water pool poured at {c:?}"),
                             format!("{water} water buckets held"),
                         );
                         self.spikes.doing = Some(Doing::Bucket {
-                            look: [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5],
+                            look: [
+                                f64::from(c.0) + 0.5 + 0.3 * sx,
+                                f64::from(c.1),
+                                f64::from(c.2) + 0.5 + 0.3 * sz,
+                            ],
                             item: ItemKind::WaterBucket,
                             want: ItemKind::Bucket,
                             count: empty + 1,
