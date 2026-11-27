@@ -1263,9 +1263,10 @@ fn near_the_head_stand_but_out_of_reach_the_bot_steps_onto_its_middle() {
 }
 
 #[test]
-fn a_strafe_is_sheltered_from_before_the_fireball() {
-    // Frontier race 45924970608: two bots died of breath on open ground, the notch begun after the
-    // cloud was on them.
+fn a_strafe_is_met_in_sight_by_a_notch_dug_beside() {
+    // Dev race 45937087645: hidden in a notch, the strafe held 11,000 ticks (its fireball needs the
+    // bot in sight, DragonStrafePlayerPhase) and the dragon never perched. Frontier race
+    // 45924970608: on open ground with no notch, the cloud was on the bot before one was dug.
     let feet = [12.5, 64.0, 0.5];
     let mut w = end_at(feet);
     with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
@@ -1273,35 +1274,163 @@ fn a_strafe_is_sheltered_from_before_the_fireball() {
     let mut p = Plan::new(Aim::Race);
     // A bunker made, far off (with none yet, E3's own dig waits for the dragon).
     p.bunker = Some([60, FLOOR - 4, 60]);
-    assert!(p.charge_step(&w, 0).is_some());
+    let c = p.charge_step(&w, 0).expect("held");
+    assert!(!c.forward);
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "strafe: shelter before the fireball (a notch)")
+            .any(|e| e.what == "strafe: a notch dug beside at [13, 64, 0], stood by in sight"),
+        "{:?}",
+        p.events_since(0)
     );
     assert!(
         p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
-        "dug now"
+        "the notch beside dug now"
     );
-    // With the bunker within 12: into it.
-    let mut q = Plan::new(Aim::Race);
-    q.bunker = Some([16, FLOOR - 4, 0]);
-    q.end.door = Some((1, 0));
-    assert!(q.charge_step(&w, 0).is_some());
-    assert!(q.events_since(0).iter().any(|e| {
-        e.what
-            .starts_with("strafe: shelter before the fireball (the bunker at")
-    }));
+    assert!(!p.dragon.charging, "not hidden");
+    // Both blocks dug: stood by it in sight, nothing dug and no shelter taken.
+    let dug = |w: &mut World| {
+        for y in [62, 63] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (13, y, 0),
+                state: state(BlockKind::Air),
+            }));
+        }
+    };
+    dug(&mut w);
+    let c = p.charge_step(&w, 40).expect("stood by");
+    assert!(!c.forward && c.sneak);
+    assert!(p.take_acts().is_empty());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: stood by the notch at [13, 64, 0] in sight")
+    );
+    assert!(
+        !p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: shelter before the fireball"))
+    );
+    // The fireball comes: stepped into the notch, not sneaking (a sneak keeps to the edge).
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
+    let c = p.charge_step(&w, 41).expect("in");
+    assert!(c.forward && !c.sneak, "{c:?}");
+    assert!((c.yaw + 90.0).abs() < 1.0, "toward +x: {}", c.yaw);
+    // Down in it: the notch is the shelter, and roofed (the side block first).
+    let mut down = end_at([13.5, 62.0, 0.5]);
+    with_dragon(&mut down, [-30.5, 80.0, 0.5], 1, 90.0);
+    dug(&mut down);
+    add(
+        &mut down,
+        51,
+        EntityKind::DragonFireball,
+        [-10.5, 74.0, 0.5],
+    );
+    down.inventory
+        .slots
+        .insert(36, (data::ItemKind::EndStone, 64));
+    down.held = 0;
+    let c = p.charge_step(&down, 50).expect("in the notch");
+    assert!(c.sneak && !c.forward);
+    assert_eq!(p.dragon.notch_from, Some([13, 64, 0]));
+    assert!(p.dragon.charging);
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: into the notch at [13, 64, 0]")
+    );
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::UseOn { .. })),
+        "roofed"
+    );
     // The strafe over with a cloud still within reach: stayed in.
-    let mut after = end_at(feet);
+    let mut after = end_at([13.5, 62.0, 0.5]);
+    dug(&mut after);
     with_dragon(&mut after, [-30.5, 80.0, 0.5], 0, 90.0);
     cloud(&mut after, 50, [13.5, 64.0, 0.5], 3.0);
-    let c = p.charge_step(&after, 20).expect("stays sheltered");
+    let c = p.charge_step(&after, 60).expect("stays sheltered");
     assert!(c.sneak && !c.forward);
+    // A charge is never met in the open: hidden at once (a notch where the feet are).
+    let mut charge = end_at(feet);
+    with_dragon(&mut charge, [-17.5, 64.0, 0.5], 8, 90.0);
+    let mut q = Plan::new(Aim::Race);
+    assert!(q.charge_step(&charge, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: dig a notch at [12, 63, 0]")
+    );
     // Far off: no shelter.
     let mut far = end_at(feet);
     with_dragon(&mut far, [-80.5, 80.0, 0.5], 1, 90.0);
     assert!(dragon::strafing_at(&far, feet).is_none());
+}
+
+#[test]
+fn hidden_through_a_strafe_the_bot_comes_out_to_be_seen_after_the_cap() {
+    // Dev race 45937087645: the strafe never ends while the bot is out of the dragon's sight.
+    let hidden = |extra: &dyn Fn(&mut World)| {
+        let mut w = end_at([12.5, 62.0, 0.5]);
+        for y in [62, 63] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (12, y, 0),
+                state: state(BlockKind::Air),
+            }));
+        }
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, 64, 0),
+            state: state(BlockKind::EndStone),
+        }));
+        extra(&mut w);
+        let mut p = Plan::new(Aim::Race);
+        p.bunker = Some([60, FLOOR - 4, 60]);
+        p.dragon.notch_from = Some([12, 64, 0]);
+        p.dragon.notch_roof = Some([12, 64, 0]);
+        p.dragon.charging = true;
+        (w, p)
+    };
+    let out = |p: &Plan| {
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: out of the notch to be seen"))
+    };
+    let (w, mut p) = hidden(&|w| with_dragon(w, [-30.5, 80.0, 0.5], 1, 90.0));
+    let c = p.charge_step(&w, 100).expect("hidden");
+    assert!(c.sneak && !c.forward);
+    let _ = p.charge_step(&w, 100 + dragon::STRAFE_HIDE_TICKS - 1);
+    assert!(!out(&p), "within the cap");
+    assert!(p.take_acts().is_empty());
+    let _ = p.charge_step(&w, 100 + dragon::STRAFE_HIDE_TICKS);
+    assert!(out(&p), "{:?}", p.events_since(0));
+    assert_eq!(
+        p.dragon.notch_rise_to,
+        Some(64),
+        "risen out a block at a jump"
+    );
+    assert_eq!(p.dragon.notch_from, None);
+    assert!(!p.dragon.charging);
+    assert!(
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "the roof dug back first"
+    );
+    // A cloud within reach: never out, past the cap too.
+    let off = 3.0 + dragon::BREATH_MARGIN + 0.5;
+    let (w, mut p) = hidden(&|w| {
+        with_dragon(w, [-30.5, 80.0, 0.5], 1, 90.0);
+        cloud(w, 50, [12.5 + off, 64.0, 0.5], 3.0);
+    });
+    let _ = p.charge_step(&w, 0);
+    let c = p
+        .charge_step(&w, dragon::STRAFE_HIDE_TICKS + 50)
+        .expect("hidden");
+    assert!(c.sneak && !c.forward);
+    assert!(!out(&p));
+    // A charge: never out either.
+    let (w, mut p) = hidden(&|w| with_dragon(w, [-17.5, 64.0, 0.5], 8, 90.0));
+    let _ = p.charge_step(&w, 0);
+    let _ = p.charge_step(&w, dragon::STRAFE_HIDE_TICKS + 50);
+    assert!(!out(&p));
+    assert_eq!(p.dragon.notch_rise_to, None);
 }
 
 #[test]
@@ -1352,6 +1481,8 @@ fn an_open_bunker_is_no_shelter_from_a_strafe_or_a_breath() {
     let feet = [12.5, 64.0, 0.5];
     let mut w = end_at(feet);
     with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 90.0);
+    // Its fireball in flight, no notch beside dug: the shelter as it was.
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
     // The bunker 4 down at (16, 60, 0), its roof (16, 62, 0) dug open.
     w.step(&Event::Packet(S2c::BlockUpdate {
         pos: (16, 62, 0),
@@ -1372,10 +1503,21 @@ fn an_open_bunker_is_no_shelter_from_a_strafe_or_a_breath() {
     // Shut: into it.
     let mut shut = end_at(feet);
     with_dragon(&mut shut, [-30.5, 80.0, 0.5], 1, 90.0);
+    add(
+        &mut shut,
+        51,
+        EntityKind::DragonFireball,
+        [-10.5, 74.0, 0.5],
+    );
     let mut q = Plan::new(Aim::Race);
     q.bunker = Some([16, FLOOR - 4, 0]);
     q.end.door = Some((1, 0));
     assert!(q.bunker_shut(&shut));
+    assert!(q.charge_step(&shut, 0).is_some());
+    assert!(q.events_since(0).iter().any(|e| {
+        e.what
+            .starts_with("strafe: shelter before the fireball (the bunker at")
+    }));
     // And a breath on the feet by the open bunker: a notch, not the bunker.
     let mut b = end_at(feet);
     b.step(&Event::Packet(S2c::BlockUpdate {

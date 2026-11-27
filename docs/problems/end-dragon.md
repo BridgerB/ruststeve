@@ -237,3 +237,19 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.
+
+### Dev race 45937087645 (0783310, dev-end-no-crystals, 3 lanes, cap 24,000), read mid-run: the strafe shelter was wrong
+**Wall 25: hidden for the whole strafe, the strafe never ended.** The dragon was at 200 in all three lanes and was never struck.
+- **Lane 0:** the strafe began at tick 780 and "strafe: shelter before the fireball (a notch)" fired. The bot sat in its roofed notch at (13, 57, 3). The phase was still strafe at tick 11,900, with no change in the ledger in between. The fight handed back at 1,820 with 0 strikes, E3's stairs out failed (dig `Refused`) twice and stalled, and the bot was idle in the notch from 3,840 on.
+- **Lane 2:** the same, from 660. **Lane 1:** the strafe held from 900 to 4,700.
+- **Why the rule was wrong** (the 26.1.2 jar, `javap` of `DragonStrafePlayerPhase.doServerTick`, probe 45938702513): a strafe ends only one of two ways.
+  - It fires: `fireballCharge` goes up 1 a tick only while the player is within 64 (`distanceToSqr < 4096`) and `dragon.hasLineOfSight(target)`, and goes down 1 a tick otherwise. At 5 or more, with the target within 10 degrees of the dragon's facing, it fires and sets `HOLDING_PATTERN`.
+  - It has no target (`attackTarget == null`), and sets `HOLDING_PATTERN`.
+  - Out of sight, the charge never builds, so the dragon circles in the strafe and never goes back to the holding pattern it perches from. Sheltering for the whole strafe (walls 23 and the 3f0d5be rule) turned the fireball's danger into a fight that never starts.
+- **Fix:** the strafe is met in the dragon's sight (`Plan::strafe_seen_step`, called from `charge_step` when there is no charge).
+  - With no threat, the bot digs a notch two deep in the cell beside the feet and stands by it, sneaking. Notes: "strafe: a notch dug beside at …, stood by in sight" and "strafe: stood by the notch at … in sight".
+  - With a threat, it steps into the notch (not sneaking) and roofs it ("strafe: into the notch at …"). A threat is a fireball in flight within 64 (`fireball_at`) or a cloud within reach and `OUT_SLACK`.
+  - Hidden in its notch through a strafe with no threat, it stays `STRAFE_HIDE_TICKS` (200), then digs the roof back and rises out a block at a jump to be seen ("strafe: out of the notch to be seen at …").
+  - A charge is still hidden from at once, and a cloud within reach still holds it in.
+  - With no notch beside ready at a threat, the shelter is as before (a shut bunker within 12, else a notch where the feet are).
+- **Unproven:** whether 200 ticks is right, and whether the step in beats the fireball. The fireball spawns at the head and flies about 30 to 40 blocks; the step is one block and a 2-block drop. E3's seal-on-strafe for the bunker hides the bot the same way and will hold the strafe too unless it is capped.

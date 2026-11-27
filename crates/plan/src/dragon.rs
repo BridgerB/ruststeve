@@ -631,6 +631,12 @@ pub fn fireball_at(w: &World, feet: [f64; 3]) -> Option<f64> {
 /// Blocks from the feet a fireball in flight is sheltered from.
 pub const FIREBALL_RANGE: f64 = 64.0;
 
+/// Ticks of a strafe the bot stays hidden before it comes out to be seen. A strafe ends only by
+/// its fireball, which needs the bot in sight (`DragonStrafePlayerPhase`; dev race 45937087645:
+/// hidden in a notch, the strafe held 11,000 ticks and the dragon never perched). 200 is the
+/// coordinator's cap (10 s), well over the 5 ticks in sight the fireball's charge needs.
+pub const STRAFE_HIDE_TICKS: u64 = 200;
+
 /// Blocks the strafing dragon fires within (`DragonStrafePlayerPhase`; E4's `THREAT_NEAR`).
 pub const STRAFE_RANGE: f64 = 64.0;
 
@@ -1611,6 +1617,14 @@ pub struct DragonState {
     pub first_skips: u64,
     #[serde(default)]
     pub first_noted_at: u64,
+    /// In a strafe: the surface cell of the notch dug beside the bot, which it stands by in the
+    /// dragon's sight until a fireball comes; the tick it was first hidden in this strafe.
+    #[serde(default)]
+    pub strafe_notch: Option<[i32; 3]>,
+    #[serde(default)]
+    pub hidden_since: Option<u64>,
+    #[serde(default)]
+    pub strafe_seen_noted: bool,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2471,11 +2485,15 @@ impl Plan {
         // A fireball in flight counts as the strafe that sent it: the strafe may end, or start
         // beyond 64, before it lands (frontier race 45931225605 lane 0: the strafe 56 off at its
         // end, the fireball 40 ticks in the air with the phase holding, the cloud on the bot).
+        let fireball = fireball_at(w, body.pos);
         let strafe = charge
             .is_none()
-            .then(|| strafing_at(w, body.pos).or_else(|| fireball_at(w, body.pos)))
+            .then(|| strafing_at(w, body.pos).or(fireball))
             .flatten();
         let Some(d) = charge.or(strafe) else {
+            self.dragon.strafe_notch = None;
+            self.dragon.hidden_since = None;
+            self.dragon.strafe_seen_noted = false;
             if self.dragon.charging {
                 // Stayed in until no cloud lies within reach.
                 if breathed(&breaths(w), body.pos, 0.0) {
@@ -2498,7 +2516,8 @@ impl Plan {
             }
             return self.notch_exit_step(w, tick);
         };
-        if !world::stage::open_sky(w) || breath_on(&breaths(w), body.pos).is_some() {
+        let clouds = breaths(w);
+        if breath_on(&clouds, body.pos).is_some() {
             return None;
         }
         // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
@@ -2516,6 +2535,17 @@ impl Plan {
                     .as_ref()
                     .is_some_and(|wk| wk.kind == crate::end::WorkKind::Build))
         {
+            return None;
+        }
+        // A strafe is met in the dragon's sight, by a notch dug beside, and the notch taken when
+        // its fireball comes or a cloud is within reach: hidden, the strafe never ends.
+        if charge.is_none() {
+            let threat = fireball.is_some() || breathed(&clouds, body.pos, OUT_SLACK);
+            if let Some(c) = self.strafe_seen_step(w, tick, body, threat) {
+                return c;
+            }
+        }
+        if !world::stage::open_sky(w) {
             return None;
         }
         // For a strafe only a bunker shut (roof and door): an open one lets the fireball in.
@@ -2599,6 +2629,142 @@ impl Plan {
             c.pitch = Some(90.0);
         }
         Some(c)
+    }
+
+    /// One tick of a strafe met in sight (no charge): `threat` is a fireball in flight or a cloud
+    /// within reach. Hidden in its notch the bot stays `STRAFE_HIDE_TICKS`, then rises out; in the
+    /// open with no threat it digs a notch two deep beside the feet and stands by it, seen; with a
+    /// threat it steps into that notch and roofs it. `None` leaves the tick to the shelter as it
+    /// was (no notch beside ready at a threat, none to be dug, or a dig failed).
+    fn strafe_seen_step(
+        &mut self,
+        w: &World,
+        tick: u64,
+        body: physics::Body,
+        threat: bool,
+    ) -> Option<Option<Controls>> {
+        let fc = cell_of(body.pos);
+        let crouch = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        let air = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+        };
+        // Hidden in its notch.
+        if self.dragon.notch_from.is_some_and(|f| fc[1] <= f[1] - 2) {
+            if threat {
+                return Some(Some(self.notch_dig_step(w, tick, crouch, "strafe")));
+            }
+            let since = *self.dragon.hidden_since.get_or_insert(tick);
+            if tick < since + STRAFE_HIDE_TICKS {
+                return Some(Some(crouch));
+            }
+            let from = self.dragon.notch_from.take();
+            self.dragon.notch_side = None;
+            self.dragon.notch_step = None;
+            self.dragon.notch_rise_to = from.map(|f| f[1]);
+            self.dragon.charging = false;
+            self.dragon.hidden_since = None;
+            self.note(
+                tick,
+                format!("strafe: out of the notch to be seen at {fc:?}"),
+                format!(
+                    "hidden {} ticks in the strafe; risen out a block at a jump",
+                    tick - since
+                ),
+            );
+            return Some(self.notch_exit_step(w, tick));
+        }
+        // On the way out of a notch (its roof, its step, the rise).
+        if (self.dragon.notch_rise_to.is_some()
+            || self.dragon.notch_step.is_some()
+            || self.dragon.notch_roof.is_some_and(|r| !air(r)))
+            && let Some(c) = self.notch_exit_step(w, tick)
+        {
+            return Some(Some(c));
+        }
+        if !world::stage::open_sky(w) || self.dragon.notch_failed {
+            return None;
+        }
+        let ready = |n: [i32; 3]| air([n[0], n[1] - 1, n[2]]) && air([n[0], n[1] - 2, n[2]]);
+        if threat {
+            let n = self.dragon.strafe_notch.filter(|n| ready(*n))?;
+            if fc[0] == n[0] && fc[2] == n[2] {
+                if self.dragon.notch_from != Some(n) {
+                    self.dragon.notch_from = Some(n);
+                    self.dragon.roof_tries = 0;
+                    self.dragon.charging = true;
+                    self.dragon.charges += 1;
+                    self.note(
+                        tick,
+                        format!("strafe: into the notch at {n:?}"),
+                        format!(
+                            "a fireball in flight or a cloud within reach; health {:.1}",
+                            w.player.health.unwrap_or(0.0)
+                        ),
+                    );
+                }
+                return Some(Some(self.notch_dig_step(w, tick, crouch, "strafe")));
+            }
+            let to = mid(n);
+            return Some(Some(Controls {
+                forward: true,
+                yaw: (-(to[0] - body.pos[0]))
+                    .atan2(to[2] - body.pos[2])
+                    .to_degrees(),
+                ..Controls::default()
+            }));
+        }
+        // No threat: a notch beside, dug from the surface, and stood by in the dragon's sight.
+        if self
+            .dragon
+            .strafe_notch
+            .is_none_or(|n| (n[0] - fc[0]).abs() + (n[2] - fc[2]).abs() != 1 || n[1] != fc[1])
+        {
+            self.dragon.strafe_notch = None;
+            if !body.on_ground {
+                return None;
+            }
+            let n = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .find_map(|(dx, dz)| {
+                    let n = [fc[0] + dx, fc[1], fc[2] + dz];
+                    (air(n)
+                        && air([n[0], n[1] + 1, n[2]])
+                        && notch_diggable(w, n)
+                        && notch_diggable(w, [n[0], n[1] - 1, n[2]]))
+                    .then_some(n)
+                })?;
+            self.dragon.strafe_notch = Some(n);
+            self.note(
+                tick,
+                format!("strafe: a notch dug beside at {n:?}, stood by in sight"),
+                format!("from {fc:?}; the strafe's fireball needs the bot seen"),
+            );
+        }
+        let n = self.dragon.strafe_notch?;
+        for y in [n[1] - 1, n[1] - 2] {
+            let c = [n[0], y, n[2]];
+            if !air(c) {
+                return Some(Some(self.charge_dig_step(w, tick, c).unwrap_or(crouch)));
+            }
+        }
+        if !self.dragon.strafe_seen_noted {
+            self.dragon.strafe_seen_noted = true;
+            self.note(
+                tick,
+                format!("strafe: stood by the notch at {n:?} in sight"),
+                format!("at {fc:?}; into it when the fireball comes"),
+            );
+        }
+        Some(Some(Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            ..Controls::default()
+        }))
     }
 
     /// One tick of the notch two deep where the feet are: the end stone under them dug, twice,
