@@ -1474,7 +1474,7 @@ impl Plan {
     }
 
     /// The End before the crystals are done, all in the open: down a pillar first (E4's), out
-    /// from under the ground by stairs up, end stone from the surface up to `STOCK_WANTED`, then
+    /// from under the ground by stairs up, end stone from the surface up to `STOCK_ENOUGH`, then
     /// the hand-off; nothing to hand over, the bot stays where it stands.
     fn open_task(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
         let up = crate::spikes::on_pillar(w, feet, &self.spikes.pillars)
@@ -1503,7 +1503,9 @@ impl Plan {
         }
         self.end.out_runs = 0;
         let stone = craft::count(w, ItemKind::EndStone);
-        let want = STOCK_WANTED;
+        // Enough for the tallest pillar and its walls, no more: the time on the ground before the
+        // first climb is what kills (the coordinator); a hand-back for blocks mines again.
+        let want = STOCK_ENOUGH;
         if stone < want && self.end.surface_walks <= SURFACE_WALKS && !self.end.open_stock_over {
             if let Some(t) = self.surface_mine(w, feet, tick) {
                 return Some(t);
@@ -1522,7 +1524,7 @@ impl Plan {
         }
         let next = if crystals_alive(w) > 0 {
             let t = self.end_spikes(w, tick);
-            if t.is_none() && stone < STOCK_WANTED {
+            if t.is_none() && stone < STOCK_ENOUGH {
                 // Handed back (for blocks): mine again.
                 self.end.handed_back = true;
                 self.end.open_stock_over = false;

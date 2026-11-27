@@ -1354,3 +1354,33 @@ fn from_arrival_to_the_crystals_no_bunker_or_tunnel_only_surface_mining() {
         notes(&p)
     );
 }
+
+#[test]
+fn the_first_surface_stock_stops_at_enough_for_the_tallest_pillar() {
+    // The coordinator: exposure on the ground before the first climb is what kills; 64 is the
+    // tallest pillar and its walls, the restock on a hand-back covers the rest.
+    let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    w.inventory
+        .slots
+        .insert(40, (ItemKind::EndStone, plan::end::STOCK_ENOUGH - 1));
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0);
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("dig"),
+        "{:?}",
+        notes(&p)
+    );
+    // One more held: the surface stock is over and the crystals are asked.
+    w.inventory
+        .slots
+        .insert(40, (ItemKind::EndStone, plan::end::STOCK_ENOUGH));
+    let mut p = racer();
+    p.end.bridged = true;
+    let _ = p.end_task(&w, 0);
+    assert!(noted(&p, "end: surface stock over"), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
+}
