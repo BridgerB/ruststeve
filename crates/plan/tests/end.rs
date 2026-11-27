@@ -834,19 +834,61 @@ fn an_open_with_fire_coming_by_the_stair_is_cut_and_the_bunker_sealed() {
 }
 
 #[test]
-fn in_an_open_bunker_under_a_strafe_the_bunker_is_sealed() {
+fn in_an_open_bunker_a_fireball_in_flight_seals_it_and_a_strafe_alone_does_not() {
     // Frontier race 45931225605 lane 1: the fireball aimed at the bot came into its open bunker.
+    let open_bunker = || {
+        let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
+        for c in [
+            (12, 60, 0),
+            (12, 61, 0),
+            (12, 62, 0),
+            (11, 61, 0),
+            (11, 62, 0),
+        ] {
+            set(&mut w, c, BlockKind::Air);
+        }
+        with_entity(&mut w, 7, EntityKind::EnderDragon, [40.0, 80.0, 0.0]);
+        if let Some(e) = w.entities.get_mut(&7) {
+            e.metadata.insert(16, MetaValue::Int(1));
+        }
+        w
+    };
+    let racer_in = || {
+        let mut p = racer();
+        p.end.bridged = true;
+        p.end.stock_over = true;
+        p.bunker = Some([12, 60, 0]);
+        p.end.door = Some((-1, 0));
+        p
+    };
+    // The strafe alone: no seal (a bot never seen holds the strafe for good).
+    let w = open_bunker();
+    let mut p = racer_in();
+    p.step(&w);
+    assert!(!noted(&p, "end: the bunker sealed for"), "{:?}", notes(&p));
+    // A fireball in flight within 64: sealed.
+    let mut w = open_bunker();
+    with_entity(&mut w, 8, EntityKind::DragonFireball, [30.0, 75.0, 0.0]);
+    let mut p = racer_in();
+    p.step(&w);
+    assert!(
+        noted(&p, "end: the bunker sealed for a DragonFireball"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(noted(&p, "end: seal the bunker at"), "{:?}", notes(&p));
+}
+
+#[test]
+fn a_hold_for_a_cloud_alone_under_a_strafe_is_capped() {
+    // The bunker shut, a cloud by its stair's top (9, 64, 0), the dragon strafing, no fireball.
     let mut w = world(4, 0..=7, [12.5, 60.0, 0.5]);
-    for c in [
-        (12, 60, 0),
-        (12, 61, 0),
-        (12, 62, 0),
-        (11, 61, 0),
-        (11, 62, 0),
-    ] {
+    for c in [(12, 60, 0), (12, 61, 0)] {
         set(&mut w, c, BlockKind::Air);
     }
-    with_entity(&mut w, 7, EntityKind::EnderDragon, [40.0, 80.0, 0.0]);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    with_entity(&mut w, 13, EntityKind::AreaEffectCloud, [6.5, 64.0, 0.5]);
+    with_entity(&mut w, 7, EntityKind::EnderDragon, [-40.0, 80.0, 0.0]);
     if let Some(e) = w.entities.get_mut(&7) {
         e.metadata.insert(16, MetaValue::Int(1));
     }
@@ -857,17 +899,18 @@ fn in_an_open_bunker_under_a_strafe_the_bunker_is_sealed() {
     p.end.door = Some((-1, 0));
     p.step(&w);
     assert!(
-        noted(&p, "end: the bunker sealed for a EnderDragon"),
+        noted(&p, "end: the bunker stays shut for a"),
         "{:?}",
         notes(&p)
     );
-    assert!(noted(&p, "end: seal the bunker at"), "{:?}", notes(&p));
-    // Sealed, the strafe still on: no open.
-    for c in [(12, 62, 0), (11, 61, 0)] {
-        set(&mut w, c, BlockKind::EndStone);
-    }
-    p.end.work = None;
+    // Past the cap: opened to be seen.
+    p.end.fire_since = Some(0);
+    w.ticks = 400;
     p.retry_at = 0;
     p.step(&w);
-    assert!(!noted(&p, "end: open the bunker"), "{:?}", notes(&p));
+    assert!(
+        noted(&p, "end: the bunker opens though a cloud is by its stair"),
+        "{:?}",
+        notes(&p)
+    );
 }

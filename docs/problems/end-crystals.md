@@ -344,3 +344,17 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The pool's digs and pours are made from its stand only. Away from it, the bot walks back ("to the pool site at").
   - With no way back, or after 8 digs for its four cells, the pool is given up ("no pool: given up"), and the crystals go on with the buckets in hand.
   - Unit test `the_pool_is_worked_from_its_stand_or_given_up`.
+
+## Eighteenth race: 45937952400 (dev-end-island, dc7ed65, development only)
+- **Both bots alive at the cap, 2 crystals each.**
+- Lane 0 made the pool, and after a few give-ups held 2 full buckets. It poured landing water at (38, 59, 0) for the West pillar.
+- That approach was then refused ("no way to (39, 59, 0)" 40 times from inside E3's bunker). The South pillar was climbed and dug down: no drop, the bucket lost.
+- Lane 1 gave its pool up correctly and poured landing water. One clutch "missed" a fall of 85, and the bot lived at 7.6 health.
+
+### Wall 23: landing water left by a refused approach (fixed)
+- **The fix:** when the way goes to another pillar than the one whose landing water is poured (and not yet climbed), the water is taken back first ("landing water taken back at", "back for the landing water at").
+- With no way back to it, it is noted and left ("landing water left at"). If it is gone, it is forgotten.
+- Unit test `landing_water_left_by_a_refused_approach_is_taken_back`.
+- **The refills, by the server's word** (the orchestrator): a refill aims only at a pool cell the server shows as a source (its block state's water level 0, `source`), never one predicted to be.
+  - A cell a refill got nothing from waits until the server shows it in another state before it is tried again.
+  - A give-up notes the cell's last seen fluid state.
