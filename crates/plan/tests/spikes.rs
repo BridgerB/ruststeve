@@ -2263,3 +2263,97 @@ fn a_body_flung_sideways_lands_where_its_fall_takes_it() {
     assert_eq!(col.1, 20);
     assert!(col.0 > 30, "carried sideways: {col:?} in {t} ticks");
 }
+
+#[test]
+fn the_clutchs_water_counts_as_taken_back_only_with_more_water_buckets() {
+    // E9's read of race 46038776204 lane 7: "the water taken back" while water_bucket 2 -> 1.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    set(&mut w, (20, 64, 20), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    w.held = 1;
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.clutch = Some(spikes::Clutch {
+        since: 90,
+        from_y: 80.0,
+        poured: Some((20, 64, 20)),
+        landed_at: None,
+        sent_at: Some(95),
+    });
+    p.spikes_clutch(&w, 100);
+    assert!(p.take_acts().contains(&Act::UseItem));
+    // The source gone with no bucket filled: not taken back.
+    set(&mut w, (20, 64, 20), BlockKind::Air);
+    assert!(p.spikes_clutch(&w, 101).is_none());
+    let why = p
+        .events
+        .iter()
+        .find(|e| e.what.starts_with("spikes: clutch over"))
+        .map(|e| e.why.clone())
+        .unwrap_or_default();
+    assert!(why.contains("gone, not taken back"), "{why}");
+}
+
+#[test]
+fn no_clutch_pour_while_rising() {
+    // Lane 9: "clutch pour sent (0.85 over the ground, falling 1.23)", upward, at an edge.
+    let mut w = world(2, [20.5, 66.0, 20.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    w.held = 1;
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.clutch = Some(spikes::Clutch {
+        since: 90,
+        from_y: 80.0,
+        poured: None,
+        landed_at: None,
+        sent_at: None,
+    });
+    at(&mut w, [20.5, 65.0, 20.5]);
+    if let Some(b) = w.body.as_mut() {
+        b.on_ground = false;
+        b.vel = [0.0, 0.4, 0.0];
+    }
+    p.spikes_clutch(&w, 100);
+    assert!(!p.take_acts().contains(&Act::UseItem), "no pour rising");
+}
+
+#[test]
+fn an_empty_bucket_refills_from_the_water_left_behind() {
+    // Lanes 7 and 9: "no climb: no water" for 10,000 ticks, empty buckets held and water left.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    set(&mut w, (21, 64, 20), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.left_water.push((21, 64, 20));
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: refill from the water left at (21, 64, 20)"),
+        "{:?}",
+        notes(&p)
+    );
+    // Far: walked to.
+    let mut w = world(2, [30.5, 64.0, 20.5]);
+    set(&mut w, (21, 64, 20), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.left_water.push((21, 64, 20));
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Explore(_))),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: to the water left at (21, 64, 20)"),
+        "{:?}",
+        notes(&p)
+    );
+}

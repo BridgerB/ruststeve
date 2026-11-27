@@ -559,3 +559,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 ### Wall 39: the clutch's pour landed short under fast knock-back (lanes 1 and 4; fixed)
 - **What happened:** flung about 60 blocks sideways, the pour went to "beside the feet's (an edge)" columns: in lane 1 it was sent at 17,825 with 19.7 under the feet. The body landed far past it.
 - **The fix:** the landing is predicted over the whole fall (`predict_landing`: stepped tick by tick with gravity 0.08, vertical drag 0.98 and air drag 0.91, from vanilla `LivingEntity.travel`). The first column under the box whose ground the feet reach is the one the pour aims at and is timed by. Unit test `a_body_flung_sideways_lands_where_its_fall_takes_it`.
+
+### Wall 40: water counted back that wasn't, and buckets never refilled (E9's read of race 46038776204 lanes 7 and 9; fixed)
+- **What happened:**
+  - Lane 7 at 14,540: "clutch over … the water taken back" while water_bucket went 2 to 1 the same tick, again at 17,220, then 1 to 0 at 17,240. From 17,440 it was "no climb: no water" 40 and more times to 28,100, holding 3 empty buckets.
+  - Lane 9 sent "clutch pour sent (0.85 over the ground, falling 1.23)" at 10,380 while rising, at an edge. At 10,460: "clutch water left … not taken back". It was "no climb: no water" to 26,200.
+- **The fix:**
+  - "Taken back" only when more water buckets are held than when the take-back's use went (`take_back_from`). Otherwise "the water gone, not taken back".
+  - Water the bot leaves (a clutch's not taken back, a landing's with no way back to it) goes on a record (`left_water`). With no water bucket and an empty one held, the bot refills from it first, its own task: "refill from the water left at" in reach, else "to the water left at", or "no way to the water left at" with the cell dropped from the record.
+  - No clutch pour while the vertical speed is upward.
+  - Unit tests `the_clutchs_water_counts_as_taken_back_only_with_more_water_buckets`, `no_clutch_pour_while_rising` and `an_empty_bucket_refills_from_the_water_left_behind`.
+- **Lane 5** dug down through a charge (33,620 to 34,020), the same as lane 3: wall 38's descent and the no-dig hold cover it.

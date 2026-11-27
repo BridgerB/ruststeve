@@ -920,6 +920,13 @@ pub struct SpikeState {
     pub dig_out_turn: bool,
     /// Walks with no approach (a dig-out's stair) that failed in a row, and their target.
     pub stair_walk_fails: Option<(Cell, u32)>,
+    /// Water buckets held when the clutch's take-back use went: taken back only when more are
+    /// held after (E9's read of race 46038776204 lane 7: "the water taken back" with water_bucket
+    /// 2 -> 1 the same tick).
+    pub take_back_from: Option<i32>,
+    /// Water the bot poured and left (a clutch's or a landing's not taken back): an empty bucket
+    /// refills from it first.
+    pub left_water: Vec<Cell>,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -981,6 +988,8 @@ impl Default for SpikeState {
             dig_out_off: 0,
             dig_out_turn: false,
             stair_walk_fails: None,
+            take_back_from: None,
+            left_water: Vec::new(),
         }
     }
 }
@@ -2727,6 +2736,9 @@ impl Plan {
                         kind(w, (column.0, g as i32, column.1)) != Some(BlockKind::Water)
                     })
                     && pour_now_at(body.pos[1], body.vel[1], ground, None)
+                    // Never rising (lane 9: "clutch pour sent … falling 1.23", upward, at an
+                    // edge: the water went where the body never landed).
+                    && body.vel[1] < 0.0
                     && self.acts.is_empty()
                 {
                     let land = ground.map(|g| ticks_to_land(body.pos[1], body.vel[1], g));
@@ -2773,22 +2785,32 @@ impl Plan {
                 // Over once no source is left there, never because a water bucket is in hand
                 // (frontier race 45978279345 lane 4: two water buckets held, the other one in
                 // hand read as the water taken back, "the water left" on the ground).
+                let water_now = craft::count(w, ItemKind::WaterBucket);
                 if !source(w, cell) {
+                    // Taken back only when the bucket count went up.
+                    let taken = self.spikes.take_back_from.is_some_and(|n| water_now > n);
+                    self.spikes.take_back_from = None;
                     self.note(
                         tick,
                         format!("spikes: clutch over at {:?}", path::feet_cell(body.pos)),
                         format!(
-                            "fell from {:.1}; the water taken back; health {:?}",
-                            c.from_y, w.player.health
+                            "fell from {:.1}; the water {}; {water_now} water buckets held; health {:?}",
+                            c.from_y,
+                            if taken { "taken back" } else { "gone, not taken back" },
+                            w.player.health
                         ),
                     );
                     return None;
                 }
                 if tick.saturating_sub(at) > CLUTCH_TAKE_TICKS {
+                    self.spikes.take_back_from = None;
+                    if !self.spikes.left_water.contains(&cell) {
+                        self.spikes.left_water.push(cell);
+                    }
                     self.note(
                         tick,
                         format!("spikes: clutch water left at {cell:?}"),
-                        format!("not taken back in {CLUTCH_TAKE_TICKS} ticks"),
+                        format!("not taken back in {CLUTCH_TAKE_TICKS} ticks; a refill's source"),
                     );
                     return None;
                 }
@@ -2800,6 +2822,7 @@ impl Plan {
                 let (yaw, pitch) = crate::walk::look_at(eye(&body), target);
                 let ctl = self.spikes_clutch_hold(w, ItemKind::Bucket, down);
                 if crate::dig::held_item(w) == Some(ItemKind::Bucket) && self.acts.is_empty() {
+                    self.spikes.take_back_from.get_or_insert(water_now);
                     self.acts.push(Act::UseItem);
                 }
                 self.spikes.clutch = Some(c);
@@ -3052,6 +3075,9 @@ impl Plan {
                 }
                 self.expanded += walk.expanded;
                 self.spikes.landings.remove(i);
+                if !self.spikes.left_water.contains(&l) {
+                    self.spikes.left_water.push(l);
+                }
                 self.note(
                     tick,
                     format!("spikes: landing water left at {l:?}"),
@@ -3249,6 +3275,75 @@ impl Plan {
                     return Some(self.spikes_hold(tick));
                 }
             }
+        }
+        // No water bucket and an empty one held: refilled from the water the bot left first, its
+        // own task (E9's read of race 46038776204 lanes 7 and 9: "no climb: no water" for 10,000
+        // ticks and more, holding empty buckets, its clutch and landing water left on the ground).
+        self.spikes.left_water.retain(|c| source(w, *c));
+        if water == 0
+            && empty > 0
+            && let Some(c) =
+                self.spikes.left_water.iter().copied().min_by_key(|c| {
+                    (c.0 - feet.0).abs() + (c.1 - feet.1).abs() + (c.2 - feet.2).abs()
+                })
+        {
+            let target = [
+                f64::from(c.0) + 0.5,
+                f64::from(c.1) + 0.5,
+                f64::from(c.2) + 0.5,
+            ];
+            let reach = (0..3)
+                .map(|i| (target[i] - eye(body)[i]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+            if reach <= POUR_REACH {
+                self.note(
+                    tick,
+                    format!("spikes: refill from the water left at {c:?}"),
+                    format!("{empty} empty, {water} full"),
+                );
+                self.spikes.doing = Some(Doing::Bucket {
+                    look: target,
+                    item: ItemKind::Bucket,
+                    want: ItemKind::WaterBucket,
+                    count: water + 1,
+                    until: tick + BUCKET_TICKS,
+                    last: None,
+                    why: "the refill from the water left".to_owned(),
+                });
+                self.retry_at = tick + 1;
+                return Some(Task::Idle);
+            }
+            let beside = Axis::ALL
+                .iter()
+                .map(|a| {
+                    let (dx, dz) = a.step();
+                    (c.0 + dx, c.1, c.2 + dz)
+                })
+                .filter(|b| {
+                    full(kind(w, (b.0, b.1 - 1, b.2)))
+                        && passable(kind(w, *b))
+                        && passable(kind(w, (b.0, b.1 + 1, b.2)))
+                })
+                .min_by_key(|b| (b.0 - feet.0).abs() + (b.2 - feet.2).abs());
+            if let Some(b) = beside {
+                let mut walk = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.spikes_note(
+                        tick,
+                        format!("spikes: to the water left at {c:?}"),
+                        format!("from {feet:?}, to refill"),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+            }
+            self.spikes.left_water.retain(|x| *x != c);
+            self.note(
+                tick,
+                format!("spikes: no way to the water left at {c:?}"),
+                format!("from {feet:?}; dropped from the record"),
+            );
         }
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
