@@ -1804,19 +1804,16 @@ impl Plan {
                         return Some(self.spikes_hold(tick));
                     }
                 }
-                // The landing water at the pillar's foot, before the climb: the way down is a
-                // drop into it. Two buckets held (one stays for the clutch), end stone to spare.
-                if !climbing
-                    && craft::count(w, ItemKind::WaterBucket) >= 2
-                    && craft::count(w, PILLAR_ITEM) >= WATERFALL_KEEP
-                    && !self.spikes.landings.iter().any(|(c, _)| *c == column)
-                    && let Some(l) = landing_cell(w, column, feet.1, top)
-                {
+                // The landing water beside the pillar's foot: the way down is a drop into it.
+                // Poured from the first block up, never from the foot: poured there it ran into
+                // the foot's cell and a body in water cannot jump-place (race 45949063425 lane 0:
+                // three climbs, none rose). Two buckets held (one stays for the clutch).
+                if let Some(l) = self.landing_due(w, column, feet, top) {
                     self.spikes.landings.push((column, l));
                     self.spikes_note(
                         tick,
                         format!("spikes: landing water poured at {l:?}"),
-                        format!("beside the pillar's foot {feet:?}, the drop from {top}"),
+                        format!("from the first block up at {feet:?}, the drop from {top}"),
                     );
                     self.spikes.doing = Some(Doing::Bucket {
                         look: [f64::from(l.0) + 0.5, f64::from(l.1), f64::from(l.2) + 0.5],
@@ -1830,7 +1827,10 @@ impl Plan {
                     self.retry_at = tick + 1;
                     return Some(Task::Idle);
                 }
-                if !climbing && !self.spikes.landings.iter().any(|(c, _)| *c == column) {
+                if climbing
+                    && self.first_block_up(column, feet)
+                    && !self.spikes.landings.iter().any(|(c, _)| *c == column)
+                {
                     let water = craft::count(w, ItemKind::WaterBucket);
                     let stone = craft::count(w, PILLAR_ITEM);
                     let why = if water < 2 {
@@ -2902,6 +2902,27 @@ impl Plan {
         }
     }
 
+    /// Are the feet on the first block of this column's pillar?
+    fn first_block_up(&self, column: (i32, i32), feet: Cell) -> bool {
+        (feet.0, feet.2) == column
+            && self
+                .spikes
+                .pillars
+                .iter()
+                .any(|p| (p.x, p.z) == column && feet.1 == p.base + 1)
+    }
+
+    /// The landing water's cell when it is due now: the feet on the first block up, none poured
+    /// for this column, two water buckets (one stays the clutch's), end stone to spare.
+    fn landing_due(&self, w: &World, column: (i32, i32), feet: Cell, top: i32) -> Option<Cell> {
+        (self.first_block_up(column, feet)
+            && craft::count(w, ItemKind::WaterBucket) >= 2
+            && craft::count(w, PILLAR_ITEM) >= WATERFALL_KEEP
+            && !self.spikes.landings.iter().any(|(c, _)| *c == column))
+        .then(|| landing_cell(w, column, feet.1 - 1, top))
+        .flatten()
+    }
+
     fn spikes_climb(
         &mut self,
         w: &World,
@@ -2932,6 +2953,15 @@ impl Plan {
                     self.spikes.pillars_up,
                     self.spikes.risen
                 ),
+            );
+            return None;
+        }
+        // The first block up: the climb hands back for the landing water's pour (spikes_task).
+        if body.on_ground && self.landing_due(w, c.column, feet, c.goal).is_some() {
+            self.note(
+                tick,
+                format!("spikes: climb paused for the landing water at {feet:?}"),
+                format!("the first block up of the pillar in {:?}", c.column),
             );
             return None;
         }

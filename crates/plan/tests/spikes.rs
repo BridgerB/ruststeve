@@ -1135,14 +1135,43 @@ fn a_body_flung_sideways_pours_on_the_column_it_will_land_on() {
 }
 
 #[test]
-fn the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top() {
+fn the_landing_water_is_poured_from_the_first_block_up_and_dropped_into_from_the_top() {
     // Race 45916169323 lane 1: a pour on the pillar's top made a waterfall too slow to ride, and
-    // the bot drowned in it. The water goes at the foot before the climb; the way down is a drop.
+    // the bot drowned in it. The water goes beside the foot; the way down is a drop.
+    // Race 45949063425 lane 0: poured from the foot, it ran into the foot's cell and the bot,
+    // in water, rose no block in three climbs. At the foot: the climb, no pour.
     let mut w = world(2, [8.5, 64.0, 5.5]);
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
     w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
     let mut p = Plan::new(Aim::Race);
     assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        !notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: landing water poured")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
+    // The first block up: the climb hands back for the pour.
+    set(&mut w, (8, 64, 5), BlockKind::EndStone);
+    at(&mut w, [8.5, 65.0, 5.5]);
+    let mut c = match p.spikes.doing.take() {
+        Some(spikes::Doing::Climb(c)) => c,
+        d => panic!("{d:?}"),
+    };
+    c.top = 64;
+    p.spikes.doing = Some(spikes::Doing::Climb(c));
+    p.spikes_step(&w, 120);
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: climb paused for the landing water at (8, 65, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    p.spikes.doing = None;
+    assert_eq!(p.spikes_task(&w, 121), Some(Task::Idle));
     assert!(
         notes(&p)
             .iter()
@@ -1160,6 +1189,7 @@ fn the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top() {
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     gone(&mut w);
     at(&mut w, [8.5, 70.0, 5.5]);
+    p.spikes.pillars.clear();
     p.spikes.pillars.push(PillarRec {
         x: 8,
         z: 5,

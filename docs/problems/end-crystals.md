@@ -377,3 +377,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - With no landing water, the bot drops off a side that falls clear, holding the clutch's bucket in the hotbar ("drop with the clutch from"): a fall of about 2 s that the clutch catches (E6's window, race 16's 5 of 5), where the dig is a block every 40 ticks.
   - The dig stays only for a bot with no bucket in the hotbar.
   - Unit test `a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down`, extended.
+
+## Twenty-first race: 45949063425 (dev-end-island, 4e86a78, development only)
+- Both died to breath clouds (indirectMagic): lane 0 at tick 5,680 in E5's strafe notch after a dodge with no path; lane 1 at 2,900 in E5's charge notch. 0 strikes from a pillar in either.
+
+### Wall 25: the landing water flooded the pillar's foot, and no climb rose (fixed)
+- **What happened (lane 0):**
+  - At 2,440 the landing water went in at (38, 59, 0), beside the foot (39, 59, 0) at the same height; "pillar up from (39, 59, 0)".
+  - It ran into the foot's cell: senses at 2,540, 2,740 and 2,940 read "cell 39,59,0 in water". In water the jump does nothing, so no block went in.
+  - The climb was held from a charge at 2,900 with the feet still at 59. The second climb (3,240) stalled 1,200 ticks at 59.06, "on the ground false". The third (4,640) was held at the foot by the charge at 4,780. That was three climbs and about 1,900 ticks with no rise. The death cell (45, 57, 0), a notch at another foot, was in landing water too.
+- **The fix:** the landing water is poured from the first block up, never from the foot. The climb hands back on its first rise ("climb paused for the landing water at"), the pour follows, then the climb goes on. The water sits beside the pillar's base block, below the feet. Unit test `the_landing_water_is_poured_from_the_first_block_up_and_dropped_into_from_the_top`.
