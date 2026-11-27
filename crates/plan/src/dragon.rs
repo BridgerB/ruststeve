@@ -400,6 +400,13 @@ impl Breath {
     pub fn reach(&self) -> f64 {
         self.radius + BREATH_MARGIN
     }
+
+    /// The reach it grows to before it is gone: `CLOUD_MAX` (a fireball's cloud grows from 3 to
+    /// 7 over its 600 ticks: `DragonFireball.onHit`, `setRadiusPerTick((7 - 3) / 600)`) and the
+    /// margin (wall 47: bots waited at an edge that grew over them).
+    pub fn end_reach(&self) -> f64 {
+        self.radius.max(CLOUD_MAX) + BREATH_MARGIN
+    }
 }
 
 /// The dragon's breath clouds and fireballs the server shows, with their radii (a cloud's from
@@ -438,6 +445,13 @@ pub const BREATH_OVER: f64 = 1.5;
 pub const BREATH_UNDER: f64 = 1.0;
 /// Columns round the feet the cell out of a breath is looked for in.
 pub const OUT_SEARCH: i32 = 9;
+/// Columns each way a cell clear of a cloud's end reach is looked for (wall 47).
+pub const OUT_SEARCH_END: i32 = 12;
+/// Loops' caps in one episode of a breath (wall 50): walks out, walls dug, and ticks between the
+/// "out of the breath" notes.
+pub const BREATH_OUTS_MAX: u32 = 12;
+pub const BREATH_WALLS_MAX: u32 = 3;
+pub const LOOP_NOTE_TICKS: u64 = 100;
 /// Blocks ahead of the feet along a walk's heading tested for a breath (`breath_ahead`).
 pub const AHEAD: f64 = 1.5;
 /// Ticks between the notes of a walk held at a breath's edge.
@@ -469,6 +483,13 @@ pub fn out_of_breath(w: &World, feet: [f64; 3]) -> Option<[i32; 3]> {
 /// at 6.4 off a reach of 6.5, the walk to its own cell done each tick).
 pub const OUT_SLACK: f64 = 1.0;
 
+/// Is `p` clear of every breath's end reach on the plane, with `OUT_SLACK` more (wall 47)?
+pub fn clear_of_end(breaths: &[Breath], p: [f64; 3]) -> bool {
+    !breaths
+        .iter()
+        .any(|b| flat(b.pos, p) <= b.end_reach() + OUT_SLACK)
+}
+
 /// Is a body with its feet at `p` well clear of every breath (`breath_on` with `OUT_SLACK` more)?
 pub fn clear_of_breath(breaths: &[Breath], p: [f64; 3]) -> bool {
     !breaths.iter().any(|b| {
@@ -489,10 +510,12 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
     let fc = cell_of(feet);
     let mut cells = crate::path::Cells::new(w);
     let mut best: Option<(f64, [i32; 3])> = None;
-    for x in (fc[0] - OUT_SEARCH)..=(fc[0] + OUT_SEARCH) {
-        for z in (fc[2] - OUT_SEARCH)..=(fc[2] + OUT_SEARCH) {
+    // Out to `OUT_SEARCH_END`: a cell clear of a cloud's end reach (7 and the margins) can lie
+    // past the 9 the edge needed (wall 47).
+    for x in (fc[0] - OUT_SEARCH_END)..=(fc[0] + OUT_SEARCH_END) {
+        for z in (fc[2] - OUT_SEARCH_END)..=(fc[2] + OUT_SEARCH_END) {
             let d0 = flat(feet, mid([x, 0, z]));
-            if d0 > f64::from(OUT_SEARCH) || best.is_some_and(|(bd, _)| d0 > bd) {
+            if d0 > f64::from(OUT_SEARCH_END) || best.is_some_and(|(bd, _)| d0 > bd) {
                 continue;
             }
             let Some(y) = ((fc[1] - 3)..=(fc[1] + 2))
@@ -505,7 +528,7 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
             let p = mid(c);
             if (x == fc[0] && z == fc[2])
                 || refused.contains(&c)
-                || !clear_of_breath(&clouds, p)
+                || !clear_of_end(&clouds, p)
                 || v.is_some_and(|v| before_head(&v, p) || !way_clear(&v, feet, p))
             {
                 continue;
@@ -939,8 +962,8 @@ pub fn dodge_cell_within(
             && r.waypoints.iter().all(|p| {
                 // A cloud already on the start is walked out of; any other is kept off the way.
                 !clouds.iter().any(|b| {
-                    flat(b.pos, mid(from)) > b.reach()
-                        && flat(b.pos, mid([p.0, p.1, p.2])) <= b.reach()
+                    flat(b.pos, mid(from)) > b.end_reach()
+                        && flat(b.pos, mid([p.0, p.1, p.2])) <= b.end_reach()
                 })
             })
     };
@@ -984,7 +1007,7 @@ pub fn dodge_cell_within(
                     && (-EDGE_CLEAR..=EDGE_CLEAR).all(|ex| {
                         (-EDGE_CLEAR..=EDGE_CLEAR).all(|ez| ground(x + ex, c[1], z + ez))
                     })
-                    && clear_of_breath(&clouds, mid(c))
+                    && clear_of_end(&clouds, mid(c))
                     && walked(c))
                 .then_some(c)
             })
@@ -1001,12 +1024,17 @@ pub const ENDER_NEAR: f64 = 8.0;
 pub const STRAFE_UNSEEN_TICKS: u64 = 100;
 pub const STRAFE_RISES: i32 = 10;
 pub const ENDER_HOLD_CAP: u64 = 600;
-/// Water against endermen (wall 46): the reach angry ones are counted in, how many call for it,
+/// Water against endermen (walls 46, 48: any angry one, a single one beat a full-iron bot with the
+/// sword in race 46071506005 lane 5, about 3.8 a blow against 7 strikes it needed): the reach angry
+/// ones are counted in, how many call for it,
 /// ticks a hurt by something not the bot counts, and ticks between a bucket's uses.
 pub const ENDER_WATER_NEAR: f64 = 16.0;
-pub const ENDER_WATER_MOST: usize = 2;
+pub const ENDER_WATER_MOST: usize = 1;
 pub const DRAGON_HURT_TICKS: u64 = 400;
 pub const BUCKET_RETRY: u64 = 10;
+/// Ticks a pour's source is looked for, and the take-back's uses at most (wall 49).
+pub const POUR_WAIT: u64 = 20;
+pub const TAKE_TRIES: u32 = 3;
 /// Recovery (wall 46): health it begins under and ends over, and the blocks a cloud's reach and the
 /// dragon are kept by while it lasts.
 pub const RECOVER_BELOW: f32 = 10.0;
@@ -2120,6 +2148,27 @@ pub struct DragonState {
     pub ender_water_at: u64,
     #[serde(default)]
     pub recovering: bool,
+    /// The item in hand at the enderman's strikes and since when (a swap resets the charge).
+    #[serde(default)]
+    pub ender_hand: Option<ItemKind>,
+    #[serde(default)]
+    pub ender_hand_at: Option<u64>,
+    /// A pour against endermen sent (the feet's cell, the tick), and the take-back's water
+    /// buckets before it and its uses (wall 49).
+    #[serde(default)]
+    pub ender_pour: Option<([i32; 3], u64)>,
+    #[serde(default)]
+    pub ender_take: Option<(i32, u32)>,
+    /// One episode of a breath (wall 50): walks out and walls dug in it, cells whose dig failed,
+    /// and the last "out of the breath" note.
+    #[serde(default)]
+    pub breath_episode_outs: u32,
+    #[serde(default)]
+    pub breath_walls: u32,
+    #[serde(default)]
+    pub dug_failed: Vec<[i32; 3]>,
+    #[serde(default)]
+    pub breath_out_noted_at: Option<u64>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2833,18 +2882,33 @@ impl Plan {
                     return self.breath_walk_step(w, tick, b);
                 }
             }
-            self.dragon.breath_refused.clear();
+            // The cells refused, the walls dug and the walks out kept for the whole episode, until no
+            // cloud's end reach takes the bot in (wall 50: race 46071506005 lanes 0 and 3, "out of
+            // the breath" 120 to 250 times a lane, the same cells tried again each time).
+            if clear_of_end(&clouds, feet) {
+                self.dragon.breath_refused.clear();
+                self.dragon.dug_failed.clear();
+                self.dragon.breath_walls = 0;
+                self.dragon.breath_episode_outs = 0;
+            }
             self.dragon.breath_noted = None;
             self.dragon.breath_wall = None;
-            if let Some(wk) = self.dragon.breath_walk.take() {
+            if let Some(wk) = self.dragon.breath_walk.take()
+                && self
+                    .dragon
+                    .breath_out_noted_at
+                    .is_none_or(|t| tick >= t + LOOP_NOTE_TICKS)
+            {
+                self.dragon.breath_out_noted_at = Some(tick);
                 self.note(
                     tick,
                     "out of the breath".to_owned(),
                     format!(
-                        "at {:?}, {} ticks after the walk to {:?} began",
+                        "at {:?}, {} ticks after the walk to {:?} began; {} walks out this time",
                         cell_of(feet),
                         tick.saturating_sub(wk.started),
-                        wk.target
+                        wk.target,
+                        self.dragon.breath_episode_outs
                     ),
                 );
             }
@@ -2921,10 +2985,31 @@ impl Plan {
             .breath_walk
             .as_ref()
             .map(|wk| [wk.target.0, wk.target.1, wk.target.2])
-            .filter(|c| clear_of_breath(&clouds, mid(*c)) && *c != cell_of(feet));
+            .filter(|c| clear_of_end(&clouds, mid(*c)) && *c != cell_of(feet));
         let target = match held {
             Some(c) => c,
             None => {
+                // Walks out of one episode capped: past it, straight away from the cloud's middle.
+                if self.dragon.breath_episode_outs >= BREATH_OUTS_MAX {
+                    if self.dragon.breath_episode_outs == BREATH_OUTS_MAX {
+                        self.dragon.breath_episode_outs += 1;
+                        self.note(
+                            tick,
+                            "out of the breath: walks capped".to_owned(),
+                            format!("{BREATH_OUTS_MAX} walks out; pressed straight away from it"),
+                        );
+                    }
+                    let away = [feet[0] - on.pos[0], feet[2] - on.pos[2]];
+                    let d = away[0].hypot(away[1]).max(1e-6);
+                    return Some(toward(
+                        feet,
+                        [
+                            feet[0] + away[0] / d * 3.0,
+                            feet[1],
+                            feet[2] + away[1] / d * 3.0,
+                        ],
+                    ));
+                }
                 let Some(c) = out_of_breath_except(w, feet, &self.dragon.breath_refused) else {
                     if self.dragon.breath_walk.take().is_some() || self.dragon.breath_outs == 0 {
                         self.note(
@@ -2940,6 +3025,7 @@ impl Plan {
                     return None;
                 };
                 self.dragon.breath_outs += 1;
+                self.dragon.breath_episode_outs += 1;
                 self.dragon.breath_walk = Some(Walk::new(
                     (c[0], c[1], c[2]),
                     Goal::Block {
@@ -3005,8 +3091,11 @@ impl Plan {
             if let TaskStatus::Failed(e) = status {
                 // Walled in: the wall toward the cell out dug (the next tick's walk digs on).
                 if let Some(feet) = w.body.map(|b| b.pos)
-                    && let Some(n) = wall_toward(w, feet, target)
+                    && let Some(n) =
+                        wall_toward(w, feet, target).filter(|n| !self.dragon.dug_failed.contains(n))
+                    && self.dragon.breath_walls < BREATH_WALLS_MAX
                 {
+                    self.dragon.breath_walls += 1;
                     self.dragon.breath_wall = Some(n);
                     self.note(
                         tick,
@@ -3738,9 +3827,10 @@ impl Plan {
         // A leg whose end a cloud now reaches is given up (wall 46: race 46063334187 lane 9 paced
         // into a cloud, three 6.0 blows).
         let clouds = clouds_only(w);
-        let done = self.dragon.pace_to.is_none_or(|c| {
-            fc == c || flat(feet, mid(c)) < 1.0 || !clear_of_breath(&clouds, mid(c))
-        });
+        let done = self
+            .dragon
+            .pace_to
+            .is_none_or(|c| fc == c || flat(feet, mid(c)) < 1.0 || !clear_of_end(&clouds, mid(c)));
         if done {
             self.dragon.pace_walk = None;
             let Some((_, v)) = view(w) else {
@@ -4083,7 +4173,11 @@ impl Plan {
                 );
                 self.dragon.notch_step = None;
                 // Never the same failed dig again each tick (race 45913263506 lane 2: a wall cell
-                // in water, "failed: Gone" 289 times while a fireball's cloud burned it).
+                // in water, "failed: Gone" 289 times while a fireball's cloud burned it), nor its
+                // cell again in this episode (wall 50: 32 to 40 a lane in race 46071506005).
+                if self.dragon.dug_failed.len() < 32 && !self.dragon.dug_failed.contains(&c) {
+                    self.dragon.dug_failed.push(c);
+                }
                 self.dragon.breath_wall = None;
                 self.dragon.notch_failed = true;
             }
@@ -4121,25 +4215,60 @@ impl Plan {
             feet[1],
             feet[2] + r.cos() * AHEAD,
         ];
-        let Some(b) = breath_on(&clouds, ahead) else {
+        // A cloud's end reach, not its edge (wall 47: frontier race 46063334187 lanes 1, 2 and 8
+        // waited at an edge that grew over them, 5.0 to 7.0): at its height, the point ahead or
+        // the feet within it.
+        let level = |b: &Breath| {
+            feet[1] <= b.pos[1] + BREATH_OVER
+                && feet[1] + physics::HEIGHT + BREATH_UNDER >= b.pos[1]
+        };
+        let Some(b) = clouds
+            .iter()
+            .filter(|b| {
+                level(b)
+                    && (flat(b.pos, ahead) <= b.end_reach()
+                        || flat(b.pos, feet) <= b.end_reach() + OUT_SLACK)
+            })
+            .min_by(|a, b| flat(a.pos, feet).total_cmp(&flat(b.pos, feet)))
+            .copied()
+        else {
             return c;
         };
         let tick = w.ticks;
         self.dragon.breath_waits += 1;
+        let inside = flat(b.pos, feet) <= b.end_reach() + OUT_SLACK;
         if tick >= self.dragon.breath_waited_at + AHEAD_NOTE_TICKS || self.dragon.breath_waits == 1
         {
             self.dragon.breath_waited_at = tick;
             self.note(
                 tick,
-                "walk waits at a breath's edge".to_owned(),
+                if inside {
+                    "walk backs off a breath's growth".to_owned()
+                } else {
+                    "walk held clear of a breath's end reach".to_owned()
+                },
                 format!(
-                    "a breath {:.1} ahead (radius {:.1}) at {:?}; task {}; {} ticks waited in the run",
-                    flat(b.pos, ahead),
+                    "a breath {:.1} off (radius {:.1}, to grow to {:.1}) at {:?}; task {}; {} ticks in the run",
+                    flat(b.pos, feet),
                     b.radius,
+                    b.end_reach(),
                     cell_of(feet),
                     self.task.name(),
                     self.dragon.breath_waits
                 ),
+            );
+        }
+        if inside {
+            // Straight away from its middle, out past where it will grow to.
+            let away = [feet[0] - b.pos[0], feet[2] - b.pos[2]];
+            let d = away[0].hypot(away[1]).max(1e-6);
+            return toward(
+                feet,
+                [
+                    feet[0] + away[0] / d * 3.0,
+                    feet[1],
+                    feet[2] + away[1] / d * 3.0,
+                ],
             );
         }
         Controls {
@@ -4400,21 +4529,58 @@ impl Plan {
         let feet = body.pos;
         let fc = cell_of(feet);
         let (n, hurt) = angry_endermen(w, feet);
+        let held = |k: ItemKind| crate::craft::count(w, k);
         let look = |to: [f64; 3]| {
             let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
             crate::walk::look_at(eye, to)
         };
-        if let Some(cell) = self.dragon.ender_water {
-            if !in_water(w, cell) {
-                self.dragon.ender_water = None;
+        // A pour sent: its source found at the feet or beside them, else, after `POUR_WAIT`, the
+        // water is lost there (wall 49: race 46071506005 lanes 4 and 6, a bucket emptied with no
+        // note and the water never recorded).
+        if let Some((at, sent)) = self.dragon.ender_pour {
+            let found = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|(dx, dz)| [at[0] + dx, at[1], at[2] + dz])
+                .find(|c| crate::spikes::source(w, (c[0], c[1], c[2])));
+            if let Some(c) = found {
+                self.dragon.ender_pour = None;
+                self.dragon.ender_water = Some(c);
+                self.dragon.ender_take = None;
                 self.note(
                     tick,
-                    format!("end: the water against endermen gone at {cell:?}"),
-                    format!("{n} angry within {ENDER_WATER_NEAR}"),
+                    format!("end: water against endermen standing at {c:?}"),
+                    format!("{n} angry within {ENDER_WATER_NEAR}; poured from {at:?}"),
                 );
+            } else if tick >= sent + POUR_WAIT {
+                self.dragon.ender_pour = None;
+                self.ender_water_lost(tick, at, "no source after the pour");
+                return None;
+            } else {
+                return Some(Controls {
+                    yaw: f64::from(w.player.yaw),
+                    pitch: Some(ENDER_LOOK_PITCH),
+                    ..Controls::default()
+                });
+            }
+        }
+        if let Some(cell) = self.dragon.ender_water {
+            if !crate::spikes::source(w, (cell[0], cell[1], cell[2])) {
+                // Gone: taken back (the bucket count rose) or flowed away.
+                let full = held(ItemKind::WaterBucket);
+                match self.dragon.ender_take {
+                    Some((before, _)) if full > before => self.note(
+                        tick,
+                        format!("end: the water against endermen taken back at {cell:?}"),
+                        format!("{full} water buckets held"),
+                    ),
+                    _ => self.ender_water_lost(tick, cell, "the source gone, not taken back"),
+                }
+                self.dragon.ender_water = None;
+                self.dragon.ender_take = None;
                 return None;
             }
             if n > 0 {
+                self.dragon.ender_take = None;
                 // In the source, looking at its body (`keep_look` keeps it off the eyes).
                 if fc != cell {
                     return Some(toward(feet, mid(cell)));
@@ -4425,7 +4591,26 @@ impl Plan {
                     ..Controls::default()
                 });
             }
-            // None angry near: the water taken back.
+            // None angry near: the water taken back, at most `TAKE_TRIES` uses.
+            let full = held(ItemKind::WaterBucket);
+            if let Some((before, tries)) = self.dragon.ender_take {
+                if full > before {
+                    self.note(
+                        tick,
+                        format!("end: the water against endermen taken back at {cell:?}"),
+                        format!("{full} water buckets held"),
+                    );
+                    self.dragon.ender_water = None;
+                    self.dragon.ender_take = None;
+                    return None;
+                }
+                if tries >= TAKE_TRIES && tick >= self.dragon.ender_water_at + BUCKET_RETRY {
+                    self.dragon.ender_water = None;
+                    self.dragon.ender_take = None;
+                    self.ender_water_lost(tick, cell, "not taken back in 3 uses");
+                    return None;
+                }
+            }
             let target = [
                 f64::from(cell[0]) + 0.5,
                 f64::from(cell[1]) + 0.2,
@@ -4439,12 +4624,10 @@ impl Plan {
                             || tick >= self.dragon.ender_water_at + BUCKET_RETRY)
                     {
                         self.dragon.ender_water_at = tick;
+                        let tries = self.dragon.ender_take.map_or(0, |(_, t)| t) + 1;
+                        let before = self.dragon.ender_take.map_or(full, |(b, _)| b);
+                        self.dragon.ender_take = Some((before, tries));
                         self.acts.push(Act::UseItem);
-                        self.note(
-                            tick,
-                            format!("end: the water against endermen taken back at {cell:?}"),
-                            "none angry near".to_owned(),
-                        );
                     }
                 }
                 Hold::Act(a) => {
@@ -4455,6 +4638,7 @@ impl Plan {
                 Hold::Wait => {}
                 Hold::Missing => {
                     self.dragon.ender_water = None;
+                    self.ender_water_lost(tick, cell, "no empty bucket to take it back");
                     return None;
                 }
             }
@@ -4467,26 +4651,19 @@ impl Plan {
         if (n < ENDER_WATER_MOST && !hurt) || n == 0 || !body.on_ground {
             return None;
         }
-        if in_water(w, fc) {
+        if crate::spikes::source(w, (fc[0], fc[1], fc[2])) {
             self.dragon.ender_water = Some(fc);
             self.note(
                 tick,
-                format!("end: water poured at {fc:?} against {n} angry endermen"),
-                format!(
-                    "{}; stood in the source",
-                    if hurt {
-                        "one hurt by the dragon"
-                    } else {
-                        "more than one"
-                    }
-                ),
+                format!("end: water against endermen standing at {fc:?}"),
+                format!("{n} angry within {ENDER_WATER_NEAR}; a source already there"),
             );
             return None;
         }
-        if crate::craft::count(w, ItemKind::WaterBucket) == 0 {
+        if held(ItemKind::WaterBucket) == 0 {
             return None;
         }
-        // Poured on the floor's top under the feet.
+        // Poured on the floor's top under the feet, noted as the use goes.
         let target = [
             f64::from(fc[0]) + 0.5,
             f64::from(fc[1]) + 0.02,
@@ -4500,7 +4677,21 @@ impl Plan {
                         || tick >= self.dragon.ender_water_at + BUCKET_RETRY)
                 {
                     self.dragon.ender_water_at = tick;
+                    self.dragon.ender_pour = Some((fc, tick));
                     self.acts.push(Act::UseItem);
+                    self.note(
+                        tick,
+                        format!("end: water poured at {fc:?} against {n} angry endermen"),
+                        format!(
+                            "{}; {} water buckets held",
+                            if hurt {
+                                "one hurt by the dragon"
+                            } else {
+                                "within 16"
+                            },
+                            held(ItemKind::WaterBucket)
+                        ),
+                    );
                 }
             }
             Hold::Act(a) => {
@@ -4515,6 +4706,20 @@ impl Plan {
             pitch: Some(pitch),
             ..Controls::default()
         })
+    }
+
+    /// Water against endermen lost at `cell` (`why`): noted, and given to E4's refill as a source
+    /// left on the ground (`spikes.left_water`).
+    fn ender_water_lost(&mut self, tick: u64, cell: [i32; 3], why: &str) {
+        let c = (cell[0], cell[1], cell[2]);
+        if !self.spikes.left_water.contains(&c) {
+            self.spikes.left_water.push(c);
+        }
+        self.note(
+            tick,
+            format!("end: the water against endermen lost at {cell:?}"),
+            format!("{why}; left for the refill"),
+        );
     }
 
     /// Recovery first at low health in the End (wall 46: race 46063334187 lane 4 walked through
@@ -4608,10 +4813,23 @@ impl Plan {
             }
         }
         let ready = (crate::hunt::swing_ticks(w) * crate::dig::slowdown(w)).ceil() as u64 + 1;
+        // A full charge from the swing and from the sword's coming to hand: a swap resets the
+        // server's attack charge (wall 48: race 46071506005 lane 5's strikes of 1.3 between full
+        // ones of 6.0, the dig task bringing the pickaxe back between them).
+        let wp = crate::hunt::weapon(w);
+        let in_hand = crate::dig::held_item(w);
+        if in_hand != wp || self.dragon.ender_hand != in_hand {
+            self.dragon.ender_hand = in_hand;
+            self.dragon.ender_hand_at = Some(tick);
+        }
         if self
             .dragon
-            .ender_swing_at
+            .ender_hand_at
             .is_none_or(|t| tick.saturating_sub(t) >= ready)
+            && self
+                .dragon
+                .ender_swing_at
+                .is_none_or(|t| tick.saturating_sub(t) >= ready)
         {
             self.dragon.ender_swing_at = Some(tick);
             self.acts.push(Act::Attack { entity: id });
