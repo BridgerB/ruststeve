@@ -1998,3 +1998,59 @@ fn a_water_bucket_in_hand_is_no_sign_the_clutchs_water_is_back() {
         notes(&p)
     );
 }
+
+#[test]
+fn a_dig_out_stair_with_a_step_floor_missing_gets_the_floor_put() {
+    // Frontier race 45988967677 lane 1: surface mining had dug the first step's floor, the stair
+    // read as open, and its walk failed NoPath every 200 ticks for 2,700.
+    let mut w = world(2, [13.5, 57.0, 0.5]);
+    for c in [
+        (13, 57, 0),
+        (13, 58, 0),
+        (13, 59, 0),
+        (12, 58, 0),
+        (12, 59, 0),
+        (12, 60, 0),
+        (11, 59, 0),
+        (11, 60, 0),
+        (11, 61, 0),
+        (10, 60, 0),
+        (10, 61, 0),
+        (12, 57, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    let all = Axis::ALL.map(|a| (8, 8, a, u64::MAX));
+    let st = SpikeState {
+        refused: all.to_vec(),
+        ..SpikeState::default()
+    };
+    assert_eq!(
+        spikes::stair_floor_gap(&w, (13, 57, 0), (8, 64, 5), false),
+        Some((12, 57, 0))
+    );
+    assert_eq!(
+        spikes::next(&w, &st, 0),
+        Next::Build((12, 57, 0), Role::Stair)
+    );
+    // The floor in: no gap, the stair walked.
+    set(&mut w, (12, 57, 0), BlockKind::EndStone);
+    assert_eq!(
+        spikes::stair_floor_gap(&w, (13, 57, 0), (8, 64, 5), false),
+        None
+    );
+}
+
+#[test]
+fn the_way_out_turned_runs_along_the_other_axis() {
+    // After the stair's walks fail STAIR_WALK_TRIES times, the dig-out turns to a new way.
+    let mut w = world(2, [13.5, 57.0, 0.5]);
+    for y in 57..=63 {
+        set(&mut w, (13, y, 0), BlockKind::Air);
+    }
+    let (straight, _) =
+        spikes::dig_out_plan_turned(&w, (13, 57, 0), (8, 64, 5), false).expect("plan");
+    let (turned, _) = spikes::dig_out_plan_turned(&w, (13, 57, 0), (8, 64, 5), true).expect("plan");
+    assert_eq!(straight, Some((12, 58, 0)), "along x toward the foot");
+    assert_eq!(turned, Some((13, 58, 1)), "along z instead");
+}

@@ -483,6 +483,8 @@ pub enum Role {
     Wall,
     /// Over the head, the box's top.
     Roof,
+    /// A step's floor of a dig-out's stair, put where it was missing.
+    Stair,
 }
 
 /// The next block of the stand's box (the orchestrator, after race 45871173293's wall 2: a
@@ -845,6 +847,10 @@ pub struct SpikeState {
     /// tick until which a failed one stays off.
     pub dig_out_since: Option<(u64, f64)>,
     pub dig_out_off: u64,
+    /// The dig-out's stair along the other axis, after walks up the first failed.
+    pub dig_out_turn: bool,
+    /// Walks with no approach (a dig-out's stair) that failed in a row, and their target.
+    pub stair_walk_fails: Option<(Cell, u32)>,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -904,6 +910,8 @@ impl Default for SpikeState {
             dig_out_since: None,
             clutch_drops: 0,
             dig_out_off: 0,
+            dig_out_turn: false,
+            stair_walk_fails: None,
         }
     }
 }
@@ -1137,14 +1145,22 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
             // (13, 59, 0) was refused for 12,000 ticks).
             let out = spike_for(w, &st.geography, pos)
                 .and_then(|sp| best_approach(w, &sp, body.pos, &[], tick))
-                .and_then(|a| dig_out_plan(w, feet, a.foot).map(|p| (p, a.foot)));
+                .and_then(|a| {
+                    dig_out_plan_turned(w, feet, a.foot, st.dig_out_turn).map(|p| (p, a.foot))
+                });
             let stands = |c: Cell| {
                 full(kind(w, (c.0, c.1 - 1, c.2)))
                     && open(kind(w, c))
                     && open(kind(w, (c.0, c.1 + 1, c.2)))
             };
+            let gap = out.and_then(|(_, toward)| stair_floor_gap(w, feet, toward, st.dig_out_turn));
             match out {
                 Some(((Some(cell), _), toward)) => Next::DigOut { cell, toward },
+                // A step with no floor: one put there, then the walk up.
+                Some(((None, top), _)) if top != feet && gap.is_some() => gap
+                    .map_or(Next::Wait("no stair gap".to_owned()), |c| {
+                        Next::Build(c, Role::Stair)
+                    }),
                 // The stair open: up it, and the dig-out goes on from its top.
                 Some(((None, top), _)) if top != feet && stands(top) => Next::Walk {
                     to: top,
@@ -1337,15 +1353,20 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
 /// under its bunker the stair rose only to the foot's height, 59, under the ground at 62, and
 /// every walk from the feet was refused for 19,560 ticks).
 pub fn dig_out_plan(w: &World, feet: Cell, target: Cell) -> Option<(Option<Cell>, Cell)> {
-    let (dx, dz) = {
-        let (ax, az) = (target.0 - feet.0, target.2 - feet.2);
-        if ax.abs() >= az.abs() {
-            (ax.signum(), 0)
-        } else {
-            (0, az.signum())
-        }
+    dig_out_plan_turned(w, feet, target, false)
+}
+
+/// The dig-out's direction and rise: along the larger axis toward the target, or the other one
+/// when `turn` (its stair's walks failed), and up to the higher of the target and the ground.
+fn stair_line(w: &World, feet: Cell, target: Cell, turn: bool) -> Option<(i32, i32, i32)> {
+    let (ax, az) = (target.0 - feet.0, target.2 - feet.2);
+    let along_x = (ax.abs() >= az.abs()) != turn;
+    let (dx, dz) = if along_x {
+        (if ax == 0 { 1 } else { ax.signum() }, 0)
+    } else {
+        (0, if az == 0 { 1 } else { az.signum() })
     };
-    if (dx, dz) == (0, 0) {
+    if (ax, az) == (0, 0) {
         return None;
     }
     let (x, y, z) = feet;
@@ -1355,7 +1376,29 @@ pub fn dig_out_plan(w: &World, feet: Cell, target: Cell) -> Option<(Option<Cell>
         .max()
         .unwrap_or(y);
     // A stair of up to `DIG_OUT_STEPS` steps (each within a dig's reach), or the way along.
-    let rise = (target.1.max(surface) - y).clamp(0, DIG_OUT_STEPS);
+    Some((dx, dz, (target.1.max(surface) - y).clamp(0, DIG_OUT_STEPS)))
+}
+
+/// The first step of the dig-out's stair with no floor under it (frontier race 45988967677 lane
+/// 1: surface mining had dug the first step's floor, the stair read as open, and its walk failed
+/// NoPath every 200 ticks for 2,700). `None` when every step has its floor.
+pub fn stair_floor_gap(w: &World, feet: Cell, target: Cell, turn: bool) -> Option<Cell> {
+    let (dx, dz, rise) = stair_line(w, feet, target, turn)?;
+    let (x, y, z) = feet;
+    (0..rise)
+        .map(|k| (x + (k + 1) * dx, y + k, z + (k + 1) * dz))
+        .find(|c| kind(w, *c).is_some() && !full(kind(w, *c)))
+}
+
+/// `dig_out_plan` along the other axis when `turn`.
+pub fn dig_out_plan_turned(
+    w: &World,
+    feet: Cell,
+    target: Cell,
+    turn: bool,
+) -> Option<(Option<Cell>, Cell)> {
+    let (dx, dz, rise) = stair_line(w, feet, target, turn)?;
+    let (x, y, z) = feet;
     let top = if rise > 0 {
         (x + rise * dx, y + rise, z + rise * dz)
     } else {
@@ -1390,6 +1433,8 @@ pub const DIG_OUT_OFF: u64 = 1200;
 
 /// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
 pub const DIG_OUT_STEPS: i32 = 3;
+/// Failed walks in a row up a dig-out's stair before the way out turns.
+pub const STAIR_WALK_TRIES: u32 = 3;
 
 /// A 2 by 2 square of end stone ground beside the feet, one under the feet's level, walled below
 /// and round by full blocks: the pool's cells, the near corner first and the far diagonal last.
@@ -1926,6 +1971,27 @@ impl Plan {
                     self.expanded += walk.expanded;
                     if let Some((x, z, a)) = approach {
                         self.spikes_refuse([x, z], a, tick);
+                    } else {
+                        // A walk with no approach to refuse (the dig-out's stair): after
+                        // `STAIR_WALK_TRIES` failed in a row, a new way, not the same retried
+                        // (frontier race 45988967677 lane 1: 2,700 ticks of the same walk).
+                        let n = match self.spikes.stair_walk_fails {
+                            Some((t, n)) if t == to => n + 1,
+                            _ => 1,
+                        };
+                        self.spikes.stair_walk_fails = Some((to, n));
+                        if n >= STAIR_WALK_TRIES {
+                            self.spikes.stair_walk_fails = None;
+                            self.spikes.dig_out_turn = !self.spikes.dig_out_turn;
+                            self.note(
+                                tick,
+                                format!("spikes: the way out turned at {feet:?}"),
+                                format!(
+                                    "{n} walks to {to:?} failed; the stair along the other axis now ({})",
+                                    if self.spikes.dig_out_turn { "turned" } else { "straight" }
+                                ),
+                            );
+                        }
                     }
                     self.spikes_note(
                         tick,
@@ -1933,6 +1999,12 @@ impl Plan {
                         format!("from {feet:?}; approach {approach:?} refused"),
                     );
                     return Some(self.spikes_hold(tick));
+                }
+                // A route found: the failed walks' count over; out to a foot, the way out
+                // straight again.
+                self.spikes.stair_walk_fails = None;
+                if approach.is_some() {
+                    self.spikes.dig_out_turn = false;
                 }
                 self.spikes_note(
                     tick,
