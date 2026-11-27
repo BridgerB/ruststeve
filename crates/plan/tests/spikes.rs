@@ -1477,3 +1477,75 @@ fn landing_water_left_by_a_refused_approach_is_taken_back() {
     );
     assert!(p.spikes.landings.is_empty());
 }
+
+fn fireball(w: &mut World, pos: [f64; 3]) {
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 70,
+        uuid: [4; 16],
+        kind: EntityKind::DragonFireball.id(),
+        x: pos[0],
+        y: pos[1],
+        z: pos[2],
+        velocity: [0.0; 3],
+    }));
+}
+
+#[test]
+fn a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down() {
+    // E5's jar read: a fireball's cloud goes on the first living entity within 4 of its impact,
+    // walls or not; up high there is no room to dodge.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    fireball(&mut w, [8.5, 80.0, 35.5]);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p).iter().any(|n| n == "spikes: no climb"),
+        "{:?}",
+        notes(&p)
+    );
+    // Half way up when one comes: down at once.
+    let mut w = world(2, [8.5, 67.0, 5.5]);
+    water(&mut w);
+    pillar(&mut w, (8, 5), 64, 66, BlockKind::EndStone);
+    fireball(&mut w, [8.5, 80.0, 35.5]);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 66, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: down from a fireball at (8, 67, 5)")
+    );
+}
+
+#[test]
+fn the_landing_water_is_poured_from_a_bucket_other_than_the_clutchs() {
+    // Race 45942992471 lane 1: the landing pour took the clutch's bucket from the hotbar.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(12, (ItemKind::WaterBucket, 1));
+    assert_eq!(
+        spikes::pour_hold(&w),
+        plan::hold::Hold::Act(Act::Click {
+            slot: 12,
+            button: 0,
+            mode: 2
+        }),
+        "the main slot's bucket into the hotbar, not over the clutch's"
+    );
+    w.inventory.slots.remove(&12);
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    assert_eq!(
+        spikes::pour_hold(&w),
+        plan::hold::Hold::Act(Act::Hold { slot: 1 }),
+        "the other hotbar bucket"
+    );
+}

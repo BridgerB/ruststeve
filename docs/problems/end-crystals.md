@@ -358,3 +358,11 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The refills, by the server's word** (the orchestrator): a refill aims only at a pool cell the server shows as a source (its block state's water level 0, `source`), never one predicted to be.
   - A cell a refill got nothing from waits until the server shows it in another state before it is tried again.
   - A give-up notes the cell's last seen fluid state.
+
+### Fireballs up high (E5's jar read, DragonFireball.onHit: the cloud goes on the first living entity within 4 of the impact, walls or not)
+- **No climb begins** with a dragon fireball in flight within 64 ("no climb": "a fireball in flight").
+- **Up a pillar when one comes:** the climb stops ("climb stopped by a fireball"), and the bot goes down at once ("down from a fireball"). It drops into the landing water when that is poured and the feet are at the top, else digs.
+- Unit test `a_fireball_in_flight_keeps_the_bot_off_its_pillar_and_takes_it_down`.
+- **The landing water from another bucket:**
+  - The landing pour uses a water bucket other than the clutch's (the hotbar's highest water slot): another hotbar one, else one from the main slots swapped into a hotbar slot that is not the clutch's (`pour_hold`).
+  - So the clutch's stays in the hotbar, with no "no climb: no water" pass after the pour (race 45942992471 lane 1 lost 40 ticks to it).
