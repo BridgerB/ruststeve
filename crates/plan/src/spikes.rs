@@ -835,15 +835,22 @@ pub fn climb_refusal(d: Option<&DragonNear>, health: Option<f32>, danger: f32) -
     }
 }
 
-/// Blocks under the stand within which a climb goes on through a refusal: the dragon holding
-/// and not closing (the orchestrator's one exception, after E5's read of race 46063334187 lane
-/// 5: "climb on through" with the dragon 63 off, struck off at (42, 91, 19)).
+/// Blocks under the stand within which a climb finishes through a refusal (the orchestrator's
+/// one exception, after race 46075095202: "climb stopped at (34, 70, -29) (the dragon 46 off in
+/// phase 0 …; 1 under the goal 71)", 0 strikes in 6 lanes).
 pub const STAND_NEAR: i32 = 5;
+/// The phases that deny the finish within `KNOCK_NEAR`: the landing, the sitting phases, the
+/// charge.
+pub const FINISH_DENIED: [i32; 5] = [3, 5, 6, 7, 8];
 
 /// The one exception to "a refusal mid-climb stops it": within `STAND_NEAR` of the stand, the
-/// dragon holding (phase 0) and not closing.
-pub fn climb_on_near_stand(d: Option<&DragonNear>, closing: bool, under: i32) -> bool {
-    under <= STAND_NEAR && !closing && d.is_none_or(|d| d.phase == Some(HOLDING_PHASE))
+/// climb finishes in any phase but a landing, sitting or charge within `KNOCK_NEAR` (the
+/// take-off's knock is held by `knock_risk` first).
+pub fn climb_on_near_stand(d: Option<&DragonNear>, under: i32) -> bool {
+    under <= STAND_NEAR
+        && !d.is_some_and(|d| {
+            d.dist <= KNOCK_NEAR && d.phase.is_some_and(|p| FINISH_DENIED.contains(&p))
+        })
 }
 
 /// The dragon's holding pattern (`EnderDragonPhase` 0), the one phase a climb begins in.
@@ -2134,6 +2141,7 @@ impl Plan {
         // (E9's read of race 46038776204), a strike due at the stand first.
         if body.on_ground
             && descend_from(d.as_ref())
+            && !matches!(n, Next::Pillar { top, .. } if climb_on_near_stand(d.as_ref(), top - feet.1))
             && !matches!(
                 n,
                 Next::Strike(_) | Next::Bar(_) | Next::Build(_, Role::Wall)
@@ -2642,7 +2650,7 @@ impl Plan {
                     // Up already: no climb on through (E5's read of race 46063334187 lane 5,
                     // struck off 3 under its stand with the dragon 63 off): down by water, or
                     // held, never on, but near the stand with the dragon holding and not closing.
-                    if climb_on_near_stand(d.as_ref(), closing, top - feet.1) {
+                    if climb_on_near_stand(d.as_ref(), top - feet.1) {
                         self.spikes_note(
                             tick,
                             "spikes: climb on, the stand near".to_owned(),
@@ -4192,7 +4200,7 @@ impl Plan {
         // No wait on a half-built pillar (the orchestrator, after wall 2: lane 1 of race
         // 45871173293 held at y 85 and was struck off): the rules are read at the foot, and
         // the climb goes on to the box, noted when they would have held it.
-        if descend_from(d.as_ref()) {
+        if descend_from(d.as_ref()) && !climb_on_near_stand(d.as_ref(), c.goal - feet.1) {
             self.note(
                 tick,
                 format!("spikes: climb stopped by the perch at {feet:?}"),
@@ -4207,13 +4215,7 @@ impl Plan {
         if let Some(why) = refusal.or_else(|| {
             threatens(d.as_ref()).then(|| "the dragon strafes or charges near".to_owned())
         }) {
-            let closing = match (d, self.spikes.dragon_seen) {
-                (Some(now), Some((at, then))) => {
-                    tick.saturating_sub(at) <= CLOSING_TICKS && now.dist < then - CLOSING_BY
-                }
-                (Some(_) | None, _) => false,
-            };
-            if !climb_on_near_stand(d.as_ref(), closing, c.goal - feet.1) {
+            if !climb_on_near_stand(d.as_ref(), c.goal - feet.1) {
                 self.note(
                     tick,
                     format!("spikes: climb stopped at {feet:?}"),

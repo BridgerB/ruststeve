@@ -635,3 +635,9 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - It stops on any other phase (landing, sitting, strafe, charge), on coming within 40, or on a fireball. The bot comes down by water (walls 38 and 43, the near-stand exception kept).
   - A stopped climb resumes on its own stub: `chosen_approach` takes a stub's approach after a poured landing's column and before the nearest.
   - Unit tests `a_climb_goes_on_through_the_holding_pattern_40_off_or_more` and `a_stopped_climb_resumes_on_its_own_stub`, with the earlier climb-rule tests moved to 40.
+
+### Wall 47: a climb 1 under its stand stopped (race 46075095202; fixed)
+- **What happened:**
+  - Climb stops on 4 of 5, 5 of 5, 4 of 4 and 5 of 6 climbs, 0 strikes.
+  - One stopped 1 under the top: "climb stopped at (34, 70, -29) (the dragon 46 off in phase Some(0) …; 1 under the goal 71)".
+- **The fix:** within `STAND_NEAR` (5) of the stand the climb finishes in any phase but a landing, sitting or charge within `KNOCK_NEAR` (`FINISH_DENIED`, `climb_on_near_stand`). The perch-descent rule and the climb's own perch stop honour it too. The knock rule (a landing, take-off or charge within 30) still holds first. Unit tests `the_one_exception_near_the_stand_finishes_but_for_a_perch_or_charge_near` and `a_climb_one_under_its_stand_finishes`; the stop tests use a tall spike (`tall`) to stay more than 5 under.

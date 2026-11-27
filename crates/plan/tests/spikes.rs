@@ -2237,6 +2237,7 @@ fn the_dragon_perching_while_the_bot_is_up_takes_it_down_by_water() {
         water(&mut w);
         dragon(&mut w, [8.5, 67.0, 50.5], phase);
         let mut p = Plan::new(Aim::Race);
+        tall(&mut p);
         p.spikes.pillars.push(PillarRec {
             x: 8,
             z: 5,
@@ -2509,6 +2510,7 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
     water(&mut w);
     dragon(&mut w, [8.5, 67.0, 40.5], 0);
     let mut p = Plan::new(Aim::Race);
+    tall(&mut p);
     p.spikes.dragon_seen = Some((95, 70.0));
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -2529,6 +2531,7 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
     // or not.
     dragon(&mut w, [8.5, 67.0, 75.5], 1);
     let mut p = Plan::new(Aim::Race);
+    tall(&mut p);
     p.spikes.pillars.push(PillarRec {
         x: 8,
         z: 5,
@@ -2546,6 +2549,7 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
     dragon(&mut w, [8.5, 67.0, 40.5], 0);
     w.inventory.slots.remove(&44);
     let mut p = Plan::new(Aim::Race);
+    tall(&mut p);
     p.spikes.dragon_seen = Some((95, 70.0));
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -2561,30 +2565,39 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
 }
 
 #[test]
-fn the_one_exception_near_the_stand_holding_and_not_closing() {
-    let holding = |dist: f64, phase: i32| spikes::DragonNear {
+fn the_one_exception_near_the_stand_finishes_but_for_a_perch_or_charge_near() {
+    // Race 46075095202: "climb stopped at (34, 70, -29) (the dragon 46 off in phase 0 …; 1 under
+    // the goal 71)". Within STAND_NEAR the climb finishes in any phase but a landing, sitting or
+    // charge within 30.
+    let near = |dist: f64, phase: i32| spikes::DragonNear {
         id: DRAGON,
         dist,
         phase: Some(phase),
     };
-    assert!(spikes::climb_on_near_stand(
-        Some(&holding(50.0, 0)),
-        false,
-        3
-    ));
-    assert!(spikes::climb_on_near_stand(None, false, 5));
+    assert!(spikes::climb_on_near_stand(Some(&near(46.0, 0)), 1));
+    assert!(spikes::climb_on_near_stand(None, 5));
     assert!(
-        !spikes::climb_on_near_stand(Some(&holding(50.0, 0)), false, 6),
+        spikes::climb_on_near_stand(Some(&near(20.0, 0)), 3),
+        "holding near"
+    );
+    assert!(
+        spikes::climb_on_near_stand(Some(&near(20.0, 1)), 3),
+        "a strafe"
+    );
+    assert!(
+        spikes::climb_on_near_stand(Some(&near(45.0, 6)), 3),
+        "sitting far"
+    );
+    assert!(
+        !spikes::climb_on_near_stand(Some(&near(46.0, 0)), 6),
         "too far under"
     );
-    assert!(
-        !spikes::climb_on_near_stand(Some(&holding(50.0, 0)), true, 3),
-        "closing"
-    );
-    assert!(
-        !spikes::climb_on_near_stand(Some(&holding(50.0, 1)), false, 3),
-        "strafing"
-    );
+    for p in [3, 5, 6, 7, 8] {
+        assert!(
+            !spikes::climb_on_near_stand(Some(&near(25.0, p)), 3),
+            "phase {p} within 30"
+        );
+    }
 }
 
 #[test]
@@ -2795,4 +2808,40 @@ fn a_stopped_climb_resumes_on_its_own_stub() {
         } => assert_eq!(a, far, "the stub's axis, not the nearest"),
         n => panic!("{n:?}"),
     }
+}
+
+/// The test spike's geography made tall (its top at 80), so a bot on a pillar beside it is more
+/// than `STAND_NEAR` under its stand.
+fn tall(p: &mut Plan) {
+    p.spikes.geography = vec![Spike {
+        centre: [8, 8],
+        radius: 2,
+        top_y: 80,
+        caged: false,
+    }];
+}
+
+#[test]
+fn a_climb_one_under_its_stand_finishes() {
+    // Race 46075095202: stopped 1 under the goal with the dragon holding 46 off.
+    let mut w = world(2, [8.5, 69.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 68, BlockKind::EndStone);
+    water(&mut w);
+    dragon(&mut w, [8.5, 69.0, 40.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.landings.push(((8, 5), (9, 64, 5)));
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: climb on, the stand near"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(matches!(p.spikes.doing, Some(spikes::Doing::Climb(_))));
 }
