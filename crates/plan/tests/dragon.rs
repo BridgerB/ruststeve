@@ -1999,3 +1999,34 @@ fn a_strike_stand_has_ground_behind_and_a_breath_walk_goes_off_the_fountain_at_a
         "{c:?}"
     );
 }
+
+#[test]
+fn with_no_way_out_on_foot_a_fireball_is_answered_by_rising_out() {
+    // Frontier race 45969992660 lane 2: in the bunker's shaft, its stair shut, "no dodge cell".
+    let feet = [12.5, 61.0, 0.5];
+    let mut w = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    for y in [61, 62, 63] {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
+    w.held = 0;
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    let c = p.charge_step(&w, 0).expect("rising");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "fireball: no dodge cell from [12, 61, 0]"),
+        "{:?}",
+        p.events_since(0)
+    );
+    assert!(c.jump, "a jump from the pit's floor: {c:?}");
+}

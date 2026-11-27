@@ -661,6 +661,8 @@ pub const DODGE_NODES: u32 = 800;
 pub const DODGE_STEPS: usize = 16;
 /// Heights off the feet a dodge cell is looked for at, nearest first: up to 4 (from the bunker's
 /// stair, 3 under the ground: frontier race 45964846590, "no dodge cell from [13, 59, 0]").
+/// Blocks a bot with no dodge cell rises out of a pit or a shaft at most.
+pub const DODGE_RISES: i32 = 6;
 pub const DODGE_YS: [i32; 8] = [0, 1, -1, 2, -2, 3, 4, -3];
 /// Blocks a tick a fireball flies, for the note's ticks to its hit (dev race 45940964839: about
 /// 40 ticks over 30 to 40 blocks).
@@ -3316,7 +3318,7 @@ impl Plan {
                     tick,
                     format!("fireball: no dodge cell from {from:?}"),
                     format!(
-                        "flight {:.2},{:.2}; ticks {eta:.0}; stood in the open",
+                        "flight {:.2},{:.2}; ticks {eta:.0}; risen a block at a jump",
                         dir[0], dir[1]
                     ),
                 ),
@@ -3327,6 +3329,14 @@ impl Plan {
             ..Controls::default()
         };
         let Some(c) = self.dragon.dodge_to else {
+            // No way out on foot under the open sky (a pit, the bunker's shaft with its stair shut:
+            // frontier race 45969992660 lane 2): up a block at a jump, at most `DODGE_RISES`.
+            if let Some(from) = self.dragon.dodge_from
+                && cell_of(feet)[1] < from[1] + DODGE_RISES
+                && w.body.is_some()
+            {
+                return Some(self.rise_step(w, tick, body));
+            }
             return Some(stand);
         };
         let cell: Cell = (c[0], c[1], c[2]);
