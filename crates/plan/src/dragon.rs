@@ -2165,7 +2165,17 @@ impl Plan {
             // in and out of the cloud from tick to tick (race 45918669138 lane 2: "into the
             // bunker" and "out of the breath" 40 times each, the stair climbed back into the cloud
             // between, 20 to dead).
+            // Not through the strike window: with the dragon scanning or attacking on its perch the
+            // fight goes (race 45924968115 lane 2: held in the bunker 7,320 ticks by the clouds the
+            // dragon kept sending, the dragon at 200).
+            let window = view(w).is_some_and(|(_, v)| {
+                matches!(
+                    v.phase(),
+                    Some(Phase::SittingScanning | Phase::SittingAttacking)
+                )
+            });
             if let Some(b) = self.bunker
+                && !window
                 && breathed(&clouds, feet, BUNKER_HOLD)
             {
                 // With nothing in hand the End's own rows keep the bunker shut (E3's "stays
