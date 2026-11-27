@@ -1050,3 +1050,42 @@ fn the_paused_stock_resumes_only_with_the_dragon_holding_far_off() {
     assert!(noted(&p, "end: stock resumed in a lull"), "{:?}", notes(&p));
     assert!(noted(&p, "end: stock run 1"), "{:?}", notes(&p));
 }
+
+#[test]
+fn the_first_stock_run_waits_for_a_lull_and_a_fireball_pauses_it() {
+    let at = |d: Option<([f64; 3], i32)>| {
+        let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+        set(&mut w, (12, 61, 0), BlockKind::Air);
+        set(&mut w, (12, 62, 0), BlockKind::Air);
+        if let Some((pos, phase)) = d {
+            dragon_at(&mut w, pos, phase);
+        }
+        w
+    };
+    let racer_in = || {
+        let mut p = racer();
+        p.end.bridged = true;
+        p.bunker = Some([12, 61, 0]);
+        p.end.door = Some((1, 0));
+        p
+    };
+    // The dragon holding 40 off: the first run waits.
+    let mut p = racer_in();
+    let _ = p.end_task(&at(Some(([50.0, 70.0, 0.0], 0))), 0);
+    assert!(noted(&p, "end: stock waits for a lull"), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+    // Holding 100 off: it begins.
+    let _ = p.end_task(&at(Some(([110.0, 70.0, 0.0], 0))), 0);
+    assert!(noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+    // A fireball in flight 20 off (no strafe phase sent): the stock pauses.
+    let mut w = at(None);
+    with_entity(&mut w, 8, EntityKind::DragonFireball, [30.0, 70.0, 0.0]);
+    let mut p = racer_in();
+    let _ = p.end_task(&w, 0);
+    assert!(
+        noted(&p, "end: stock paused for a strafe"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+}
