@@ -2834,6 +2834,16 @@ impl Plan {
             .is_none()
             .then(|| strafing_at(w, body.pos).or(fireball))
             .flatten();
+        // Landing or taking off with the bot by its body: out of the knock (wall 36), ahead of the
+        // rest (no charge, no strafe then).
+        if charge.is_none()
+            && strafe.is_none()
+            && knock_risk(w, body.pos).is_some()
+            && world::stage::open_sky(w)
+            && !self.spikes_up_high(w)
+        {
+            return self.fireball_dodge_step(w, tick);
+        }
         let Some(d) = charge.or(strafe) else {
             self.dragon.dodge_id = None;
             self.dragon.dodge_walk = None;
