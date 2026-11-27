@@ -397,3 +397,8 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix:** within 8 on open ground with no bunker, the bot fights it with the sword over the danger line ("struck with the sword over the danger line", or "met in the open" out of reach, the look on its body at 25 degrees down, `keep_look` keeping it off the eyes).
   - Under the line, it walks away to open ground ("walked away to open ground").
   - No enderman notch is begun.
+- **Dev race 46050674145 (9a7b543, dev-end-far-crystals), read at tick 4,700:** the perch fight with no heal in reach works.
+  - Lane 0 struck the dragon to 43 over two perches with (42, 0) and (-42, -1) standing. Its "dragon healed 21.0" came in flight near a far crystal (27 off).
+  - Lane 1 struck both far crystals and had the dragon at 61.
+  - **Wall 43:** lane 1's "charge: no dodge from" walked it from 64 down to 62 into E3's surface pits, by the short-drop rule.
+  - **Fix:** the drop only off a raised spot (two or more sides open under the feet's level); the rise and the wall dig only in a pit (walled on three or more sides at the feet); never a rise on open ground.

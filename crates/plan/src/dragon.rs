@@ -4491,20 +4491,30 @@ impl Plan {
             }
             return None;
         }
-        // A short drop beside (a step, a low pillar): off it.
-        let mut cells = crate::path::Cells::new(w);
-        if let Some(c) = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        // A short drop beside, only off a raised spot (a step, a low pillar: two or more sides
+        // open under the feet's level), never down into a pit (dev race 46050674145 lane 1: stepped
+        // down E3's surface pits from 64 to 62, each a cell with no dodge).
+        let below_open = [(1, 0), (-1, 0), (0, 1), (0, -1)]
             .iter()
-            .find_map(|(dx, dz)| {
-                (1..=3).find_map(|dy| {
-                    let c = (fc[0] + dx, fc[1] - dy, fc[2] + dz);
-                    (cells.clear((c.0, fc[1], c.2))
-                        && cells.clear((c.0, fc[1] + 1, c.2))
-                        && cells.standable(c))
-                    .then_some([c.0, c.1, c.2])
-                })
+            .filter(|(dx, dz)| {
+                w.block_at(world::BlockPos::new(fc[0] + dx, fc[1] - 1, fc[2] + dz))
+                    == Some(BlockKind::Air)
             })
-        {
+            .count();
+        let mut cells = crate::path::Cells::new(w);
+        if let Some(c) = (below_open >= 2).then_some(()).and_then(|()| {
+            [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .find_map(|(dx, dz)| {
+                    (1..=3).find_map(|dy| {
+                        let c = (fc[0] + dx, fc[1] - dy, fc[2] + dz);
+                        (cells.clear((c.0, fc[1], c.2))
+                            && cells.clear((c.0, fc[1] + 1, c.2))
+                            && cells.standable(c))
+                        .then_some([c.0, c.1, c.2])
+                    })
+                })
+        }) {
             return Some(toward(feet, mid(c)));
         }
         if !world::stage::open_sky(w) {
@@ -4521,7 +4531,15 @@ impl Plan {
         {
             return self.charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]]);
         }
-        // A pit: up a block at a jump, or the wall toward the open dug for a block.
+        // A pit (walled on three or more sides at the feet): up a block at a jump, or the wall
+        // toward the open dug for a block. Never a rise on open ground.
+        let walls = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .filter(|(dx, dz)| !air([fc[0] + dx, fc[1], fc[2] + dz]))
+            .count();
+        if walls < 3 {
+            return None;
+        }
         if crate::spikes::pillar_item(w).is_none() {
             let side = [feet[0] + 6.0, feet[1], feet[2]];
             let n = wall_toward(w, feet, cell_of(side))?;
