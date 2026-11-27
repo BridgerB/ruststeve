@@ -2278,6 +2278,8 @@ fn while_the_dragon_scans_the_bot_paces_wider_than_its_wings_sweep() {
     let feet = [12.5, 64.0, 0.5];
     let mut w = end_at(feet);
     with_dragon(&mut w, [0.5, PERCH_Y, 0.5], 6, 270.0);
+    // Crystals standing, one in heal reach (the perch not fought): paced while it scans.
+    add(&mut w, 80, EntityKind::EndCrystal, [12.5, 77.0, 39.5]);
     let mut p = Plan::new(Aim::Race);
     p.bunker = Some([60, FLOOR - 4, 60]);
     assert!(p.charge_step(&w, 0).is_some(), "paced");
@@ -2293,4 +2295,10 @@ fn while_the_dragon_scans_the_bot_paces_wider_than_its_wings_sweep() {
     q.bunker = Some([60, FLOOR - 4, 60]);
     q.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
     assert_eq!(q.charge_step(&w, 0), None);
+    // No crystal standing: the fight is the next choice, never held off by a pace.
+    let mut none = end_at(feet);
+    with_dragon(&mut none, [0.5, PERCH_Y, 0.5], 6, 270.0);
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([60, FLOOR - 4, 60]);
+    assert_eq!(r.charge_step(&none, 0), None);
 }

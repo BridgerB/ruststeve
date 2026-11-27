@@ -4419,9 +4419,13 @@ impl Plan {
             // cannot follow (wall 41: walking 12 takes about 55 ticks, the charge about 20).
             // Only with nothing in hand (wall 37's rule; the end loop: the scan's pace took E3's
             // walks back to the bunker site, every one NoPath).
+            // And only while crystals stand and the perch is not fought: else the idle bot's
+            // next choice is the fight itself, which the pace would hold off.
             if v.phase() == Some(Phase::SittingScanning)
                 && matches!(self.task, Task::Idle)
                 && from_fountain(feet) <= SCAN_PACE_NEAR
+                && crate::end::crystals_alive(w) > 0
+                && fight_with_crystals(w).is_none()
             {
                 let stand = Controls {
                     yaw: f64::from(w.player.yaw),
