@@ -1089,3 +1089,38 @@ fn the_first_stock_run_waits_for_a_lull_and_a_fireball_pauses_it() {
     );
     assert!(!noted(&p, "end: stock run 1"), "{:?}", notes(&p));
 }
+
+#[test]
+fn the_crystals_handing_back_for_blocks_starts_the_stock_again_in_a_lull() {
+    // Frontier race 45959448248 lane 3: paused for a strafe at 3,840, about 0 end stone to the cap.
+    let at = |d: ([f64; 3], i32)| {
+        let mut w = world(4, 0..=7, [12.5, 61.0, 0.5]);
+        set(&mut w, (12, 61, 0), BlockKind::Air);
+        set(&mut w, (12, 62, 0), BlockKind::Air);
+        with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+        dragon_at(&mut w, d.0, d.1);
+        w
+    };
+    for (over, paused) in [(true, false), (false, true)] {
+        let mut p = racer();
+        p.end.bridged = true;
+        p.bunker = Some([12, 61, 0]);
+        p.end.door = Some((1, 0));
+        p.end.stock_over = over;
+        p.end.strafe_paused = paused;
+        p.end.stock_runs = 13;
+        p.end.handed_back = true;
+        // A strafe 30 off: not yet.
+        let _ = p.end_task(&at(([40.0, 70.0, 0.0], 1)), 0);
+        assert!(!noted(&p, "end: stock again"), "{:?}", notes(&p));
+        // The dragon holding 100 off: the stock again.
+        let _ = p.end_task(&at(([110.0, 70.0, 0.0], 0)), 0);
+        assert!(
+            noted(&p, "end: stock again: the crystals handed back for blocks"),
+            "over {over} paused {paused}: {:?}",
+            notes(&p)
+        );
+        assert!(!p.end.stock_over && !p.end.strafe_paused);
+        assert!(noted(&p, "end: stock run 1"), "{:?}", notes(&p));
+    }
+}
