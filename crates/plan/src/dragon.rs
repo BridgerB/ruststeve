@@ -657,6 +657,18 @@ pub const EDGE_CLEAR: i32 = 3;
 pub const EDGE_DEPTH: i32 = 6;
 /// Blocks over a dodge cell's feet that must be air: the open sky, never under a roof.
 pub const SKY_CLEAR: i32 = 6;
+/// Blocks on the plane from the fountain's axis a dodge or pace cell keeps (its bedrock is 3 or
+/// so across, the portal round it).
+pub const FOUNTAIN_CLEAR: f64 = 5.0;
+
+/// Controls that walk straight from `feet` toward `to` on the plane.
+pub fn toward(feet: [f64; 3], to: [f64; 3]) -> Controls {
+    Controls {
+        forward: true,
+        yaw: (-(to[0] - feet[0])).atan2(to[2] - feet[2]).to_degrees(),
+        ..Controls::default()
+    }
+}
 
 /// The dragon's clouds alone (`breaths` less the fireballs in flight).
 pub fn clouds_only(w: &World) -> Vec<Breath> {
@@ -687,11 +699,18 @@ pub fn dodge_cell(
     dir: [f64; 2],
     dragon: Option<[f64; 3]>,
     banned: &[(i32, i32)],
+    prefer: Option<f64>,
 ) -> Option<[i32; 3]> {
     let perp = [-dir[1], dir[0]];
     let (cx, cz) = (f64::from(from[0]) + 0.5, f64::from(from[2]) + 0.5);
     let away = dragon.is_some_and(|d| (d[0] - cx) * perp[0] + (d[2] - cz) * perp[1] > 0.0);
-    let sides = if away { [-1.0, 1.0] } else { [1.0, -1.0] };
+    // The side the bot already walks first (never a turn back), else away from the dragon.
+    let sides = match prefer {
+        Some(p) if p < 0.0 => [-1.0, 1.0],
+        Some(_) => [1.0, -1.0],
+        None if away => [-1.0, 1.0],
+        None => [1.0, -1.0],
+    };
     let clouds = clouds_only(w);
     let mut cells = crate::path::Cells::new(w);
     let ground = |x: i32, y: i32, z: i32| {
@@ -717,7 +736,11 @@ pub fn dodge_cell(
                     .filter(|(sx, sz)| air([x + sx, c[1], z + sz]))
                     .count();
                 let sky = (2..=SKY_CLEAR).all(|up| air([x, c[1] + up, z]));
+                // Never by the fountain (its bedrock and the portal; frontier race 45947478869
+                // lane 0's dodge cell was on its rim).
+                let fountain = (f64::from(x) + 0.5).hypot(f64::from(z) + 0.5) < FOUNTAIN_CLEAR;
                 (!banned.contains(&(x, z))
+                    && !fountain
                     && open_sides >= 2
                     && sky
                     && cells.standable((c[0], c[1], c[2]))
@@ -1769,6 +1792,18 @@ pub struct DragonState {
     pub unseen_noted: bool,
     #[serde(default)]
     pub unseen_rise_from: Option<i32>,
+    /// In a strafe: the pace leg's end and its walk, the side it went, the legs in the run; and
+    /// the dodge pressed straight on after its walk failed.
+    #[serde(default)]
+    pub pace_to: Option<[i32; 3]>,
+    #[serde(default)]
+    pub pace_walk: Option<Walk>,
+    #[serde(default)]
+    pub pace_side: f64,
+    #[serde(default)]
+    pub pace_legs: u32,
+    #[serde(default)]
+    pub dodge_straight: bool,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2644,6 +2679,8 @@ impl Plan {
             self.dragon.unseen_since = None;
             self.dragon.unseen_noted = false;
             self.dragon.unseen_rise_from = None;
+            self.dragon.pace_to = None;
+            self.dragon.pace_walk = None;
             if self.dragon.charging {
                 // Stayed in until no cloud lies within reach.
                 if breathed(&breaths(w), body.pos, 0.0) {
@@ -2958,14 +2995,16 @@ impl Plan {
             }
             return Some(Some(self.rise_step(w, tick, body)));
         }
-        // Stood where the feet are, in sight: no notch, no cover (wall 28: a fireball's cloud is
-        // put on a body within 4 of its hit, walls or not; dev race 45940964839).
+        // In sight and on the move: a leg of `DODGE_MIN` to `DODGE_MAX` sideways to the dragon's
+        // bearing, then back (a fireball aims where the bot is when it fires, with no lead; 20
+        // ticks on, a walking bot is 4 off: frontier race 45947478869, three bots stood or turned
+        // and the cloud was put on them). No notch, no cover (wall 28).
         let stand = Controls {
             sneak: true,
             yaw: f64::from(w.player.yaw),
             ..Controls::default()
         };
-        Some(Some(self.strafe_stood(tick, fc, stand)))
+        Some(Some(self.pace_step(w, tick, body, stand)))
     }
 
     /// One tick of the answer to a dragon fireball in flight aimed near the bot: a walk on open
@@ -3007,10 +3046,19 @@ impl Plan {
             }
             self.dragon.dodge_id = Some(id);
             self.dragon.dodge_walk = None;
+            self.dragon.dodge_straight = false;
             let from = cell_of(feet);
             self.dragon.dodge_from = Some(from);
             let banned = self.bunker_columns();
-            let to = dodge_cell(w, from, dir, view(w).map(|(_, v)| v.pos), &banned);
+            // On the way the bot already walks (a pace leg): the side its leg goes.
+            let perp = [-dir[1], dir[0]];
+            let prefer = self.dragon.pace_to.map(|c| {
+                (f64::from(c[0]) + 0.5 - feet[0]) * perp[0]
+                    + (f64::from(c[2]) + 0.5 - feet[2]) * perp[1]
+            });
+            self.dragon.pace_to = None;
+            self.dragon.pace_walk = None;
+            let to = dodge_cell(w, from, dir, view(w).map(|(_, v)| v.pos), &banned, prefer);
             self.dragon.dodge_to = to;
             let eta = (along / FIREBALL_SPEED).ceil();
             match to {
@@ -3047,6 +3095,9 @@ impl Plan {
             self.dragon.dodge_walk = None;
             return Some(stand);
         }
+        if self.dragon.dodge_straight {
+            return Some(toward(feet, mid(c)));
+        }
         if self
             .dragon
             .dodge_walk
@@ -3074,14 +3125,16 @@ impl Plan {
                 Some(stand)
             }
             TaskStatus::Failed(e) => {
+                // Pressed straight on toward it, never stood (frontier race 45947478869 lane 1:
+                // NoPath at once, stood, the cloud on the bot).
                 self.dragon.dodge_walk = None;
-                self.dragon.dodge_to = None;
+                self.dragon.dodge_straight = true;
                 self.note(
                     tick,
                     format!("fireball: the dodge to {c:?} failed: {e:?}"),
-                    "stood in the open".to_owned(),
+                    "pressed straight on toward it".to_owned(),
                 );
-                Some(stand)
+                Some(toward(feet, mid(c)))
             }
         }
     }
@@ -3098,6 +3151,98 @@ impl Plan {
             cols.extend(cells.iter().map(|c| (c.0, c.2)));
         }
         cols
+    }
+
+    /// One tick of the pace in a strafe: the leg in hand walked, a new one at its end (the other
+    /// side), stood where the feet are when none is to be had.
+    fn pace_step(
+        &mut self,
+        w: &World,
+        tick: u64,
+        body: physics::Body,
+        stand: Controls,
+    ) -> Controls {
+        let feet = body.pos;
+        let fc = cell_of(feet);
+        let done = self
+            .dragon
+            .pace_to
+            .is_none_or(|c| fc == c || flat(feet, mid(c)) < 1.0);
+        if done {
+            self.dragon.pace_walk = None;
+            let Some((_, v)) = view(w) else {
+                return self.strafe_stood(tick, fc, stand);
+            };
+            let (bx, bz) = (feet[0] - v.pos[0], feet[2] - v.pos[2]);
+            let len = bx.hypot(bz);
+            if len < 1e-6 || !body.on_ground {
+                return self.strafe_stood(tick, fc, stand);
+            }
+            self.dragon.pace_side = if self.dragon.pace_side > 0.0 {
+                -1.0
+            } else {
+                1.0
+            };
+            let banned = self.bunker_columns();
+            let Some(to) = dodge_cell(
+                w,
+                fc,
+                [bx / len, bz / len],
+                Some(v.pos),
+                &banned,
+                Some(self.dragon.pace_side),
+            ) else {
+                self.dragon.pace_to = None;
+                return self.strafe_stood(tick, fc, stand);
+            };
+            self.dragon.pace_to = Some(to);
+            self.dragon.pace_legs += 1;
+            if !self.dragon.strafe_seen_noted {
+                self.dragon.strafe_seen_noted = true;
+                self.note(
+                    tick,
+                    format!("strafe: paced in sight from {fc:?} to {to:?}"),
+                    format!(
+                        "sideways to the dragon's bearing; {} legs in the run",
+                        self.dragon.pace_legs
+                    ),
+                );
+            }
+        }
+        let Some(c) = self.dragon.pace_to else {
+            return self.strafe_stood(tick, fc, stand);
+        };
+        let cell: Cell = (c[0], c[1], c[2]);
+        if self
+            .dragon
+            .pace_walk
+            .as_ref()
+            .is_none_or(|wk| wk.target != cell)
+        {
+            self.dragon.pace_walk = Some(Walk::new(
+                cell,
+                Goal::Block { pos: cell },
+                Arrive::Goal,
+                tick,
+            ));
+        }
+        let Some(wk) = self.dragon.pace_walk.as_mut() else {
+            return stand;
+        };
+        let (ctl, status) = wk.step(w, tick);
+        let (acts, said) = wk.take_out();
+        self.acts.extend(acts);
+        for (what, why) in said {
+            self.note(tick, what, why);
+        }
+        match status {
+            TaskStatus::Running => ctl,
+            TaskStatus::Done | TaskStatus::Failed(_) => {
+                self.dragon.pace_walk = None;
+                self.dragon.pace_to = None;
+                stand
+            }
+        }
     }
 
     /// Stood where the feet are in a strafe, in sight, noted once a strafe.
