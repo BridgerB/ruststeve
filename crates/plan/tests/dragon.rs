@@ -1776,3 +1776,47 @@ fn a_fireball_is_dodged_ahead_of_the_walk_out_of_a_cloud_on_the_feet() {
         Some("fireball: dodge to [12, 64, 6]")
     );
 }
+
+#[test]
+fn the_dodge_goes_only_where_a_way_is_found_clear_of_every_cloud() {
+    // Frontier race 45954274931: lanes 2 and 3's dodge walks failed NoPath at once and the cloud
+    // was put on the bots; lane 5's dodge walked across an older cloud.
+    let feet = [12.5, 64.0, 0.5];
+    // A wall two high across the whole +z side at z 3: no way there, the dodge to -z.
+    let mut w = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    for x in -32..32 {
+        for y in [64, 65] {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (x, y, 3),
+                state: state(BlockKind::EndStone),
+            }));
+        }
+    }
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert_eq!(
+        dodged_to(&p).as_deref(),
+        Some("fireball: dodge to [12, 64, -6]")
+    );
+    // A small cloud across the +z way: never the cells in its reach, never a way through it.
+    let mut c = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    cloud(&mut c, 60, [12.5, 64.0, 3.5], 1.0);
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(q.charge_step(&c, 0).is_some());
+    let to = q.dragon.dodge_to.expect("a dodge");
+    let off = dragon::flat(feet_of(to), [12.5, 64.0, 3.5]);
+    assert!(off > 1.0 + dragon::BREATH_MARGIN + 1.0, "{to:?} {off}");
+    assert_ne!(to, [12, 64, 6]);
+}

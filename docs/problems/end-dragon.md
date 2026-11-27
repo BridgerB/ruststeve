@@ -300,3 +300,10 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
 - **Lane 2:** died of breath at about 8,440, the dragon at 145.
 - The first kills on a real server, from a development start (never the issue's evidence: `brain/ruststeve/decisions/development-starts.md`). They ran before wall 31's pacing.
 - **Wall 32 (lane 2's death):** dodging at 8,320, the bot stood on an older cloud's edge. `charge_step` left a cloud on the feet to `breath_step`, whose walk out went the other way, and the next fireball's cloud was put on it at 8,360. **Fix:** the dodge comes ahead of the walk out of a cloud (its cell is clear of every cloud).
+
+### Frontier race 45954274931 (21efdaf, from `island`, 6 lanes): 0/6 crystals, 5 dead of breath, the dragon at 200
+- **Wall 33: the dodge chose cells it could not walk to.** The three deaths read as "holding -> landing-approach" were not the perch. That was only the last phase note before death. The bots were 38, 53 and 15 from the fountain, and in each the fireball's cloud was put on the bot.
+  - **Lane 2:** the dodge to [7, 62, 40] failed `NoPath` at once. Pressed straight on, it went nowhere, then the walk out of the cloud failed `NoPath` too, in E4's pool water.
+  - **Lane 3:** just down from a clutch fall at (46, 58, 0) by a spike. The fireball was seen 5 ticks out, and the dodge failed `NoPath`.
+  - **Lane 5:** repeated clouds wore it from 20 to 3.5. Its dodge to [12, 62, 8] crossed an older cloud's reach.
+  - **Fix:** a dodge (and pace) cell is taken only with a route found from the feet (`path::plan`, `DODGE_NODES` 800), at most `DODGE_STEPS` (16) long, none of its cells in the reach of a cloud not already on the bot. It tries sideways first, then 30 degrees either way off sideways; never along the fireball's line.
