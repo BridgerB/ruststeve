@@ -319,25 +319,30 @@ pub fn fire_near(w: &World, c: Cell, range: f64) -> Option<(EntityKind, [f64; 3]
         .map(|e| (e.kind, e.pos))
 }
 
-/// A strafe or a fireball in flight this near keeps the bunker sealed (the coordinator, wall 14).
+/// Seals that may fail in a row before no more are begun.
+pub const SEAL_TRIES: u32 = 3;
+/// A fireball in flight this near (no longer a reason to seal: wall 15).
 pub const STRAFE_RANGE: f64 = 64.0;
 /// The dragon's strafe phase (`EnderDragonPhase.STRAFE_PLAYER`, 1).
 pub const STRAFE_PHASE: i32 = 1;
 
-/// The dragon strafing within `STRAFE_RANGE` of the bot, or a dragon fireball in flight within it:
-/// its kind and place (frontier race 45931225605 lane 1: the fireball aimed at the bot came into
-/// its open bunker, the cloud 0.0 off it).
+/// A dragon fireball in flight within `STRAFE_RANGE` of the bot: its kind and place (frontier
+/// race 45931225605 lane 1: the fireball aimed at the bot came into its open bunker, the cloud
+/// 0.0 off it). Not the strafe alone: a strafe ends only once the dragon has seen its target
+/// within 64 for 5 ticks and fired (`DragonStrafePlayerPhase`, probe 45938702513), so a bot
+/// sealed for a whole strafe holds it for good.
 pub fn strafe_threat(w: &World) -> Option<(EntityKind, [f64; 3])> {
     let body = w.body?;
     w.entities
         .values()
-        .filter(|e| !e.dead && dist(e.pos, body.pos) <= STRAFE_RANGE)
-        .find(|e| {
-            e.kind == EntityKind::DragonFireball
-                || (e.kind == EntityKind::EnderDragon
-                    && matches!(e.metadata.get(&DRAGON_PHASE_INDEX), Some(MetaValue::Int(p)) if *p == STRAFE_PHASE))
-        })
+        .filter(|e| !e.dead && e.kind == EntityKind::DragonFireball)
+        .find(|e| dist(e.pos, body.pos) <= STRAFE_RANGE)
         .map(|e| (e.kind, e.pos))
+}
+
+/// The dragon is strafing (any distance): a hold for a cloud alone is capped.
+pub fn strafing(w: &World) -> bool {
+    dragon(w).is_some_and(|(_, phase)| phase == Some(STRAFE_PHASE))
 }
 
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
@@ -569,6 +574,12 @@ pub struct EndState {
     pub returning: bool,
     #[serde(default)]
     pub stock_back: u32,
+    /// Seals failed in a row.
+    #[serde(default)]
+    pub seal_fails: u32,
+    /// When the wait for fire by the stair began.
+    #[serde(default)]
+    pub fire_since: Option<u64>,
     /// A wait for a fireball or cloud by the stair in hand, and waits begun.
     #[serde(default)]
     pub fire_waiting: bool,
@@ -818,8 +829,7 @@ impl Plan {
             if !inside {
                 return self.walk_home(w, b, tick, "to heal and eat");
             }
-            if !sealed {
-                self.begin_seal(w, b, door, tick);
+            if !sealed && self.begin_seal(w, b, door, tick) {
                 return None;
             }
             if let Some(item) = food_held {
@@ -855,7 +865,7 @@ impl Plan {
             // Open and waiting: shut again until the stair's top is clear (the open re-digs it).
             if inside && open(w, roof) {
                 self.end.exit_walk = false;
-                self.begin_seal(w, b, door, tick);
+                let _ = self.begin_seal(w, b, door, tick);
             }
             return None;
         }
@@ -979,8 +989,7 @@ impl Plan {
         if !inside {
             return self.walk_home(w, b, tick, "nothing to hand over to");
         }
-        if !sealed {
-            self.begin_seal(w, b, door, tick);
+        if !sealed && self.begin_seal(w, b, door, tick) {
             return None;
         }
         if !self.end.hold_noted {
@@ -1083,8 +1092,7 @@ impl Plan {
                 ),
             );
         }
-        if !sealed {
-            self.begin_seal(w, b, door, tick);
+        if !sealed && self.begin_seal(w, b, door, tick) {
             return None;
         }
         let d0 = stock_dir(door, 0);
@@ -1330,10 +1338,18 @@ impl Plan {
         None
     }
 
-    fn begin_seal(&mut self, w: &World, b: Cell, door: (i32, i32), tick: u64) {
+    /// The roof and the door laid back; never a cell in the body's own box, and no more after
+    /// `SEAL_TRIES` seals failed in a row (E5's dev race 45940964839 lane 0: "Seal work failed
+    /// ((13, 59, 0) is in the body's box)" 1,067 times). Whether a seal was begun.
+    fn begin_seal(&mut self, w: &World, b: Cell, door: (i32, i32), tick: u64) -> bool {
+        if self.end.seal_fails >= SEAL_TRIES {
+            return false;
+        }
+        let in_body = |c: Cell| crate::fortress_way::body_in_cell(w, c);
         let (_, roof, cells) = bunker_cells(b, door);
         let mut ops = Vec::new();
         if open(w, roof)
+            && !in_body(roof)
             && let Some((against, face)) = support(w, roof, Some(door))
         {
             ops.push(Op::Place {
@@ -1343,17 +1359,23 @@ impl Plan {
             });
         }
         let d = cells[0];
-        ops.push(Op::Place {
-            cell: d,
-            against: (d.0, d.1 - 1, d.2),
-            face: 1,
-        });
+        if open(w, d) && !in_body(d) {
+            ops.push(Op::Place {
+                cell: d,
+                against: (d.0, d.1 - 1, d.2),
+                face: 1,
+            });
+        }
+        if ops.is_empty() {
+            return false;
+        }
         self.note(
             tick,
             format!("end: seal the bunker at {b:?}"),
             format!("the roof {roof:?} and the door {d:?} laid back"),
         );
         self.end.work = Some(Work::new(WorkKind::Seal, ops, tick));
+        true
     }
 
     /// A walk back to the bunker's cell (`HOME_WALKS` at most, then a hold where the bot is).
@@ -1411,36 +1433,6 @@ impl Plan {
         if !in_end(w) {
             return None;
         }
-        // In the bunker under a strafe or a fireball in flight: sealed, whatever task brought the
-        // bot in or would take it out (wall 14).
-        if let (Some([x, y, z]), Some(door), Some(body)) = (self.bunker, self.end.door, w.body) {
-            let b = (x, y, z);
-            let (_, roof, door_cells) = bunker_cells(b, door);
-            let sealed = !open(w, roof) && !open(w, door_cells[0]);
-            let sealing = self
-                .end
-                .work
-                .as_ref()
-                .is_some_and(|wk| wk.kind == WorkKind::Seal);
-            if path::stand_cell(w, body.pos) == b
-                && !sealed
-                && !sealing
-                && let Some((kind, at)) = strafe_threat(w)
-            {
-                self.task = Task::Idle;
-                self.end.work = None;
-                self.end.exit_walk = false;
-                self.note(
-                    tick,
-                    format!("end: the bunker sealed for a {kind:?}"),
-                    format!(
-                        "at {:.0}, {:.0}, {:.0}; the bot stays in until it is over",
-                        at[0], at[1], at[2]
-                    ),
-                );
-                self.begin_seal(w, b, door, tick);
-            }
-        }
         if !matches!(self.task, Task::Idle) {
             return None;
         }
@@ -1465,8 +1457,7 @@ impl Plan {
             let b = (x, y, z);
             let (_, _, door_cells) = bunker_cells(b, door);
             if fire_near(w, door_cells[6], STAIR_CLEAR)
-                .or_else(|| strafe_threat(w))
-                .is_some()
+                .is_some_and(|(k, _)| k == EntityKind::AreaEffectCloud)
             {
                 self.end.work = None;
                 self.note(
@@ -1474,7 +1465,7 @@ impl Plan {
                     "end: the open cut for fire by the stair".to_owned(),
                     format!("the bunker {b:?} sealed again"),
                 );
-                self.begin_seal(w, b, door, tick);
+                let _ = self.begin_seal(w, b, door, tick);
             }
         }
         if let Some(mut work) = self.end.work.take() {
@@ -1492,6 +1483,9 @@ impl Plan {
                     );
                     if work.kind == WorkKind::Build {
                         self.end.site_walks += 1;
+                    }
+                    if work.kind == WorkKind::Seal {
+                        self.end.seal_fails += 1;
                     }
                     self.retry_at = tick + crate::RETRY_TICKS;
                 }
@@ -1555,6 +1549,7 @@ impl Plan {
             }
             WorkKind::Seal => {
                 self.end.home_walks = 0;
+                self.end.seal_fails = 0;
                 self.note(
                     tick,
                     "end: bunker sealed".to_owned(),
@@ -2007,11 +2002,37 @@ impl Plan {
     /// bunker is not left (race 45910659261 lane 1: a fireball on the stair, its cloud reached
     /// the bot under the end stone at 6 a second, 20 to dead in 4 s). Noted once a wait.
     fn fire_at_stair(&mut self, w: &World, top: Cell, tick: u64) -> bool {
-        let threat = fire_near(w, top, STAIR_CLEAR).or_else(|| strafe_threat(w));
+        // A cloud only: a fireball aims its cloud at the nearest living thing within 4 of its hit,
+        // walls or not (`DragonFireball.onHit`, E5's read), so the bunker is no shelter from it
+        // and E5's dodge moves the bot instead (wall 15).
+        let flying: Option<(EntityKind, [f64; 3])> = None;
+        let threat =
+            fire_near(w, top, STAIR_CLEAR).filter(|(k, _)| *k == EntityKind::AreaEffectCloud);
         let Some((kind, at)) = threat else {
             self.end.fire_waiting = false;
+            self.end.fire_since = None;
             return false;
         };
+        // A cloud alone by the stair during a strafe: held at most `STRAFE_HIDE_TICKS` (E5's),
+        // then out so the dragon sees the bot and the strafe can end.
+        let since = *self.end.fire_since.get_or_insert(tick);
+        if flying.is_none()
+            && strafing(w)
+            && tick.saturating_sub(since) >= crate::dragon::STRAFE_HIDE_TICKS
+        {
+            if self.end.fire_waiting {
+                self.end.fire_waiting = false;
+                self.note(
+                    tick,
+                    "end: the bunker opens though a cloud is by its stair".to_owned(),
+                    format!(
+                        "held {} ticks under a strafe with no fireball in flight; to be seen",
+                        crate::dragon::STRAFE_HIDE_TICKS
+                    ),
+                );
+            }
+            return false;
+        }
         if !self.end.fire_waiting {
             self.end.fire_waiting = true;
             self.end.fire_waits += 1;

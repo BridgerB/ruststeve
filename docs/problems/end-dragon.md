@@ -253,3 +253,31 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - A charge is still hidden from at once, and a cloud within reach still holds it in.
   - With no notch beside ready at a threat, the shelter is as before (a shut bunker within 12, else a notch where the feet are).
 - **Unproven:** whether 200 ticks is right, and whether the step in beats the fireball. The fireball spawns at the head and flies about 30 to 40 blocks; the step is one block and a 2-block drop. E3's seal-on-strafe for the bunker hides the bot the same way and will hold the strafe too unless it is capped.
+
+### Dev race 45940964839 (dd18d00, 3 lanes, cap 24,000), read mid-run (lanes 0 and 1 at tick 4,700)
+- **The fix's first race.** Lane 0 perched twice: 4 head strikes, the dragon to 181. Lane 1: 6 head strikes, the dragon to 169. No breath hits in either lane.
+- **Lane 1 is the fix working:** "strafe: stood by the notch at [14, 58, 2] in sight" at 2,940, and in the same tick the strafe fired and went to holding. The fireball passed 14 off.
+- **Wall 26: the old shelter still fired first.** At each strafe's first tick, on the bunker's stair, no cell beside fitted a notch, so the step fell back to the old shelter and dug a notch at the feet. Lane 0 then stood by a notch from a block down, mostly out of sight, and the strafe held 1,380 ticks (2,720 to 4,100).
+  - **Fix:** with no cell beside (or in the air, or the notch's dig failed) and no threat, the bot stands where its feet are, in sight ("strafe: no notch beside, stood in sight at …"). The old shelter is for a threat only.
+- **Wall 27: a silent idle (lane 1).** From tick 3,580, after "charge: over", the bot sat idle in the bunker cell (14, 58, 2), its door open. There was no note of any kind for 15,800 ticks. A strafe at 17,800 to 19,300 sent a fireball whose cloud landed on it, and it died at 19,420. `why` at 10,000 shows the bunker open and the roof solid. It cannot name the row, because the recording does not hold the planner.
+  - **Backstop:** in the End, idle with no note for `IDLE_NOTE_TICKS` (600), the planner notes "end: idle N ticks at … (task …, rows held …)", drops E5's holds and chooses again now (`Plan::end_idle_watch`). `step_inner` records which rows sent controls while idle (`Plan::held`).
+  - **The notch beside is never dug** in the bunker's column or its stair's (`Plan::bunker_columns`). In lanes 0 and 1 it was the bunker's own floor.
+  - **A half-dug notch is taken** at a threat, with its second block dug under the feet. In lane 2 the strafe fired 40 ticks after the bot was seen, with one block dug.
+- **Wall 28: cover is no answer to a fireball** (the 26.1.2 jar, `javap` of `DragonFireball.onHit`, probe 45938702513). On a hit, the fireball lists the living entities in its box grown by (4, 2, 4). The cloud (radius 3, 600 ticks, growing to 7) is put at the first one within 4 blocks (`distanceToSqr < 16`), walls or not.
+  - All three deaths in this race fit: the cloud "0.0 from its edge" of the bot, on it in the bunker (lanes 0 and 1) and in a half-dug notch (lane 2), the splash 1 to 2 blocks off.
+  - A notch or bunker within 4 blocks of where a fireball lands puts its cloud on the bot. Only distance shelters: the bot more than 4 from the impact, and the cloud's growing reach kept clear after.
+  - The notch still answers a charge (a body blow) and the perched flame (no fireball).
+  - **Fix (the dodge, `Plan::fireball_dodge_step`):** a dragon fireball in flight within 64, aimed within `DODGE_AIM` (6) of the bot (its velocity, else straight at it), is dodged on open ground.
+    - **Where:** sideways to its flight, `DODGE_MIN` to `DODGE_MAX` (6 to 10) from the cell the bot stood in, the side away from the dragon first (`dodge_cell`).
+    - **Which cells:** a cell stood on in the open (two sides open, the sky over it), never in the bunker's or its stair's columns, ground under every column within 3 (no void edge), and clear of every cloud.
+    - **Note:** "fireball: dodge to … (flight …, ticks …, from …)".
+    - **Never cover for a fireball:** the shelter rows, `breath_step` and `breath_ahead` read clouds only (`clouds_only`).
+    - **The notch is kept** for a charge and the perched flame. A strafe with no fireball is met standing in sight ("strafe: stood in sight at …"); the notch beside is gone.
+- **Wall 29: a hold from an angry enderman never ended** (E4's race 45942992471 lane 0: 12,000 ticks, "end: the walk from enderman … to the bunker failed" 3,071 times). An enderman with a target keeps its anger for good (its timer restarts every tick), so a hold "until it calms" never ends.
+  - **Fix (`Plan::end_enderman_step`):**
+    - Beyond `ENDER_NEAR` (8) the task goes on: it teleports to the bot only from over 16 and cannot come into a 2-high cell.
+    - Within 8 in a roofed 2-high cell: struck from there in reach over the danger line, else held.
+    - Within 8 on open ground: into the bunker (a failed walk is never tried again for that enderman), else a notch.
+    - Every hold from one enderman is capped at `ENDER_HOLD_CAP` (600), then the choice is made again ("end: the hold from enderman N capped").
+- **Wall 30: out of the dragon's sight under the sky, the strafe held** (frontier race 45943073264 on 1a54bdf, lane 1). The bot "stood by" at (13, 52, 0), ten under the surface, and the strafe held from tick 480 past 24,040. Lane 2: from 180 to 9,760.
+  - **Fix:** in a strafe, with no line from the dragon to the bot (`cover::seen_body`) for `STRAFE_UNSEEN_TICKS` (100) under the open sky, the bot rises a block at a jump until seen, at most `STRAFE_RISES` (10). With no sky it is noted once, for the End's rows to take it out ("strafe: unseen N ticks at …, no sky").
