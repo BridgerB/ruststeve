@@ -447,6 +447,11 @@ pub const BREATH_UNDER: f64 = 1.0;
 pub const OUT_SEARCH: i32 = 9;
 /// Columns each way a cell clear of a cloud's end reach is looked for (wall 47).
 pub const OUT_SEARCH_END: i32 = 12;
+/// Loops' caps in one episode of a breath (wall 50): walks out, walls dug, and ticks between the
+/// "out of the breath" notes.
+pub const BREATH_OUTS_MAX: u32 = 12;
+pub const BREATH_WALLS_MAX: u32 = 3;
+pub const LOOP_NOTE_TICKS: u64 = 100;
 /// Blocks ahead of the feet along a walk's heading tested for a breath (`breath_ahead`).
 pub const AHEAD: f64 = 1.5;
 /// Ticks between the notes of a walk held at a breath's edge.
@@ -2154,6 +2159,16 @@ pub struct DragonState {
     pub ender_pour: Option<([i32; 3], u64)>,
     #[serde(default)]
     pub ender_take: Option<(i32, u32)>,
+    /// One episode of a breath (wall 50): walks out and walls dug in it, cells whose dig failed,
+    /// and the last "out of the breath" note.
+    #[serde(default)]
+    pub breath_episode_outs: u32,
+    #[serde(default)]
+    pub breath_walls: u32,
+    #[serde(default)]
+    pub dug_failed: Vec<[i32; 3]>,
+    #[serde(default)]
+    pub breath_out_noted_at: Option<u64>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2867,18 +2882,33 @@ impl Plan {
                     return self.breath_walk_step(w, tick, b);
                 }
             }
-            self.dragon.breath_refused.clear();
+            // The cells refused, the walls dug and the walks out kept for the whole episode, until no
+            // cloud's end reach takes the bot in (wall 50: race 46071506005 lanes 0 and 3, "out of
+            // the breath" 120 to 250 times a lane, the same cells tried again each time).
+            if clear_of_end(&clouds, feet) {
+                self.dragon.breath_refused.clear();
+                self.dragon.dug_failed.clear();
+                self.dragon.breath_walls = 0;
+                self.dragon.breath_episode_outs = 0;
+            }
             self.dragon.breath_noted = None;
             self.dragon.breath_wall = None;
-            if let Some(wk) = self.dragon.breath_walk.take() {
+            if let Some(wk) = self.dragon.breath_walk.take()
+                && self
+                    .dragon
+                    .breath_out_noted_at
+                    .is_none_or(|t| tick >= t + LOOP_NOTE_TICKS)
+            {
+                self.dragon.breath_out_noted_at = Some(tick);
                 self.note(
                     tick,
                     "out of the breath".to_owned(),
                     format!(
-                        "at {:?}, {} ticks after the walk to {:?} began",
+                        "at {:?}, {} ticks after the walk to {:?} began; {} walks out this time",
                         cell_of(feet),
                         tick.saturating_sub(wk.started),
-                        wk.target
+                        wk.target,
+                        self.dragon.breath_episode_outs
                     ),
                 );
             }
@@ -2959,6 +2989,27 @@ impl Plan {
         let target = match held {
             Some(c) => c,
             None => {
+                // Walks out of one episode capped: past it, straight away from the cloud's middle.
+                if self.dragon.breath_episode_outs >= BREATH_OUTS_MAX {
+                    if self.dragon.breath_episode_outs == BREATH_OUTS_MAX {
+                        self.dragon.breath_episode_outs += 1;
+                        self.note(
+                            tick,
+                            "out of the breath: walks capped".to_owned(),
+                            format!("{BREATH_OUTS_MAX} walks out; pressed straight away from it"),
+                        );
+                    }
+                    let away = [feet[0] - on.pos[0], feet[2] - on.pos[2]];
+                    let d = away[0].hypot(away[1]).max(1e-6);
+                    return Some(toward(
+                        feet,
+                        [
+                            feet[0] + away[0] / d * 3.0,
+                            feet[1],
+                            feet[2] + away[1] / d * 3.0,
+                        ],
+                    ));
+                }
                 let Some(c) = out_of_breath_except(w, feet, &self.dragon.breath_refused) else {
                     if self.dragon.breath_walk.take().is_some() || self.dragon.breath_outs == 0 {
                         self.note(
@@ -2974,6 +3025,7 @@ impl Plan {
                     return None;
                 };
                 self.dragon.breath_outs += 1;
+                self.dragon.breath_episode_outs += 1;
                 self.dragon.breath_walk = Some(Walk::new(
                     (c[0], c[1], c[2]),
                     Goal::Block {
@@ -3039,8 +3091,11 @@ impl Plan {
             if let TaskStatus::Failed(e) = status {
                 // Walled in: the wall toward the cell out dug (the next tick's walk digs on).
                 if let Some(feet) = w.body.map(|b| b.pos)
-                    && let Some(n) = wall_toward(w, feet, target)
+                    && let Some(n) =
+                        wall_toward(w, feet, target).filter(|n| !self.dragon.dug_failed.contains(n))
+                    && self.dragon.breath_walls < BREATH_WALLS_MAX
                 {
+                    self.dragon.breath_walls += 1;
                     self.dragon.breath_wall = Some(n);
                     self.note(
                         tick,
@@ -4118,7 +4173,11 @@ impl Plan {
                 );
                 self.dragon.notch_step = None;
                 // Never the same failed dig again each tick (race 45913263506 lane 2: a wall cell
-                // in water, "failed: Gone" 289 times while a fireball's cloud burned it).
+                // in water, "failed: Gone" 289 times while a fireball's cloud burned it), nor its
+                // cell again in this episode (wall 50: 32 to 40 a lane in race 46071506005).
+                if self.dragon.dug_failed.len() < 32 && !self.dragon.dug_failed.contains(&c) {
+                    self.dragon.dug_failed.push(c);
+                }
                 self.dragon.breath_wall = None;
                 self.dragon.notch_failed = true;
             }

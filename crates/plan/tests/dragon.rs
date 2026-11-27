@@ -2512,3 +2512,33 @@ fn a_strike_at_an_enderman_waits_a_full_charge_after_the_sword_comes_to_hand() {
             .any(|a| matches!(a, Act::Attack { entity: 70 }))
     );
 }
+
+#[test]
+fn walks_out_of_one_breath_are_capped_then_pressed_straight_away() {
+    // Wall 50, race 46071506005 lanes 0 and 3: "out of the breath" 120 to 250 times a lane.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    cloud(&mut w, 50, [13.5, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    p.dragon.breath_episode_outs = dragon::BREATH_OUTS_MAX;
+    let c = p.breath_step(&w, 0).expect("pressed away");
+    // Away from the cloud's middle at +x: toward -x (yaw 90).
+    assert!(c.forward && (c.yaw - 90.0).abs() < 1.0, "{c:?}");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "out of the breath: walks capped")
+    );
+    // A failed dig's cell is kept for the episode while a cloud's end reach takes the bot in.
+    p.dragon.dug_failed.push([13, 64, 0]);
+    let mut near = end_at(feet);
+    cloud(&mut near, 50, [18.5, 64.0, 0.5], 3.0);
+    let _ = p.breath_step(&near, 10);
+    assert!(p.dragon.dug_failed.contains(&[13, 64, 0]));
+    // Far from every cloud: the episode over, its records cleared.
+    let mut far = end_at(feet);
+    cloud(&mut far, 50, [-20.5, 64.0, 0.5], 3.0);
+    let _ = p.breath_step(&far, 20);
+    assert!(p.dragon.dug_failed.is_empty());
+    assert_eq!(p.dragon.breath_episode_outs, 0);
+}

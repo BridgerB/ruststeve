@@ -435,3 +435,6 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
     - Every pour is noted as its use goes, and its source is looked for at and beside the feet for 20 ticks ("standing at …"), else the water is lost there.
     - The take-back is noted only when the water buckets held rise; 3 uses without that, and it is lost.
     - Lost water ("end: the water against endermen lost at …") goes into E4's `spikes.left_water` for the refill.
+- **Wall 50: the breath's loops ate the time** (race 46071506005 lanes 0 and 3). "out of the breath" fired 120 to 250 times a lane; "walk out of the breath … failed: NoPath (the wall toward it dug at …)" and "charge: dig at … failed: Gone" 32 to 40 times each. The refused cells were cleared at every step out, so the same cells were tried again.
+  - **Fix:** one episode of a breath lasts until no cloud's end reach takes the bot in. Through it the refused cells, the cells whose dig failed (never dug again) and its counts are kept.
+  - Walls dug are capped at 3, walks out at 12 (then "out of the breath: walks capped" and straight away from the cloud), and "out of the breath" is noted at most every 100 ticks.
