@@ -1911,6 +1911,11 @@ pub struct Senses {
     #[serde(default)]
     pub endermen_16: Option<u32>,
     // <<< E1
+    /// The crystals left as the stages count them (`world::stage::crystals_left`: the ten spikes
+    /// less those destroyed, memory's record, so a resume carries it), in the End only (E9,
+    /// issue 20 part 2). `crystals` is the ones tracked now.
+    #[serde(default)]
+    pub crystals_left: Option<u32>,
 }
 
 /// How a fluid touches the body (the feet's cell and the one over it).
@@ -2050,6 +2055,9 @@ impl Senses {
         }
         if let Some(c) = self.crystals {
             s.push_str(&format!(" crystals {c}"));
+        }
+        if let Some(c) = self.crystals_left {
+            s.push_str(&format!(" left {c}"));
         }
         s.push_str(&format!(" fountain {f:.1}"));
         match self.over {
@@ -2214,6 +2222,7 @@ pub fn senses(w: &World, task: &str, why: &str, tick_us: Option<u64>) -> Senses 
             .then(|| u32::try_from(world::stage::crystals_alive(w)).unwrap_or(u32::MAX)),
         fountain: in_end.then(|| world::stage::from_fountain(w)).flatten(),
         over: in_end.then(|| over_ground(w)).flatten(),
+        crystals_left: world::stage::crystals_left(w).map(|n| u32::try_from(n).unwrap_or(u32::MAX)),
         endermen_16: in_end.then(|| {
             w.entities
                 .values()

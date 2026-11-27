@@ -106,7 +106,8 @@ pub struct EndCounts {
     /// Crystals seen, and gone by how (`struck`, `blast`, `far`, `gone`).
     pub crystals_seen: u32,
     pub crystals_gone: BTreeMap<String, u32>,
-    /// Crystals left at the end: the ten spikes less those destroyed (`struck` and `blast`);
+    /// Crystals left at the end: the last senses row's `crystals_left` (the stages' count, which a
+    /// resume carries), or on older rows the ten spikes less those destroyed (`struck` and `blast`);
     /// `far` and `gone` are untrackings (the bot far off, a resume's re-send) and never count
     /// (issue 20 part 2: race 45994686575 lane 3 read "1 left" with 6 standing). `None` with no
     /// crystal seen.
@@ -175,7 +176,11 @@ pub fn end_counts(l: &Ledger, rows: &[Senses]) -> Option<EndCounts> {
             next = r.at + DRAGON_TRAIL_TICKS;
         }
     }
-    if c.crystals_seen > 0 {
+    let carried = rows.iter().rev().find_map(|r| r.crystals_left);
+    if let Some(n) = carried {
+        // The stages' own count, memory's: true on a resume past crystals struck before it.
+        c.crystals_left = Some(n);
+    } else if c.crystals_seen > 0 {
         let destroyed: u32 = ["struck", "blast"]
             .iter()
             .filter_map(|how| c.crystals_gone.get(*how))
@@ -610,6 +615,7 @@ mod tests {
             fountain: None,
             over: None,
             endermen_16: None,
+            crystals_left: None,
         }
     }
 
@@ -866,5 +872,13 @@ mod tests {
         assert_eq!(c.crystals_left, Some(7));
         let none = end_counts(&ledger(Vec::new(), Vec::new()), &[]);
         assert_eq!(none.and_then(|c| c.crystals_left), None);
+        // A resume from `crystals_5`: the senses row's own count (memory's) wins over this run's
+        // strikes alone (one struck here reads 4, not 9).
+        let facts = vec![at(20, seen(0)), at(900, gone(0, "struck"))];
+        let mut last = row(900, 20, None);
+        last.fountain = Some(40.0);
+        last.crystals_left = Some(4);
+        let c = end_counts(&ledger(Vec::new(), facts), &[last]).unwrap();
+        assert_eq!(c.crystals_left, Some(4));
     }
 }
