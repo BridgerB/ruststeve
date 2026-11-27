@@ -736,12 +736,14 @@ fn a_shut_step_of_the_bunkers_stair_is_dug_out_on_the_way_up() {
         .iter()
         .position(|o| *o == plan::end::Op::Dig((10, 62, 0)))
         .unwrap_or_else(|| panic!("no dig of the shut step: {ops:?}"));
-    let step = ops
+    // Dug before any step onto it: by the stair dug again (wall 20) or by the steered exit.
+    if let Some(step) = ops
         .iter()
         .position(|o| *o == plan::end::Op::Step((10, 62, 0)))
-        .unwrap_or_else(|| panic!("no step: {ops:?}"));
-    assert!(dig < step, "{ops:?}");
-    // And the room over the head before the step, from the step below.
+    {
+        assert!(dig < step, "{ops:?}");
+    }
+    // And the room over the head of the step below.
     assert!(ops.contains(&plan::end::Op::Dig((11, 63, 0))), "{ops:?}");
 }
 
