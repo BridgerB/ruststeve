@@ -1,0 +1,10 @@
+# The bow line's frontier (docs/problems/end-bow.md, agent E8): the furthest stage a real bot
+# of the bow line has reached, as a snapshot its races resume from (race.yml
+# `-f start=snapshot -f snapshot=<tag>/<asset>`). Same shape as config/frontier.toml; it starts
+# at the pillar line's `armed` (race 45882199358 lane 0) and moves at bow_armed, end, island.
+# The pillar line's config/frontier.toml stays the one `snapshot=frontier` reads.
+stage = "armed"
+tag = "race-45882199358"
+asset = "snapshot-armed-45882199358-race-45882199358-lane-0.tar.zst"
+commit = "6882c76c29504720fb0d4e58f0231d60b4483ed0"
+how = "rs-l00-b00 of race 45882199358 (issue 20, 2026-11-26): the pillar line's armed frontier, on the surface at (1612.2, 69.0, -96.4) at dusk with the End kit, no bow. Real (no development mark, no kind)."
