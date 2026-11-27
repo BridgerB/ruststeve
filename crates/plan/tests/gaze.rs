@@ -331,3 +331,66 @@ fn the_planner_in_the_end_never_sends_a_look_within_the_guard() {
         p.events.iter().map(|e| e.what.clone()).collect::<Vec<_>>()
     );
 }
+
+/// Race 46038776204 lane 5 at 34,040: a clutch's look straight down would stare at an enderman
+/// under the landing, the old bend sent 60 and stared at another one, 18 off along that line.
+/// Now the aim ticks bend to the nearest pitch clear of both (still steeply down), and the pour
+/// itself goes out as asked, noted: the water must land under the feet.
+#[test]
+fn a_clutch_pour_is_sent_straight_down_and_its_aim_bends_only_a_little() {
+    let mut w = end_world([0.5, 90.0, 0.5]);
+    if let Some(b) = w.body.as_mut() {
+        b.vel = [0.0, -1.5, 0.0];
+        b.on_ground = false;
+    }
+    // Under the landing, 18 down: straight down meets its eyes.
+    enderman(
+        &mut w,
+        50,
+        [0.6, 90.0 + physics::EYE_HEIGHT - 18.0 - ENDERMAN_EYE, 0.5],
+    );
+    // Along pitch 60 to the south (yaw 0), 18 off: where the old bend looked.
+    let e = eye_of(&w);
+    let p60 = 60.0f64.to_radians();
+    enderman(
+        &mut w,
+        51,
+        [
+            e[0],
+            e[1] - 18.0 * p60.sin() - ENDERMAN_EYE,
+            e[2] + 18.0 * p60.cos(),
+        ],
+    );
+    let asked = controls(0.0, Some(90.0));
+    // An aim tick: bent, a little, off both.
+    let (c, why, unbent) = look::keep_off_act(&w, asked, None, false);
+    assert!(why.is_some() && !unbent);
+    let p = c.pitch.unwrap();
+    assert!(p > 70.0, "still steeply down: {p}");
+    assert!(closest(&w, &c) >= GUARD, "{c:?}");
+    // The pour: the water bucket held and used while falling.
+    w.inventory
+        .slots
+        .insert(36 + i16::from(w.held), (data::ItemKind::WaterBucket, 1));
+    assert!(look::pouring(&w, &[world::Act::UseItem]));
+    assert!(!look::pouring(&w, &[]));
+    let (c, why, unbent) = look::keep_off_act(&w, asked, None, true);
+    assert_eq!(c, asked, "the pour is sent as asked");
+    assert!(unbent);
+    assert_eq!(why.map(|x| x.0), Some(50));
+    // With no enderman near, a pour is plain.
+    let mut quiet = end_world([0.5, 90.0, 0.5]);
+    if let Some(b) = quiet.body.as_mut() {
+        b.on_ground = false;
+    }
+    assert_eq!(
+        look::keep_off_act(&quiet, asked, None, true),
+        (asked, None, false)
+    );
+    // On the ground it is no pour.
+    let mut stood = w.clone();
+    if let Some(b) = stood.body.as_mut() {
+        b.on_ground = true;
+    }
+    assert!(!look::pouring(&stood, &[world::Act::UseItem]));
+}

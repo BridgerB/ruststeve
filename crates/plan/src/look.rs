@@ -338,3 +338,30 @@ pub fn keep_off_why(
         Some((id, why)),
     )
 }
+
+/// Whether this tick's acts pour a water bucket while falling: a clutch's pour (E4's spikes),
+/// whose look is the bucket's aim (`Act::UseItem` carries the controls' look, and the server
+/// snaps to it before the use, `handleUseItem`).
+pub fn pouring(w: &World, acts: &[world::Act]) -> bool {
+    w.body.is_some_and(|b| !b.on_ground)
+        && crate::dig::held_item(w) == Some(ItemKind::WaterBucket)
+        && acts.contains(&world::Act::UseItem)
+}
+
+/// What `keep_look` sends (issue 20, `docs/problems/end-gaze.md`): the look kept off every
+/// enderman (`keep_off_why`), except a clutch's pour (`pouring`), which is sent as asked: the
+/// water must land under the feet, and the fall is the bigger danger (race 46038776204 lane 5 at
+/// 34,040: a pour bent from 90 to 60 stared at the enderman the old bend did not test). With the
+/// enderman the look comes near and why, in both cases, and whether it was sent unbent.
+pub fn keep_off_act(
+    w: &World,
+    c: Controls,
+    except: Option<u32>,
+    pour: bool,
+) -> (Controls, Option<(u32, Kept)>, bool) {
+    let (kept, why) = keep_off_why(w, c, except);
+    if pour && why.is_some() {
+        return (c, why, true);
+    }
+    (kept, why, false)
+}

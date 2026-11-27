@@ -225,6 +225,9 @@ pub struct EnderState {
     /// Of `looks_kept`, those inside the guard only, not the jar's cone (`look::GUARD`).
     #[serde(default)]
     pub looks_guarded: u64,
+    /// Clutch pours sent as asked though their look came near an enderman (`look::keep_off_act`).
+    #[serde(default)]
+    pub pours_unbent: u64,
     // <<< E7
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
@@ -738,8 +741,34 @@ impl Plan {
         };
         self.count_near_misses(w);
         // >>> pearls (P3): the provoke row's one target is exempt while that row runs.
-        let (kept, why) = crate::look::keep_off_why(w, c, self.pearls.provoking);
+        // >>> E7 (issue 20): a clutch's pour is sent as asked, noted each time it comes near.
+        let pour = crate::look::pouring(w, &self.acts);
+        let (kept, why, unbent) = crate::look::keep_off_act(w, c, self.pearls.provoking, pour);
+        // <<< E7
         // <<< pearls
+        // >>> E7 (issue 20)
+        if let Some((id, why)) = why.filter(|_| unbent) {
+            self.ender.pours_unbent += 1;
+            let d = w
+                .body
+                .zip(w.entities.get(&i32::try_from(id).unwrap_or(i32::MAX)))
+                .map_or(-1.0, |(b, e)| distance(b.pos, e.pos));
+            self.note(
+                w.ticks,
+                format!("clutch pour sent unbent near enderman {id}"),
+                format!(
+                    "pitch {:.0} would {} it {d:.1} off; the water must land under the feet and the fall is the bigger danger; {} in the run",
+                    c.pitch.unwrap_or(w.player.pitch),
+                    match why {
+                        crate::look::Kept::Stare => "stare at",
+                        crate::look::Kept::Guard => "come within the guard of",
+                    },
+                    self.ender.pours_unbent
+                ),
+            );
+            return kept;
+        }
+        // <<< E7
         if let Some((id, why)) = why {
             self.ender.looks_kept += 1;
             // >>> E7 (issue 20, docs/problems/end-gaze.md): a look kept only by the guard.
