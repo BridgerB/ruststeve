@@ -162,6 +162,22 @@ pub struct Blast {
     pub knockback: Option<[f64; 3]>,
 }
 
+/// A crystal's removal and its blast within this many server ticks of each other are its
+/// destruction (the same tick on a real server; a second of slack, as `observe`'s strikes).
+pub const CRYSTAL_BLAST_TICKS: u64 = 20;
+/// A blast this near a removed crystal's position is its own (the crystal explodes at its feet
+/// position, `EndCrystal.hurtServer`).
+pub const CRYSTAL_BLAST_NEAR: f64 = 1.0;
+/// A destroyed crystal belongs to the spike whose centre column is this near, horizontally (the
+/// crystal stands on the centre + 0.5, config/end.toml).
+pub const CRYSTAL_SPIKE_NEAR: f64 = 2.0;
+
+/// Whether a blast's centre is a removed crystal's own (`CRYSTAL_BLAST_NEAR`).
+fn blast_near(center: [f64; 3], pos: [f64; 3]) -> bool {
+    let d = [0, 1, 2].map(|i| center[i] - pos[i]);
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= CRYSTAL_BLAST_NEAR
+}
+
 /// Entity-event statuses kept per entity.
 pub const ENTITY_STATUSES_KEPT: usize = 4;
 /// Damage events kept per entity.
@@ -618,6 +634,11 @@ pub struct World {
     /// Blasts heard and felt, newest last (`SOUNDS_KEPT`).
     #[serde(default)]
     pub explosions: Vec<Blast>,
+    /// End crystals removed with no explosion at their spot yet, (tick, position), newest last:
+    /// the server removes a crystal before its blast (`EndCrystal.hurtServer`: `remove`, then
+    /// `explode`), so a removal waits `CRYSTAL_BLAST_TICKS` for one (issue 20 part 2).
+    #[serde(default)]
+    pub crystals_removed: Vec<(u64, [f64; 3])>,
     /// Each spawner's mob from its block-entity data (`blaze`): which spawner is the blaze one,
     /// with no blaze in sight (blaze wall 4 took a dungeon spawner for it).
     #[serde(default)]
@@ -737,6 +758,49 @@ impl World {
     pub fn new() -> Self {
         Self::default()
     }
+
+    // >>> E9 (issue 20 part 2): a crystal is gone only when destroyed, never when untracked.
+    /// A crystal removed: destroyed if a blast at its spot came just before, else held for one.
+    fn crystal_removed(&mut self, pos: [f64; 3]) {
+        let now = self.session.server_ticks;
+        let blast = self
+            .explosions
+            .iter()
+            .any(|b| b.at_tick + CRYSTAL_BLAST_TICKS >= now && blast_near(b.center, pos));
+        if blast {
+            self.crystal_destroyed(pos);
+            return;
+        }
+        self.crystals_removed
+            .retain(|(t, _)| t + CRYSTAL_BLAST_TICKS >= now);
+        self.crystals_removed.push((now, pos));
+    }
+
+    /// A blast: every crystal removed just before at its spot was destroyed by it.
+    fn crystal_blast(&mut self, center: [f64; 3]) {
+        let now = self.session.server_ticks;
+        let (hit, kept): (Vec<_>, Vec<_>) = self
+            .crystals_removed
+            .iter()
+            .filter(|(t, _)| t + CRYSTAL_BLAST_TICKS >= now)
+            .partition(|(_, p)| blast_near(center, *p));
+        self.crystals_removed = kept;
+        for (_, p) in hit {
+            self.crystal_destroyed(p);
+        }
+    }
+
+    /// Record the spike under a destroyed crystal; one off every spike is not counted.
+    fn crystal_destroyed(&mut self, pos: [f64; 3]) {
+        let spike = stage::SPIKES.iter().find(|[x, z]| {
+            (pos[0] - (f64::from(*x) + 0.5)).hypot(pos[2] - (f64::from(*z) + 0.5))
+                <= CRYSTAL_SPIKE_NEAR
+        });
+        if let Some([x, z]) = spike {
+            self.memory.record_crystal_destroyed((*x, *z));
+        }
+    }
+    // <<< E9
 
     /// The time of day, 0 to 23,999 (`time`'s helpers read it): the overworld clock as last
     /// told, run on by the game ticks since at its rate, so a `set_time` that leaves the clock
@@ -1459,7 +1523,11 @@ impl World {
             }
             S2c::RemoveEntities { ids } => {
                 for id in ids {
-                    self.entities.remove(id);
+                    if let Some(e) = self.entities.remove(id)
+                        && e.kind == EntityKind::EndCrystal
+                    {
+                        self.crystal_removed(e.pos);
+                    }
                 }
             }
             S2c::MoveEntity {
@@ -1880,6 +1948,7 @@ impl World {
                 });
                 let over = self.explosions.len().saturating_sub(SOUNDS_KEPT);
                 self.explosions.drain(..over);
+                self.crystal_blast(*center);
             }
             S2c::BlockEntityData { pos, spawns, .. } => {
                 if let Some(m) = spawns {
