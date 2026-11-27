@@ -1203,11 +1203,13 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
         Some(Task::Dig(d)) => d.target,
         t => panic!("{t:?}"),
     };
-    assert_eq!(dug(p.spikes_task(&w, 100)), (21, 63, 20));
-    set(&mut w, (21, 63, 20), BlockKind::Air);
-    assert_eq!(dug(p.spikes_task(&w, 101)), (22, 63, 20));
-    set(&mut w, (22, 63, 20), BlockKind::Air);
-    assert_eq!(p.spikes_task(&w, 102), Some(Task::Idle));
+    // A 2 by 2 square (race 45920382795: a 2 by 1 pit is no infinite source).
+    let square = [(21, 63, 20), (22, 63, 20), (21, 63, 21), (22, 63, 21)];
+    for (i, c) in square.iter().enumerate() {
+        assert_eq!(dug(p.spikes_task(&w, 100 + i as u64)), *c);
+        set(&mut w, *c, BlockKind::Air);
+    }
+    assert_eq!(p.spikes_task(&w, 105), Some(Task::Idle));
     assert!(
         notes(&p)
             .iter()
@@ -1215,18 +1217,18 @@ fn a_pool_is_made_by_the_bunker_and_refills_the_buckets() {
         "{:?}",
         notes(&p)
     );
-    // Both poured: the pool made, a bucket refilled from it.
+    // Both diagonal corners poured, the square full: the pool made, a bucket refilled.
     p.spikes.doing = None;
-    for c in [(21, 63, 20), (22, 63, 20)] {
+    for c in square {
         set(&mut w, c, BlockKind::Water);
     }
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     w.inventory.slots.insert(38, (ItemKind::Bucket, 1));
-    assert_eq!(p.spikes_task(&w, 103), Some(Task::Idle));
+    assert_eq!(p.spikes_task(&w, 106), Some(Task::Idle));
     let n = notes(&p);
     assert!(
         n.iter()
-            .any(|n| n == "spikes: water pool at (21, 63, 20) and (22, 63, 20)"),
+            .any(|n| n == "spikes: water pool at (21, 63, 20) and (22, 63, 21)"),
         "{n:?}"
     );
     assert!(

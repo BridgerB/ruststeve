@@ -669,6 +669,8 @@ pub struct SpikeState {
     /// The water pool by the bunker (two sources, an infinite one), the cell it is filled from,
     /// and the counts of waterfalls ridden down and buckets refilled.
     pub pool: Option<[Cell; 2]>,
+    /// The pool's whole 2 by 2 square (`pool` holds its two diagonal corners, poured).
+    pub pool_square: Option<[Cell; 4]>,
     pub pool_stand: Option<Cell>,
     pub pool_made: bool,
     pub waterfalls: u32,
@@ -718,6 +720,7 @@ impl Default for SpikeState {
             last_health: None,
             box_blow_at: None,
             pool: None,
+            pool_square: None,
             pool_stand: None,
             pool_made: false,
             waterfalls: 0,
@@ -1076,28 +1079,38 @@ pub fn dig_out(w: &World, feet: Cell, target: Cell) -> Option<Cell> {
 /// Steps of a stair out a dig-out looks along (each cell within a dig's reach of the feet).
 pub const DIG_OUT_STEPS: i32 = 3;
 
-/// Two cells of end stone ground beside each other next to the feet, one under the feet's level,
-/// walled below and round by full blocks: the pool's cells (a source poured in each makes an
-/// infinite one that spills nowhere).
-pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 2]> {
+/// A 2 by 2 square of end stone ground beside the feet, one under the feet's level, walled below
+/// and round by full blocks: the pool's cells, the near corner first and the far diagonal last.
+/// Water poured in those two diagonal corners fills the other two, and every cell then has two
+/// sources beside it: an infinite source. A 2 by 1 pit is not one: race 45920382795 refilled one
+/// bucket from it and the second "gave up" (each cell had one source beside it).
+pub fn pool_cells(w: &World, feet: Cell) -> Option<[Cell; 4]> {
     let (x, y, z) = feet;
     Axis::ALL.iter().find_map(|a| {
         let (dx, dz) = a.step();
-        let c0 = (x + dx, y - 1, z + dz);
-        let c1 = (x + 2 * dx, y - 1, z + 2 * dz);
-        let ground = |c: Cell| {
-            kind(w, c) == Some(BlockKind::EndStone)
-                && full(kind(w, (c.0, c.1 - 1, c.2)))
-                && open(kind(w, (c.0, c.1 + 1, c.2)))
+        // Across the axis, either way.
+        let across: [(i32, i32); 2] = if dx == 0 {
+            [(1, 0), (-1, 0)]
+        } else {
+            [(0, 1), (0, -1)]
         };
-        let walled = |c: Cell| {
-            Axis::ALL.iter().all(|b| {
-                let (bx, bz) = b.step();
-                let n = (c.0 + bx, c.1, c.2 + bz);
-                n == c0 || n == c1 || full(kind(w, n))
-            })
-        };
-        (ground(c0) && ground(c1) && walled(c0) && walled(c1)).then_some([c0, c1])
+        across.iter().find_map(|(bx, bz)| {
+            let at = |i: i32, j: i32| (x + dx * (1 + i) + bx * j, y - 1, z + dz * (1 + i) + bz * j);
+            let sq = [at(0, 0), at(1, 0), at(0, 1), at(1, 1)];
+            let ground = |c: Cell| {
+                kind(w, c) == Some(BlockKind::EndStone)
+                    && full(kind(w, (c.0, c.1 - 1, c.2)))
+                    && open(kind(w, (c.0, c.1 + 1, c.2)))
+            };
+            let walled = |c: Cell| {
+                Axis::ALL.iter().all(|b| {
+                    let (ex, ez) = b.step();
+                    let n = (c.0 + ex, c.1, c.2 + ez);
+                    sq.contains(&n) || full(kind(w, n))
+                })
+            };
+            sq.iter().all(|c| ground(*c) && walled(*c)).then_some(sq)
+        })
     })
 }
 
@@ -1118,8 +1131,8 @@ pub const POOL_SITE: i32 = 3;
 
 /// The nearest standable cell within `POOL_SITE` of the feet (a floor under it, room over it)
 /// with a pool's two cells beside it, and those cells.
-pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 2])> {
-    let mut best: Option<(i32, Cell, [Cell; 2])> = None;
+pub fn pool_site(w: &World, feet: Cell) -> Option<(Cell, [Cell; 4])> {
+    let mut best: Option<(i32, Cell, [Cell; 4])> = None;
     for dx in -POOL_SITE..=POOL_SITE {
         for dz in -POOL_SITE..=POOL_SITE {
             for dy in -1..=1 {
@@ -1542,6 +1555,24 @@ impl Plan {
                     });
                     self.retry_at = tick + 1;
                     return Some(Task::Idle);
+                }
+                if !climbing && !self.spikes.landings.iter().any(|(c, _)| *c == column) {
+                    let water = craft::count(w, ItemKind::WaterBucket);
+                    let stone = craft::count(w, PILLAR_ITEM);
+                    let why = if water < 2 {
+                        format!("{water} water buckets held: the clutch's only")
+                    } else if stone < WATERFALL_KEEP {
+                        format!(
+                            "{stone} end stone held, under {WATERFALL_KEEP}: the pillar dug back"
+                        )
+                    } else {
+                        "no side of the foot with a floor and clear air to the top".to_owned()
+                    };
+                    self.spikes_note(
+                        tick,
+                        "spikes: no landing water".to_owned(),
+                        format!("{why}; at {feet:?}, the way down the dig"),
+                    );
                 }
                 // At the foot the rules; once up, no wait on a half-built pillar: on to the box.
                 let closing_refusal = (closing && !d.as_ref().is_some_and(perched))
@@ -2077,8 +2108,9 @@ impl Plan {
                     );
                 } else {
                     match pool_site(w, feet) {
-                        Some((stand, cells)) if stand == feet => {
-                            self.spikes.pool = Some(cells);
+                        Some((stand, sq)) if stand == feet => {
+                            self.spikes.pool_square = Some(sq);
+                            self.spikes.pool = Some([sq[0], sq[3]]);
                             self.spikes.pool_stand = Some(stand);
                         }
                         Some((stand, _)) => {
@@ -2111,7 +2143,8 @@ impl Plan {
                 }
             }
             if let Some([c0, c1]) = self.spikes.pool {
-                for c in [c0, c1] {
+                let square = self.spikes.pool_square.unwrap_or([c0, c1, c0, c1]);
+                for c in square {
                     if full(kind(w, c)) {
                         self.spikes_note(
                             tick,
@@ -2141,10 +2174,7 @@ impl Plan {
                         return Some(Task::Idle);
                     }
                 }
-                if [c0, c1]
-                    .iter()
-                    .all(|c| kind(w, *c) == Some(BlockKind::Water))
-                {
+                if square.iter().all(|c| kind(w, *c) == Some(BlockKind::Water)) {
                     self.spikes.pool_made = true;
                     self.note(
                         tick,
@@ -2167,8 +2197,11 @@ impl Plan {
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
         if empty > 0
-            && let Some(cells) = self.spikes.pool
-            && let Some(c0) = cells
+            && let Some(pour) = self.spikes.pool
+            && let Some(c0) = self
+                .spikes
+                .pool_square
+                .unwrap_or([pour[0], pour[1], pour[0], pour[1]])
                 .iter()
                 .copied()
                 .find(|c| kind(w, *c) == Some(BlockKind::Water))
