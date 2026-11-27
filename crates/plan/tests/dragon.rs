@@ -1475,8 +1475,14 @@ fn a_fireball_aimed_near_is_dodged_sideways_six_off_never_into_cover() {
     let mut p = Plan::new(Aim::Race);
     p.bunker = Some([14, FLOOR - 4, 0]);
     p.end.door = Some((1, 0));
-    let c = p.charge_step(&w, 0).expect("dodging");
-    assert!(c.forward, "walked: {c:?}");
+    let _ = p.charge_step(&w, 0).expect("dodging");
+    assert!(
+        p.dragon
+            .dodge_walk
+            .as_ref()
+            .is_some_and(|wk| wk.target == (12, 64, 6)),
+        "the walk there begun"
+    );
     assert_eq!(
         dodged_to(&p).as_deref(),
         Some("fireball: dodge to [12, 64, 6]")
