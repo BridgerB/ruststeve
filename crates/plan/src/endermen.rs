@@ -221,6 +221,14 @@ pub struct EnderState {
     pub looks_kept: u64,
     #[serde(default)]
     pub look_noted_at: Option<u64>,
+    // >>> E7 (issue 20)
+    /// Of `looks_kept`, those inside the guard only, not the jar's cone (`look::GUARD`).
+    #[serde(default)]
+    pub looks_guarded: u64,
+    /// Clutch pours sent as asked though their look came near an enderman (`look::keep_off_act`).
+    #[serde(default)]
+    pub pours_unbent: u64,
+    // <<< E7
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
     pub near_misses: Vec<i32>,
@@ -733,10 +741,41 @@ impl Plan {
         };
         self.count_near_misses(w);
         // >>> pearls (P3): the provoke row's one target is exempt while that row runs.
-        let (kept, id) = crate::look::keep_off_controls(w, c, self.pearls.provoking);
+        // >>> E7 (issue 20): a clutch's pour is sent as asked, noted each time it comes near.
+        let pour = crate::look::pouring(w, &self.acts);
+        let (kept, why, unbent) = crate::look::keep_off_act(w, c, self.pearls.provoking, pour);
+        // <<< E7
         // <<< pearls
-        if let Some(id) = id {
+        // >>> E7 (issue 20)
+        if let Some((id, why)) = why.filter(|_| unbent) {
+            self.ender.pours_unbent += 1;
+            let d = w
+                .body
+                .zip(w.entities.get(&i32::try_from(id).unwrap_or(i32::MAX)))
+                .map_or(-1.0, |(b, e)| distance(b.pos, e.pos));
+            self.note(
+                w.ticks,
+                format!("clutch pour sent unbent near enderman {id}"),
+                format!(
+                    "pitch {:.0} would {} it {d:.1} off; the water must land under the feet and the fall is the bigger danger; {} in the run",
+                    c.pitch.unwrap_or(w.player.pitch),
+                    match why {
+                        crate::look::Kept::Stare => "stare at",
+                        crate::look::Kept::Guard => "come within the guard of",
+                    },
+                    self.ender.pours_unbent
+                ),
+            );
+            return kept;
+        }
+        // <<< E7
+        if let Some((id, why)) = why {
             self.ender.looks_kept += 1;
+            // >>> E7 (issue 20, docs/problems/end-gaze.md): a look kept only by the guard.
+            if why == crate::look::Kept::Guard {
+                self.ender.looks_guarded += 1;
+            }
+            // <<< E7
             let tick = w.ticks;
             if self
                 .ender
@@ -752,10 +791,15 @@ impl Plan {
                     tick,
                     format!("look kept off enderman {id}"),
                     format!(
-                        "pitch {:.0} would stare at it {d:.1} off; sent {:.0}; {} looks kept in the run",
+                        "pitch {:.0} would {} it {d:.1} off; sent {:.0}; {} looks kept in the run, {} by the guard",
                         c.pitch.unwrap_or(w.player.pitch),
+                        match why {
+                            crate::look::Kept::Stare => "stare at",
+                            crate::look::Kept::Guard => "come within the guard of",
+                        },
                         kept.pitch.unwrap_or(w.player.pitch),
-                        self.ender.looks_kept
+                        self.ender.looks_kept,
+                        self.ender.looks_guarded
                     ),
                 );
             }
