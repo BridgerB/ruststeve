@@ -1945,3 +1945,53 @@ fn no_walk_to_a_pillars_foot_without_its_blocks() {
         notes(&p)
     );
 }
+
+#[test]
+fn a_water_bucket_in_hand_is_no_sign_the_clutchs_water_is_back() {
+    // Frontier race 45978279345 lane 4: two water buckets held, the other one in hand read as
+    // the water taken back, and "the water left" on the ground.
+    let mut w = world(2, [20.5, 64.0, 20.5]);
+    if let Some(d) = w.dimension.as_mut() {
+        d.name = "minecraft:the_end".to_owned();
+    }
+    set(&mut w, (20, 64, 20), BlockKind::Water);
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    w.inventory.slots.insert(38, (ItemKind::Bucket, 1));
+    w.held = 1;
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.clutch = Some(spikes::Clutch {
+        since: 90,
+        from_y: 84.9,
+        poured: Some((20, 64, 20)),
+        landed_at: None,
+        sent_at: Some(95),
+    });
+    assert!(p.spikes_clutch(&w, 100).is_some(), "{:?}", notes(&p));
+    assert!(
+        !notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch over")),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        p.take_acts().contains(&Act::Hold { slot: 2 }),
+        "the empty bucket to hand"
+    );
+    w.held = 2;
+    p.spikes_clutch(&w, 101);
+    assert!(
+        p.take_acts().contains(&Act::UseItem),
+        "the water taken back"
+    );
+    // Gone: over.
+    set(&mut w, (20, 64, 20), BlockKind::Air);
+    assert!(p.spikes_clutch(&w, 102).is_none());
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch over")),
+        "{:?}",
+        notes(&p)
+    );
+}
