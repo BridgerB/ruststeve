@@ -394,3 +394,57 @@ fn a_clutch_pour_is_sent_straight_down_and_its_aim_bends_only_a_little() {
     }
     assert!(!look::pouring(&stood, &[world::Act::UseItem]));
 }
+
+fn meta(w: &mut World, id: i32, entries: Vec<(u8, protocol::metadata::MetaValue)>) {
+    w.step(&Event::Packet(S2c::SetEntityData { id, entries }));
+}
+
+/// Race 46071506005 lane 5: enderman 93 was angry from before the run (and at 17 of 40 health)
+/// and its stared-at flag rose in the fight at tick 400 with the look straight down. The jar's
+/// look-for-player goal takes a player it is angry at as stared at (`isBeingStaredBy ||
+/// isAngryAt`), so such a flag is anger's, told apart, and not a near miss; a calm enderman at
+/// full health whose flag rises is still a near miss.
+#[test]
+fn a_stared_at_flag_on_an_angry_or_hurt_enderman_is_not_a_near_miss() {
+    use protocol::metadata::MetaValue;
+    let mut w = end_world([0.5, 64.0, 0.5]);
+    // Angry first (creepy, no flag), 30 off.
+    enderman(&mut w, 60, [30.5, 64.0, 0.5]);
+    meta(
+        &mut w,
+        60,
+        vec![(9, MetaValue::Float(40.0)), (17, MetaValue::Bool(true))],
+    );
+    // Hurt, calm, 40 off the other way.
+    enderman(&mut w, 61, [-40.5, 64.0, 0.5]);
+    meta(&mut w, 61, vec![(9, MetaValue::Float(17.0))]);
+    // Calm, full health, 50 off.
+    enderman(&mut w, 62, [0.5, 64.0, 50.5]);
+    meta(&mut w, 62, vec![(9, MetaValue::Float(40.0))]);
+    let mut p = Plan::with_table(Aim::Race, table());
+    w.ticks = 1000;
+    w.session.server_ticks = 1000;
+    p.step(&w);
+    for id in [60, 61, 62] {
+        meta(&mut w, id, vec![(18, MetaValue::Bool(true))]);
+    }
+    w.ticks = 1001;
+    w.session.server_ticks = 1001;
+    p.step(&w);
+    let notes: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    for id in [60, 61] {
+        assert!(
+            notes.contains(&format!("stared-at flag of angry enderman {id}")),
+            "{id}: {notes:?}"
+        );
+        assert!(
+            !notes.contains(&format!("near miss: enderman {id} stared at")),
+            "{id}: {notes:?}"
+        );
+    }
+    assert!(
+        notes.contains(&"near miss: enderman 62 stared at".to_owned()),
+        "{notes:?}"
+    );
+    assert_eq!(p.ender.anger_flags, 2);
+}
