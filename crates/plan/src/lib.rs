@@ -1717,6 +1717,11 @@ impl Plan {
         if let Some(c) = self.always(w, &body, tick) {
             return self.held("always", c);
         }
+        // >>> E5 (wall 46): recovery first at low health in the End.
+        if let Some(c) = self.recover_step(w, tick) {
+            return self.held("recover_step", c);
+        }
+        // <<< E5
         // >>> pearls (P3, issue 18f): the hunt's rule table, in the warped forest
         // (docs/problems/pearls-hunt.md). `None` lets the task in hand run.
         if let Some(c) = self.pearls_step(w, tick) {

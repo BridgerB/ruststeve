@@ -1001,6 +1001,43 @@ pub const ENDER_NEAR: f64 = 8.0;
 pub const STRAFE_UNSEEN_TICKS: u64 = 100;
 pub const STRAFE_RISES: i32 = 10;
 pub const ENDER_HOLD_CAP: u64 = 600;
+/// Water against endermen (wall 46): the reach angry ones are counted in, how many call for it,
+/// ticks a hurt by something not the bot counts, and ticks between a bucket's uses.
+pub const ENDER_WATER_NEAR: f64 = 16.0;
+pub const ENDER_WATER_MOST: usize = 2;
+pub const DRAGON_HURT_TICKS: u64 = 400;
+pub const BUCKET_RETRY: u64 = 10;
+/// Recovery (wall 46): health it begins under and ends over, and the blocks a cloud's reach and the
+/// dragon are kept by while it lasts.
+pub const RECOVER_BELOW: f32 = 10.0;
+pub const RECOVERED: f32 = 16.0;
+pub const RECOVER_CLEAR: f64 = 3.0;
+pub const RECOVER_DRAGON: f64 = 24.0;
+
+/// Angry endermen within `ENDER_WATER_NEAR` of `feet` (their creepy flag), and whether any of
+/// them was hurt within `DRAGON_HURT_TICKS` by something not the bot.
+pub fn angry_endermen(w: &World, feet: [f64; 3]) -> (usize, bool) {
+    let now = w.session.server_ticks;
+    let angry: Vec<&world::Entity> = w
+        .entities
+        .values()
+        .filter(|e| {
+            e.kind == EntityKind::Enderman
+                && !e.dead
+                && dist3(e.pos, feet) <= ENDER_WATER_NEAR
+                && matches!(
+                    e.metadata.get(&crate::endermen::CREEPY_INDEX),
+                    Some(MetaValue::Bool(true))
+                )
+        })
+        .collect();
+    let hurt = angry.iter().any(|e| {
+        e.hurts
+            .iter()
+            .any(|h| !h.by_bot && now.saturating_sub(h.at_tick) <= DRAGON_HURT_TICKS)
+    });
+    (angry.len(), hurt)
+}
 /// Degrees down the look is held at an enderman met in the open: its body and legs, never its eyes
 /// (E7's `keep_look` bends any look that would meet them).
 pub const ENDER_LOOK_PITCH: f32 = 25.0;
@@ -2075,6 +2112,14 @@ pub struct DragonState {
     pub ready_noted: Option<[i32; 3]>,
     #[serde(default)]
     pub ready_rise_from: Option<i32>,
+    /// The water poured against endermen and its bucket's last use (wall 46); recovering from low
+    /// health (wall 46).
+    #[serde(default)]
+    pub ender_water: Option<[i32; 3]>,
+    #[serde(default)]
+    pub ender_water_at: u64,
+    #[serde(default)]
+    pub recovering: bool,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -3690,10 +3735,12 @@ impl Plan {
     ) -> Controls {
         let feet = body.pos;
         let fc = cell_of(feet);
-        let done = self
-            .dragon
-            .pace_to
-            .is_none_or(|c| fc == c || flat(feet, mid(c)) < 1.0);
+        // A leg whose end a cloud now reaches is given up (wall 46: race 46063334187 lane 9 paced
+        // into a cloud, three 6.0 blows).
+        let clouds = clouds_only(w);
+        let done = self.dragon.pace_to.is_none_or(|c| {
+            fc == c || flat(feet, mid(c)) < 1.0 || !clear_of_breath(&clouds, mid(c))
+        });
         if done {
             self.dragon.pace_walk = None;
             let Some((_, v)) = view(w) else {
@@ -4116,6 +4163,10 @@ impl Plan {
     ///
     /// Noted "end: no pocket for enderman N (…)" at most every `FIRST_NOTE_TICKS` for each case.
     pub fn end_enderman_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        // Two or more angry, or any the dragon hurt: water at the feet (wall 46).
+        if let Some(c) = self.ender_water_step(w, tick) {
+            return Some(c);
+        }
         let Some(id) = crate::endermen::angry(w) else {
             self.dragon.ender_walk = None;
             self.dragon.ender_hold = None;
@@ -4176,8 +4227,10 @@ impl Plan {
             );
         }
         let capped = self.dragon.ender_capped;
+        // One at a time only (wall 46: race 46063334187 lane 7 fought 3 or 4 at once and lost).
+        let single = angry_endermen(w, body.pos).0 <= 1;
         // Struck from the covered cell's edge in reach, over the line (40 health, the sword's 6).
-        if covered && in_reach && above {
+        if covered && in_reach && above && single {
             self.dragon.ender_walk = None;
             return Some(self.ender_strike(w, tick, id));
         }
@@ -4271,7 +4324,7 @@ impl Plan {
         // in one, and the real server hits under a roof 3 times in 5): over the danger line it is
         // fought with the sword, the look on its body (`keep_look` keeps it off the eyes); under
         // the line, a walk away to open ground.
-        if above {
+        if above && single {
             if in_reach {
                 self.dragon.ender_walk = None;
                 return Some(self.ender_strike(w, tick, id));
@@ -4330,6 +4383,210 @@ impl Plan {
             self.dragon.ender_walk = None;
         }
         Some(c)
+    }
+
+    /// Water against endermen (wall 46): with `ENDER_WATER_MOST` or more angry within
+    /// `ENDER_WATER_NEAR`, or any of them hurt by something not the bot (the dragon's breath or
+    /// charge: race 46063334187 lane 7, four angry at once after a charge), a water bucket is
+    /// poured at the feet and the bot stands in the source: they take damage from water, teleport
+    /// away and will not path into it. Taken back once none is angry within the same reach. The
+    /// source is one deep at the feet, the head over it (E3's drowning guard). `None` when not
+    /// called for or no water bucket is held.
+    pub fn ender_water_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) {
+            return None;
+        }
+        let body = w.body?;
+        let feet = body.pos;
+        let fc = cell_of(feet);
+        let (n, hurt) = angry_endermen(w, feet);
+        let look = |to: [f64; 3]| {
+            let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
+            crate::walk::look_at(eye, to)
+        };
+        if let Some(cell) = self.dragon.ender_water {
+            if !in_water(w, cell) {
+                self.dragon.ender_water = None;
+                self.note(
+                    tick,
+                    format!("end: the water against endermen gone at {cell:?}"),
+                    format!("{n} angry within {ENDER_WATER_NEAR}"),
+                );
+                return None;
+            }
+            if n > 0 {
+                // In the source, looking at its body (`keep_look` keeps it off the eyes).
+                if fc != cell {
+                    return Some(toward(feet, mid(cell)));
+                }
+                return Some(Controls {
+                    yaw: f64::from(w.player.yaw),
+                    pitch: Some(ENDER_LOOK_PITCH),
+                    ..Controls::default()
+                });
+            }
+            // None angry near: the water taken back.
+            let target = [
+                f64::from(cell[0]) + 0.5,
+                f64::from(cell[1]) + 0.2,
+                f64::from(cell[2]) + 0.5,
+            ];
+            let (yaw, pitch) = look(target);
+            match hold::toward(w, ItemKind::Bucket) {
+                Hold::Held => {
+                    if self.acts.is_empty() && tick >= self.dragon.ender_water_at + BUCKET_RETRY {
+                        self.dragon.ender_water_at = tick;
+                        self.acts.push(Act::UseItem);
+                        self.note(
+                            tick,
+                            format!("end: the water against endermen taken back at {cell:?}"),
+                            "none angry near".to_owned(),
+                        );
+                    }
+                }
+                Hold::Act(a) => {
+                    if self.acts.is_empty() {
+                        self.acts.push(a);
+                    }
+                }
+                Hold::Wait => {}
+                Hold::Missing => {
+                    self.dragon.ender_water = None;
+                    return None;
+                }
+            }
+            return Some(Controls {
+                yaw,
+                pitch: Some(pitch),
+                ..Controls::default()
+            });
+        }
+        if (n < ENDER_WATER_MOST && !hurt) || n == 0 || !body.on_ground {
+            return None;
+        }
+        if in_water(w, fc) {
+            self.dragon.ender_water = Some(fc);
+            self.note(
+                tick,
+                format!("end: water poured at {fc:?} against {n} angry endermen"),
+                format!(
+                    "{}; stood in the source",
+                    if hurt {
+                        "one hurt by the dragon"
+                    } else {
+                        "more than one"
+                    }
+                ),
+            );
+            return None;
+        }
+        if crate::craft::count(w, ItemKind::WaterBucket) == 0 {
+            return None;
+        }
+        // Poured on the floor's top under the feet.
+        let target = [
+            f64::from(fc[0]) + 0.5,
+            f64::from(fc[1]) + 0.02,
+            f64::from(fc[2]) + 0.5,
+        ];
+        let (yaw, pitch) = look(target);
+        match hold::toward(w, ItemKind::WaterBucket) {
+            Hold::Held => {
+                if self.acts.is_empty() && tick >= self.dragon.ender_water_at + BUCKET_RETRY {
+                    self.dragon.ender_water_at = tick;
+                    self.acts.push(Act::UseItem);
+                }
+            }
+            Hold::Act(a) => {
+                if self.acts.is_empty() {
+                    self.acts.push(a);
+                }
+            }
+            Hold::Wait | Hold::Missing => {}
+        }
+        Some(Controls {
+            yaw,
+            pitch: Some(pitch),
+            ..Controls::default()
+        })
+    }
+
+    /// Recovery first at low health in the End (wall 46: race 46063334187 lane 4 walked through
+    /// clouds at 1.7): under `RECOVER_BELOW` until back over `RECOVERED`, no work is done (the
+    /// task in hand cut, a meal, an escape or a defence kept) and the bot keeps away from clouds
+    /// and the dragon, else stands. Up a pillar or a spike the way down is E4's. A meal comes
+    /// first by the always rows, which run before this one. `None` when not recovering.
+    pub fn recover_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) {
+            self.dragon.recovering = false;
+            return None;
+        }
+        let health = w.player.health?;
+        if health < RECOVER_BELOW && !self.dragon.recovering {
+            self.dragon.recovering = true;
+            self.note(
+                tick,
+                format!("recover: health {health:.1} under {RECOVER_BELOW}"),
+                format!("no work until over {RECOVERED}; food {:?}", w.player.food),
+            );
+        } else if health > RECOVERED && self.dragon.recovering {
+            self.dragon.recovering = false;
+            self.note(
+                tick,
+                format!("recover: health back to {health:.1}"),
+                "on with the work".to_owned(),
+            );
+        }
+        if !self.dragon.recovering || self.spikes_up_high(w) {
+            return None;
+        }
+        if !matches!(
+            self.task,
+            Task::Idle | Task::Eat(_) | Task::Escape(_) | Task::Defend(_)
+        ) {
+            let cut = self.task.name();
+            self.task = Task::Idle;
+            self.note(
+                tick,
+                format!("recover: {cut} cut"),
+                format!("health {health:.1} under {RECOVERED}"),
+            );
+        }
+        let body = w.body?;
+        let feet = body.pos;
+        let stand = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            ..Controls::default()
+        };
+        // The nearest threat on the plane: a cloud within its reach and `RECOVER_CLEAR`, or the
+        // dragon within `RECOVER_DRAGON`.
+        let threat = clouds_only(w)
+            .iter()
+            .filter(|b| flat(b.pos, feet) <= b.reach() + RECOVER_CLEAR)
+            .map(|b| b.pos)
+            .chain(
+                view(w)
+                    .map(|(_, v)| v.pos)
+                    .filter(|p| flat(*p, feet) <= RECOVER_DRAGON),
+            )
+            .min_by(|a, b| flat(*a, feet).total_cmp(&flat(*b, feet)));
+        let Some(t) = threat else {
+            return Some(stand);
+        };
+        let r = [feet[0] - t[0], feet[2] - t[2]];
+        let d = r[0].hypot(r[1]).max(1e-6);
+        let banned = self.bunker_columns();
+        let to = dodge_cell_within(
+            w,
+            cell_of(feet),
+            [r[1] / d, -r[0] / d],
+            None,
+            &banned,
+            Some(1.0),
+            (DODGE_MIN, DODGE_MAX),
+        );
+        Some(to.map_or(stand, |c| toward(feet, mid(c))))
     }
 
     /// One tick of a strike at enderman `id`: the weapon in hand, a swing when it is ready.
