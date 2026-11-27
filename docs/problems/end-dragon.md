@@ -267,3 +267,17 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - All three deaths in this race fit: the cloud "0.0 from its edge" of the bot, on it in the bunker (lanes 0 and 1) and in a half-dug notch (lane 2), the splash 1 to 2 blocks off.
   - A notch or bunker within 4 blocks of where a fireball lands puts its cloud on the bot. Only distance shelters: the bot more than 4 from the impact, and the cloud's growing reach kept clear after.
   - The notch still answers a charge (a body blow) and the perched flame (no fireball).
+  - **Fix (the dodge, `Plan::fireball_dodge_step`):** a dragon fireball in flight within 64, aimed within `DODGE_AIM` (6) of the bot (its velocity, else straight at it), is dodged on open ground.
+    - **Where:** sideways to its flight, `DODGE_MIN` to `DODGE_MAX` (6 to 10) from the cell the bot stood in, the side away from the dragon first (`dodge_cell`).
+    - **Which cells:** a cell stood on in the open (two sides open, the sky over it), never in the bunker's or its stair's columns, ground under every column within 3 (no void edge), and clear of every cloud.
+    - **Note:** "fireball: dodge to … (flight …, ticks …, from …)".
+    - **Never cover for a fireball:** the shelter rows, `breath_step` and `breath_ahead` read clouds only (`clouds_only`).
+    - **The notch is kept** for a charge and the perched flame. A strafe with no fireball is met standing in sight ("strafe: stood in sight at …"); the notch beside is gone.
+- **Wall 29: a hold from an angry enderman never ended** (E4's race 45942992471 lane 0: 12,000 ticks, "end: the walk from enderman … to the bunker failed" 3,071 times). An enderman with a target keeps its anger for good (its timer restarts every tick), so a hold "until it calms" never ends.
+  - **Fix (`Plan::end_enderman_step`):**
+    - Beyond `ENDER_NEAR` (8) the task goes on: it teleports to the bot only from over 16 and cannot come into a 2-high cell.
+    - Within 8 in a roofed 2-high cell: struck from there in reach over the danger line, else held.
+    - Within 8 on open ground: into the bunker (a failed walk is never tried again for that enderman), else a notch.
+    - Every hold from one enderman is capped at `ENDER_HOLD_CAP` (600), then the choice is made again ("end: the hold from enderman N capped").
+- **Wall 30: out of the dragon's sight under the sky, the strafe held** (frontier race 45943073264 on 1a54bdf, lane 1). The bot "stood by" at (13, 52, 0), ten under the surface, and the strafe held from tick 480 past 24,040. Lane 2: from 180 to 9,760.
+  - **Fix:** in a strafe, with no line from the dragon to the bot (`cover::seen_body`) for `STRAFE_UNSEEN_TICKS` (100) under the open sky, the bot rises a block at a jump until seen, at most `STRAFE_RISES` (10). With no sky it is noted once, for the End's rows to take it out ("strafe: unseen N ticks at …, no sky").
