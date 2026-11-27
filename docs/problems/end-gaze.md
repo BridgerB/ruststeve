@@ -49,3 +49,8 @@ So the stares are the discipline's own default: "look down" is not safe on high 
 
 ## Tests
 `crates/plan/tests/gaze.rs`: a strike at a crystal with an enderman behind it, a dragon look past an enderman's eyes, a dodge heading at one, a look down from a pillar over one, a clutch look while falling 2 a tick (outside the cone from the feet now, inside after the move), an eat with the held look on one, a wall outside the End and in it, a sweep of 24 yaws by 19 pitches round six endermen at four ranges, the whole planner in the End over an enderman at a pillar's foot, noted; and lane 5's clutch: the aim bent a little off both endermen, the pour sent straight down and noted.
+
+## Race 46046557927 (a9ac306, 2 lanes from the frontier, cap 24,000)
+- Lane 0 (24,000 ticks on the island): `gaze near 1 (stares 1)`. The one is the clutch pour at 13,080, sent straight down as ruled, falling onto an enderman 2.6 off (`clutch pour sent unbent near enderman 765 (pitch 90 would stare at it 2.6 off …)`); no stared-at flag followed. 13 looks kept in the run, 9 of them by the guard alone, each with its note; none of them counted near.
+- Lane 1 (10,100 ticks, killed by the dragon's breath, not an enderman): `gaze near 0 (stares 0)`.
+- Against 45994686575 at 3ac92df (8 lanes, 72,000): 12 stares and every lane's near misses from looks down. Two lanes is too few to call a rate; the frontier race on the merge is the count.
