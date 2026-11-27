@@ -1754,6 +1754,10 @@ impl Plan {
             return self.held("arrival_step", c);
         }
         // <<< Q7
+        // >>> E5 (issue 20g, wall 39): a perch the standing crystals cannot heal is fought, ahead
+        // of the crystals' own rows.
+        self.perch_fight_step(w, tick);
+        // <<< E5
         // >>> E8 (issue 20, the bow line): the shot in hand, while no task runs (ahead of the
         // pillar's driver: an open crystal is shot from the ground, docs/problems/end-bow.md).
         if let Some(c) = self.bow_step(w, tick) {
@@ -2396,6 +2400,9 @@ impl Plan {
                     running == Some(make::Always::Defend)
                         || defend::foe_except(w, rules, &ignored, never_kinds).is_some()
                 }
+                // >>> E5 (wall 39): a meal in hand in the End is cut when the dragon comes.
+                make::Always::Eat if running == Some(*row) => !self.dragon_holds_meal(w),
+                // <<< E5
                 make::Always::Eat | make::Always::Hunt if running == Some(*row) => true,
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
                 make::Always::Eat => {

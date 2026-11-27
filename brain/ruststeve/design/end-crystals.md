@@ -5,8 +5,8 @@ type: reference
 tags: [plan, end, crystals, pillar, strike, dragon]
 aliases: [spikes, Spike, StandPlan, spikes_task, spikes_step, SpikeState, pillar and strike, end crystal, guard ring, bars_shield, rise_jump, rise_click]
 status: draft
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@01c65c8 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@117843e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/spikes.rs#pub fn stand(spike: &Spike, axis: Axis) -> StandPlan {"
   - "ruststeve:crates/plan/src/spikes.rs#pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {"
@@ -41,6 +41,9 @@ Issue 20f (agent E4, `docs/problems/end-crystals.md`), the port of clojurecraft'
 
 ## The water clutch
 In the End, a fall with more than `CLUTCH_FROM` (4) under the feet and a water bucket held is caught (`Plan::spikes_clutch`, run from `spikes_step` ahead of any task): the bucket to hand, looking straight down, used every tick from `CLUTCH_AT` (3, plus a tick's fall) over the ground until it pours; landed, the water is taken back with the empty bucket. Parity e06 (E6): a 21-block fall onto water poured while falling cost 0, with none 18. Notes: clutch begun, poured, missed, over (the water taken back or left).
+
+## Blocks, the way down, the knock-off (part 2)
+Any carried full block builds a pillar (`PILLAR_BLOCKS`, counted together by `pillar_blocks`): the body in the others, the top two (`PILLAR_TOP`) and the stand's walls in end stone, the only dragon-immune one. The way down is the water: the landing water when poured, else the clutch off a side ("clutch down from"), the pillar left standing; the dig only with no water bucket. With the dragon landing, taking off or charging within `KNOCK_NEAR` (30) a bot up a pillar holds crouched: no drop, climb or stand (`knock_risk`).
 
 ## Which crystal
 The crystals nearest first: the first with an approach not refused is worked (`crystals_by_distance`), so a spike whose four approaches are refused gives way to the next. Shut in a pocket (`shut_in`, fewer than `POCKET_CELLS` standable cells reachable), the bot digs out at once rather than walk at each approach in turn.

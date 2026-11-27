@@ -508,3 +508,65 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The progress invariant: after `STAIR_WALK_TRIES` (3) failed walks in a row to the same target with no approach, the way out turns to the other axis ("the way out turned at"), a new way rather than the same walk retried. It turns straight again once a walk to a foot is found.
   - Unit tests `a_dig_out_stair_with_a_step_floor_missing_gets_the_floor_put` and `the_way_out_turned_runs_along_the_other_axis`.
 - **Lane 5's stall at (43, 53, -21)** was in E3's surface-mining trench (a 1-wide cut, "DropUnreachable"). My dig-out there made no progress toward a far foot and handed back under its own invariant, as designed.
+
+# Part 2 (from 117843e)
+
+### Wall 35: only end stone built a pillar (race 45994686575 lane 5; fixed)
+- **What happened:** "no walk to the foot: too few blocks (44 end stone held, 49 wanted for the pillar at (6, 58, -40))" from tick 46,060 to the cap. The bot carried 28 cobblestone and 64 cobbled deepslate the whole time.
+- **The fix:**
+  - Any carried full block builds a pillar (`PILLAR_BLOCKS`: cobbled deepslate, cobblestone, netherrack, blackstone, andesite, diorite, granite, tuff, end stone), and all of them count in the "blocks wanted" checks (`pillar_blocks`).
+  - The body takes the others first. The top `PILLAR_TOP` (2) blocks take end stone (`pillar_block_for`), and so do the stand's walls, falling back to any other when none is left. A stair floor takes any.
+  - The risk accepted: only end stone is dragon-immune, so a dragon flying through a pillar's body may smash it. The bot comes down by water, not by the pillar.
+  - Unit test `any_carried_full_block_builds_a_pillar_with_end_stone_at_its_top`.
+
+### Wall 36: the way down was the dig (race 45994686575 lane 3; fixed)
+- **What happened:**
+  - Landing water needed 48 end stone to spare, so with fewer, none was poured, and the pillar was dug back for its blocks: lane 3 dug from 91 to 65 between 29,780 and 31,600.
+  - That wears the pickaxe (E3's budget), and it left the bot on the pillar when the dragon perched and charged.
+- **The fix:**
+  - The landing water no longer needs end stone to spare.
+  - With no landing water but the clutch's bucket in the hotbar, the bot steps off a side that falls clear onto the clutch ("clutch down from"), the pillar left standing. Its record is let go on landing, by the waterfall's landing rule.
+  - The dig is kept only with no water bucket.
+  - Unit test `with_no_landing_water_the_way_down_is_the_clutch_not_the_dig`.
+  - E6's `end_loop` descent assertions now accept the water descents (fenced E4).
+
+### Wall 37: knocked off by the charge (race 45994686575 lanes 3 and 4; fixed for the pillar)
+- **Lane 3 (mine):**
+  - At 31,440 the dragon perched at the fountain (sitting-scanning, about 40 off) while the bot dug down its pillar at (37, 68, -25).
+  - At 31,540 it charged. "hold ended by the dragon … unguarded on a pillar; the way down" kept the dig going.
+  - At 31,600 a mob_attack hit it at y 65, and it was flung over the void to (112, 22, 45): `death.fell.assist`.
+- **Lane 4 (E5's):** on the ground at (6, 60, 45) after E5's charge dodge at 52,520, hit twice and flung to (-98, 98, 72).
+- **The fix (`knock_risk`, `KNOCK_NEAR` 30):** with the dragon landing (3), taking off (4) or charging (8) within 30:
+  - up a pillar, the bot holds crouched ("hold from the knock-off"): no drop, no climb, no stand;
+  - a climb stops ("climb held from the knock-off");
+  - no waterfall or clutch descent is begun ("no drop: the knock-off").
+  - Wall 36's water descent takes the bot off the pillar long before a perch: lane 3's descent would have begun at 29,780.
+  - Unit test `no_drop_climb_or_stand_while_the_dragon_would_knock_the_bot_off`.
+
+### Wall 38: the climb began on a perch, and the charge followed (E9's read of race 46038776204 lanes 1, 3 and 4; fixed)
+- **What happened:**
+  - Lanes 1, 3 and 4 all died `fell.assist` from a charge that came 80 to 160 ticks after "sitting-scanning -> charging".
+  - Lane 1 began "pillar up from (39, 59, 0)" at 17,420 with the dragon sitting at the fountain (phase 5) and was struck at 17,540, 11 up.
+  - Lane 3 dug down from 91, ten digs from 7,280, on through a charge that began at 7,800 ("hold ended by the dragon … the way down"), and was struck at y 83 at 7,960.
+  - The climb rule we started from ("more than 64 off, or perched") was the flaw: a perched dragon scans, then charges whoever it sees.
+- **The fix:**
+  - A climb begins only with the dragon holding (phase 0) more than 64 off (`climb_refusal`, `HOLDING_PHASE`).
+  - While the bot is up, a landing approach, landing, sitting or charge (`DESCEND_PHASES`) stops the climb ("climb stopped by the perch"). The bot comes down by water at once: the landing water if poured, else the clutch off a side that falls clear (`spikes_descend`). A strike due at the stand goes first.
+  - Within `KNOCK_NEAR` the bot holds instead (wall 37).
+  - With no water bucket, a charge within 64 holds the bot rather than digging on in the open column ("hold, not the dig, from the charge").
+  - Unit tests `a_climb_begins_only_with_the_dragon_holding_over_64_off` and `the_dragon_perching_while_the_bot_is_up_takes_it_down_by_water`.
+
+### Wall 39: the clutch's pour landed short under fast knock-back (lanes 1 and 4; fixed)
+- **What happened:** flung about 60 blocks sideways, the pour went to "beside the feet's (an edge)" columns: in lane 1 it was sent at 17,825 with 19.7 under the feet. The body landed far past it.
+- **The fix:** the landing is predicted over the whole fall (`predict_landing`: stepped tick by tick with gravity 0.08, vertical drag 0.98 and air drag 0.91, from vanilla `LivingEntity.travel`). The first column under the box whose ground the feet reach is the one the pour aims at and is timed by. Unit test `a_body_flung_sideways_lands_where_its_fall_takes_it`.
+
+### Wall 40: water counted back that wasn't, and buckets never refilled (E9's read of race 46038776204 lanes 7 and 9; fixed)
+- **What happened:**
+  - Lane 7 at 14,540: "clutch over … the water taken back" while water_bucket went 2 to 1 the same tick, again at 17,220, then 1 to 0 at 17,240. From 17,440 it was "no climb: no water" 40 and more times to 28,100, holding 3 empty buckets.
+  - Lane 9 sent "clutch pour sent (0.85 over the ground, falling 1.23)" at 10,380 while rising, at an edge. At 10,460: "clutch water left … not taken back". It was "no climb: no water" to 26,200.
+- **The fix:**
+  - "Taken back" only when more water buckets are held than when the take-back's use went (`take_back_from`). Otherwise "the water gone, not taken back".
+  - Water the bot leaves (a clutch's not taken back, a landing's with no way back to it) goes on a record (`left_water`). With no water bucket and an empty one held, the bot refills from it first, its own task: "refill from the water left at" in reach, else "to the water left at", or "no way to the water left at" with the cell dropped from the record.
+  - No clutch pour while the vertical speed is upward.
+  - Unit tests `the_clutchs_water_counts_as_taken_back_only_with_more_water_buckets`, `no_clutch_pour_while_rising` and `an_empty_bucket_refills_from_the_water_left_behind`.
+- **Lane 5** dug down through a charge (33,620 to 34,020), the same as lane 3: wall 38's descent and the no-dig hold cover it.

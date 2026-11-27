@@ -355,3 +355,19 @@ setup = [
   "execute in minecraft:the_end positioned 42.5 83 0.5 run tag @e[type=minecraft:end_crystal,sort=nearest,limit=1,distance=..4] add keep",
   "execute in minecraft:the_end run kill @e[type=minecraft:end_crystal,tag=!keep]",
 ]
+
+# dev-end-far-crystals: dev-end-island with only the two crystals past the perched dragon's heal
+# box left: (42, 0), top 82, caged, and (-42, -1), top 88 (config/end.toml; the box is +-40 on x
+# and z, from the jar). For E5's perch fight with crystals standing and none able to heal it.
+[[start]]
+name = "dev-end-far-crystals"
+stage = "end"
+place = { dimension = "minecraft:the_end", x = 20.5, y = 80, z = 0.5 }
+spread = 4
+kit = [["iron_sword", 1], ["stone_pickaxe", 3], ["cooked_beef", 32], ["end_stone", 192], ["water_bucket", 2], ["bucket", 1], ["iron_helmet", 1], ["iron_chestplate", 1], ["iron_leggings", 1], ["iron_boots", 1], ["shield", 1]]
+setup = [
+  "execute in minecraft:the_end run forceload add -64 -64 64 64",
+  "execute in minecraft:the_end positioned 42.5 83 0.5 run tag @e[type=minecraft:end_crystal,sort=nearest,limit=1,distance=..4] add keep",
+  "execute in minecraft:the_end positioned -41.5 89 -0.5 run tag @e[type=minecraft:end_crystal,sort=nearest,limit=1,distance=..4] add keep",
+  "execute in minecraft:the_end run kill @e[type=minecraft:end_crystal,tag=!keep]",
+]
