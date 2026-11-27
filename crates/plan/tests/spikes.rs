@@ -753,13 +753,14 @@ fn a_fall_from_a_pillar_is_caught_with_the_water_bucket_and_the_water_taken_back
     assert!(p.take_acts().is_empty(), "too high to pour yet");
     fall(&mut w, 66.5);
     p.spikes_clutch(&w, 102);
-    assert!(
-        p.take_acts().is_empty(),
-        "in reach, but the next tick is too: the later one"
+    assert_eq!(
+        p.take_acts(),
+        vec![Act::UseItem],
+        "a tick before the last in reach (the server places it on handling the packet)"
     );
     fall(&mut w, 65.0);
     p.spikes_clutch(&w, 103);
-    assert_eq!(p.take_acts(), vec![Act::UseItem], "the last tick in reach");
+    assert!(p.take_acts().is_empty(), "one pour only");
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     fall(&mut w, 64.5);
     p.spikes_clutch(&w, 104);
@@ -874,8 +875,9 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
         v = (v - 0.08) * 0.98;
     }
     // At terminal speed a tick falls 3.9, more than the 2.78 the reach spans over the ground
-    // (4.4 less the eye's 1.62), so a fall's phase can skip it: this one's does not.
-    assert_eq!(pours.len(), 1, "{pours:?}");
+    // (4.4 less the eye's 1.62), so a fall's phase can skip it: this one's does not. The last tick
+    // in reach and the one before it qualify; the clutch sends at the first.
+    assert!((1..=2).contains(&pours.len()), "{pours:?}");
     let (py, pv) = pours[0];
     let sent = py + pv;
     assert!(sent > ground, "the feet still over the ground: {sent}");
@@ -896,7 +898,7 @@ fn a_48_block_fall_at_terminal_speed_pours_once_in_the_last_tick_in_reach() {
             y += v;
             v = (v - 0.08) * 0.98;
         }
-        assert_eq!(n, 1, "a fall from {h}");
+        assert!((1..=2).contains(&n), "a fall from {h}: {n}");
     }
 }
 

@@ -292,3 +292,6 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The clutch saved one fall (21.8). The bot died on a second fall, its pour sent.
 - **Lane 1:** died in E5's breath walk ("a notch down where the feet are").
 - **The refill:** each try now takes the next cell of the square in turn, within the pour's reach (4.4). A give-up notes the held item, the buckets' slots and the point aimed at.
+- **The pour a tick earlier** (the orchestrator: two sent pours did not save a bot, and the server places the water when it handles the packet, perhaps after the feet arrive):
+  - The pour goes in the tick whose sent position is in reach while the one two ticks on is not, so it is one tick before the last in reach when two qualify. Only one is sent (`Clutch::sent_at`): a second use would take the water back up.
+  - "clutch pour sent" now carries the tick and the predicted ticks to landing.
