@@ -22,6 +22,10 @@ path = "src/bin/ledger.rs"
 name = "replan"
 path = "src/bin/replan.rs"
 
+[[bin]]
+name = "gaze"
+path = "src/bin/gaze.rs"
+
 [dependencies]
 data = { path = "../data" }
 plan = { path = "../plan" }
