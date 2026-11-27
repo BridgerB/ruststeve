@@ -373,3 +373,16 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - The fight hands back to the crystals when the perch is over ("dragon: the perch fight over, back to the crystals").
   - Every heal is in the ledger ("dragon healed", with the total, the crystals standing and the nearest's distance), at most every 200 ticks.
   - A meal in the End only with the dragon in its holding pattern more than 40 off; a meal in hand is cut when it comes (`dragon_holds_meal`).
+- **Dev race 46040826241 (6c6d484, dev-end-two-crystals, 2 lanes), lane 1 read mid-run:**
+  - The keep tags held: crystals #86 (42.5, 83, 0.5) and #98 (12.5, 77, 39.5) stood, and #97 was seen only at tick 40.
+  - Perches were fought (1,280, 2,480, 3,860). Four head strikes took the dragon to 190.8, and #98, in heal reach of the perch, healed it back to 200 by 4,480 ("dragon healed 20.2 in all").
+  - **Fix:** the perch is fought only with no standing crystal in heal reach of it. The count alone is not enough.
+
+### Wall 40 (race 46038776204, 117843e): no dodge from where the bot stood
+- **Lanes 1, 3 and 4** fell from a charge 80 to 160 ticks after "sitting-scanning → charging", with no dodge cell: on a pillar, or in E3's surface pit.
+  - **Fix (`Plan::charge_ready_step`):** from the landing approach to the end of the perch, a bot not fighting it gets onto ground it can dodge a charge from.
+    - The check is a dodge cell from where it stands, every 20 ticks.
+    - Off a short drop beside; on a pillar's top, dug down a block at a time; in a pit, risen a block at a jump (at most 6), or the wall toward the open dug for a block.
+    - Up a crystal's pillar or spike it is E4's. Noted "charge: no dodge from … with the dragon coming down".
+- **Lane 8:** "fireball: no dodge cell from [34, 55, 53] (ticks 58)": risen out of a one-deep pit, still under the aim, no new choice. Then a meal was begun in the cloud.
+  - **Fix:** the dodge cell is chosen again after a rise and every `DODGE_RETRY` (10) ticks while none is had. No meal starts or goes on with a cloud on the feet or within reach (`dragon_holds_meal`).

@@ -663,6 +663,8 @@ pub const DODGE_STEPS: usize = 16;
 /// stair, 3 under the ground: frontier race 45964846590, "no dodge cell from [13, 59, 0]").
 /// Blocks a bot with no dodge cell rises out of a pit or a shaft at most.
 pub const DODGE_RISES: i32 = 6;
+/// Ticks between choices of a dodge cell while none is had.
+pub const DODGE_RETRY: u64 = 10;
 pub const DODGE_YS: [i32; 8] = [0, 1, -1, 2, -2, 3, 4, -3];
 /// Blocks a tick a fireball flies, for the note's ticks to its hit (dev race 45940964839: about
 /// 40 ticks over 30 to 40 blocks).
@@ -697,6 +699,8 @@ pub const CRYSTALS_FIGHT_MAX: usize = 2;
 pub const HEAL_NOTE_TICKS: u64 = 200;
 /// Blocks on the plane the holding dragon keeps from a bot that eats (wall 39).
 pub const MEAL_CLEAR: f64 = 40.0;
+/// Ticks between the checks of a dodge cell from where the bot stands as the dragon comes down.
+pub const READY_CHECK_TICKS: u64 = 20;
 
 /// The nearest standing crystal's distance from `p`, if any is shown.
 pub fn nearest_crystal(w: &World, p: [f64; 3]) -> Option<f64> {
@@ -731,7 +735,10 @@ pub fn fight_with_crystals(w: &World) -> Option<(usize, f64)> {
         .values()
         .filter(|e| e.kind == EntityKind::EndCrystal && !e.dead)
         .any(|e| heals_from(PERCH_POINT, e.pos));
-    (n <= CRYSTALS_FIGHT_MAX || !heal).then_some((n, near))
+    // A crystal in heal reach undoes the strikes (race 46040826241 lane 1: four head strikes to
+    // 190.8, healed back to 200 in 260 ticks by (12, 39)): fought only with none in reach.
+    let _ = CRYSTALS_FIGHT_MAX;
+    (!heal).then_some((n, near))
 }
 
 /// The key of a walk out of the body's knockback (`knock_risk`).
@@ -2024,6 +2031,18 @@ pub struct DragonState {
     pub heal_noted_at: Option<u64>,
     #[serde(default)]
     pub crystal_fights: u32,
+    /// The dodge's last choice (`DODGE_RETRY`); the charge-ready check's tick, its outcome and the
+    /// cell last noted.
+    #[serde(default)]
+    pub dodge_at: u64,
+    #[serde(default)]
+    pub ready_checked_at: Option<u64>,
+    #[serde(default)]
+    pub ready: bool,
+    #[serde(default)]
+    pub ready_noted: Option<[i32; 3]>,
+    #[serde(default)]
+    pub ready_rise_from: Option<i32>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -3010,7 +3029,11 @@ impl Plan {
                 );
                 self.notch_leave(w);
             }
-            return self.notch_exit_step(w, tick);
+            if let Some(c) = self.notch_exit_step(w, tick) {
+                return Some(c);
+            }
+            // The dragon coming down: onto ground a charge can be dodged from (wall 40).
+            return self.charge_ready_step(w, tick);
         };
         // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
         if self.spikes_up_high(w) {
@@ -3412,6 +3435,7 @@ impl Plan {
                 return None;
             }
             self.dragon.dodge_id = Some(id);
+            self.dragon.dodge_at = tick;
             self.dragon.dodge_walk = None;
             // From water no walk plans: pressed straight on from the first tick.
             self.dragon.dodge_straight = in_water(w, cell_of(feet));
@@ -3470,6 +3494,34 @@ impl Plan {
             yaw: f64::from(w.player.yaw),
             ..Controls::default()
         };
+        // No cell yet: chosen again after a rise and every `DODGE_RETRY` ticks (race 46038776204
+        // lane 8: risen out of a one-deep pit, still under the aim, no new choice).
+        if self.dragon.dodge_to.is_none()
+            && let Some(from) = self.dragon.dodge_from
+            && (cell_of(feet)[1] > from[1] || tick >= self.dragon.dodge_at + DODGE_RETRY)
+        {
+            self.dragon.dodge_at = tick;
+            let banned = self.bunker_columns();
+            if let Some(c) = dodge_cell(
+                w,
+                cell_of(feet),
+                dir,
+                view(w).map(|(_, v)| v.pos),
+                &banned,
+                None,
+            ) {
+                self.dragon.dodge_to = Some(c);
+                self.dragon.dodges += 1;
+                self.note(
+                    tick,
+                    format!("fireball: dodge to {c:?}"),
+                    format!(
+                        "chosen again from {:?} after the rise or a wait",
+                        cell_of(feet)
+                    ),
+                );
+            }
+        }
         let Some(c) = self.dragon.dodge_to else {
             // No way out on foot under the open sky (a pit, the bunker's shaft with its stair shut:
             // frontier race 45969992660 lane 2): up a block at a jump, at most `DODGE_RISES`.
@@ -4241,9 +4293,107 @@ impl Plan {
         let Some(feet) = w.body.map(|b| b.pos) else {
             return false;
         };
+        // Nor with a cloud on the feet or within reach (race 46038776204 lane 8: a meal begun in
+        // the cloud, dead in 60 ticks).
+        if breathed(&breaths(w), feet, OUT_SLACK) {
+            return true;
+        }
         view(w).is_some_and(|(_, v)| {
             v.phase() != Some(Phase::HoldingPattern) || flat(v.pos, feet) <= MEAL_CLEAR
         })
+    }
+
+    /// From the landing approach to the end of the perch, a bot not fighting it gets onto ground it
+    /// can dodge a charge from (`dodge_cell` from where it stands, checked every
+    /// `READY_CHECK_TICKS`): a short drop off a step or a low pillar, else a rise out of a pit (a
+    /// block at a jump) or the wall toward the open dug for a block. Up a crystal's pillar or spike
+    /// it is E4's. The charge comes 80 to 160 ticks after the scan begins (race 46038776204 lanes
+    /// 1, 3 and 4 fell from it with no dodge cell, on a pillar or in a surface pit). `None` when
+    /// ready or nothing is to be done.
+    pub fn charge_ready_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) || matches!(self.task, Task::Dragon(_)) || self.spikes_up_high(w) {
+            return None;
+        }
+        let (_, v) = view(w)?;
+        let coming = matches!(
+            v.phase(),
+            Some(
+                Phase::LandingApproach
+                    | Phase::Landing
+                    | Phase::SittingScanning
+                    | Phase::SittingAttacking
+                    | Phase::SittingFlaming
+            )
+        );
+        if !coming {
+            self.dragon.ready_checked_at = None;
+            self.dragon.ready_rise_from = None;
+            return None;
+        }
+        let body = w.body?;
+        let feet = body.pos;
+        let fc = cell_of(feet);
+        if self
+            .dragon
+            .ready_checked_at
+            .is_none_or(|t| tick >= t + READY_CHECK_TICKS)
+        {
+            self.dragon.ready_checked_at = Some(tick);
+            let to = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+            let d = to[0].hypot(to[1]).max(1e-6);
+            let banned = self.bunker_columns();
+            self.dragon.ready =
+                dodge_cell(w, fc, [to[0] / d, to[1] / d], Some(v.pos), &banned, None).is_some();
+            if !self.dragon.ready && self.dragon.ready_noted != Some(fc) {
+                self.dragon.ready_noted = Some(fc);
+                self.note(
+                    tick,
+                    format!("charge: no dodge from {fc:?} with the dragon coming down"),
+                    "onto ground a charge can be dodged from".to_owned(),
+                );
+            }
+        }
+        if self.dragon.ready {
+            return None;
+        }
+        // A short drop beside (a step, a low pillar): off it.
+        let mut cells = crate::path::Cells::new(w);
+        if let Some(c) = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .find_map(|(dx, dz)| {
+                (1..=3).find_map(|dy| {
+                    let c = (fc[0] + dx, fc[1] - dy, fc[2] + dz);
+                    (cells.clear((c.0, fc[1], c.2))
+                        && cells.clear((c.0, fc[1] + 1, c.2))
+                        && cells.standable(c))
+                    .then_some([c.0, c.1, c.2])
+                })
+            })
+        {
+            return Some(toward(feet, mid(c)));
+        }
+        if !world::stage::open_sky(w) {
+            return None;
+        }
+        // A pillar's top (air beside the block under the feet on every side): dug down a block at
+        // a time, never risen higher.
+        let air = |c: [i32; 3]| {
+            w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
+        };
+        if [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .all(|(dx, dz)| air([fc[0] + dx, fc[1] - 1, fc[2] + dz]))
+        {
+            return self.charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]]);
+        }
+        // A pit: up a block at a jump, or the wall toward the open dug for a block.
+        if crate::spikes::pillar_item(w).is_none() {
+            let side = [feet[0] + 6.0, feet[1], feet[2]];
+            let n = wall_toward(w, feet, cell_of(side))?;
+            return self.charge_dig_step(w, tick, n);
+        }
+        let from = *self.dragon.ready_rise_from.get_or_insert(fc[1]);
+        (fc[1] < from + DODGE_RISES).then(|| self.rise_step(w, tick, body))
     }
 
     /// The fight on a perch with crystals standing: begun when the dragon sits or lands with

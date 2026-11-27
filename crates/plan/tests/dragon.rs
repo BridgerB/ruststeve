@@ -2129,9 +2129,12 @@ fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
     };
     let spike = [42.5, 83.0, 0.5];
     let other = [12.5, 77.0, 39.5];
+    // Two standing, one ((12, 39)) able to heal it at the perch: not fought (race 46040826241
+    // lane 1: struck to 190.8, healed back to 200); the other alone: fought.
+    assert!(dragon::fight_with_crystals(&sat(&[spike, other])).is_none());
     assert_eq!(
-        dragon::fight_with_crystals(&sat(&[spike, other])).map(|(n, _)| n),
-        Some(2)
+        dragon::fight_with_crystals(&sat(&[spike])).map(|(n, _)| n),
+        Some(1)
     );
     // Three standing, one ((12, 39)) in the heal's box from the perch: not fought.
     assert!(dragon::heals_from(dragon::PERCH_POINT, other));
@@ -2148,15 +2151,15 @@ fn a_perch_is_fought_with_two_crystals_standing_out_of_heal_reach() {
         dragon::fight_with_crystals(&sat(&[spike, [-41.5, 89.0, -0.5], [50.5, 80.0, 50.5]]))
             .is_some()
     );
-    // Two standing, the dragon sitting: the fight begun, the task cut.
-    let w = sat(&[spike, other]);
+    // One standing out of heal reach, the dragon sitting: the fight begun, the task cut.
+    let w = sat(&[spike]);
     let mut p = Plan::new(Aim::Race);
     p.perch_fight_step(&w, 0);
     assert!(matches!(p.task, plan::Task::Dragon(_)));
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "dragon: the perch fought with 2 crystals standing")
+            .any(|e| e.what == "dragon: the perch fought with 1 crystals standing")
     );
     assert!(p.dragon_task(&w, 0).is_some());
     // Flying: never begun.
@@ -2194,4 +2197,76 @@ fn a_heal_is_written_to_the_ledger_and_a_meal_waits_for_the_dragon_far_off() {
     let mut strafe = end_at(feet);
     with_dragon(&mut strafe, [0.5, 90.0, 60.5], 1, 0.0);
     assert!(p.dragon_holds_meal(&strafe));
+    // A cloud on the feet, the dragon holding far: no meal (race 46038776204 lane 8).
+    let mut cloudy = end_at(feet);
+    with_dragon(&mut cloudy, [0.5, 90.0, 60.5], 0, 0.0);
+    cloud(&mut cloudy, 50, [12.5, 64.0, 0.5], 3.0);
+    assert!(p.dragon_holds_meal(&cloudy));
+}
+
+#[test]
+fn with_the_dragon_coming_down_the_bot_gets_onto_ground_it_can_dodge_a_charge_from() {
+    // Race 46038776204 lanes 1, 3 and 4: a charge 80 to 160 ticks after the scan began, no
+    // dodge cell (on a pillar, in a surface pit), knocked off.
+    let coming = |w: &mut World| with_dragon(w, [-40.5, 90.0, 0.5], 2, 0.0);
+    let blocks = |w: &mut World| {
+        w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
+        w.held = 0;
+    };
+    let set = |w: &mut World, cells: &[(i32, i32, i32)], k: BlockKind| {
+        for c in cells {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: *c,
+                state: state(k),
+            }));
+        }
+    };
+    // A pit two deep: no walk out; risen a block at a jump.
+    let mut pit = end_at([12.5, 62.0, 0.5]);
+    set(&mut pit, &[(12, 62, 0), (12, 63, 0)], BlockKind::Air);
+    coming(&mut pit);
+    blocks(&mut pit);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    let c = p.charge_step(&pit, 0).expect("out of the pit");
+    assert!(c.jump, "{c:?}");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "charge: no dodge from [12, 62, 0] with the dragon coming down")
+    );
+    // A pit one deep: a step out, a dodge to be had; nothing to do.
+    let mut shallow = end_at([12.5, 63.0, 0.5]);
+    set(&mut shallow, &[(12, 63, 0)], BlockKind::Air);
+    coming(&mut shallow);
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    assert_eq!(q.charge_step(&shallow, 0), None);
+    // A short pillar (two high): a drop to the ground, a dodge to be had; nothing to do.
+    let mut low = end_at([12.5, 66.0, 0.5]);
+    set(&mut low, &[(12, 64, 0), (12, 65, 0)], BlockKind::EndStone);
+    coming(&mut low);
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([60, FLOOR - 4, 60]);
+    assert_eq!(r.charge_step(&low, 0), None);
+    // A pillar five high: dug down, never risen.
+    let mut tall = end_at([12.5, 69.0, 0.5]);
+    set(
+        &mut tall,
+        &[
+            (12, 64, 0),
+            (12, 65, 0),
+            (12, 66, 0),
+            (12, 67, 0),
+            (12, 68, 0),
+        ],
+        BlockKind::EndStone,
+    );
+    coming(&mut tall);
+    blocks(&mut tall);
+    let mut t = Plan::new(Aim::Race);
+    t.bunker = Some([60, FLOOR - 4, 60]);
+    let c = t.charge_step(&tall, 0).expect("down");
+    assert!(!c.jump);
+    assert!(t.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
 }
