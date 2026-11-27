@@ -484,6 +484,8 @@ pub fn clear_of_breath(breaths: &[Breath], p: [f64; 3]) -> bool {
 pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> Option<[i32; 3]> {
     let clouds = breaths(w);
     let v = view(w).map(|(_, v)| v).filter(grounded);
+    // While it lands, sits or takes off: cells off the fountain first (its knock at the takeoff).
+    let knock = view(w).is_some_and(|(_, v)| grounded(&v) || v.phase() == Some(Phase::Takeoff));
     let fc = cell_of(feet);
     let mut cells = crate::path::Cells::new(w);
     let mut best: Option<(f64, [i32; 3])> = None;
@@ -508,8 +510,13 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
             {
                 continue;
             }
-            if best.is_none_or(|(bd, bc)| d0 < bd || (d0 == bd && c < bc)) {
-                best = Some((d0, c));
+            let score = if knock && from_fountain(p) < KNOCK_CLEAR + 2.0 {
+                d0 + f64::from(OUT_SEARCH) * 2.0
+            } else {
+                d0
+            };
+            if best.is_none_or(|(bd, bc)| score < bd || (score == bd && c < bc)) {
+                best = Some((score, c));
             }
         }
     }
@@ -654,6 +661,8 @@ pub const DODGE_NODES: u32 = 800;
 pub const DODGE_STEPS: usize = 16;
 /// Heights off the feet a dodge cell is looked for at, nearest first: up to 4 (from the bunker's
 /// stair, 3 under the ground: frontier race 45964846590, "no dodge cell from [13, 59, 0]").
+/// Blocks a bot with no dodge cell rises out of a pit or a shaft at most.
+pub const DODGE_RISES: i32 = 6;
 pub const DODGE_YS: [i32; 8] = [0, 1, -1, 2, -2, 3, 4, -3];
 /// Blocks a tick a fireball flies, for the note's ticks to its hit (dev race 45940964839: about
 /// 40 ticks over 30 to 40 blocks).
@@ -670,6 +679,60 @@ pub const FOUNTAIN_CLEAR: f64 = 5.0;
 
 /// The key of a dodge begun before its fireball is seen (`fire_imminent`).
 pub const IMMINENT: i32 = i32::MIN;
+/// The key of a dodge from a charge (`charging_at`).
+pub const CHARGE: i32 = i32::MIN + 1;
+/// The key of a walk out of the body's knockback (`knock_risk`).
+pub const KNOCK: i32 = i32::MIN + 2;
+/// Blocks on the plane from the dragon's body the bot keeps while it lands or takes off (its wings
+/// knock back what is within their boxes grown by 4 whenever it is not sitting, `EnderDragon`;
+/// frontier race 45964846590 lane 3: 10 off the fountain at the takeoff, flung 85 over the void),
+/// within `KNOCK_ZONE` of the fountain; and the blocks behind a strike's stand, away from the
+/// body, that must have ground under them (no void, no edge).
+pub const KNOCK_CLEAR: f64 = 10.0;
+pub const KNOCK_ZONE: f64 = 20.0;
+pub const KNOCK_BEHIND: i32 = 16;
+
+/// The dragon landing or taking off within `KNOCK_ZONE` of the fountain with the bot within
+/// `KNOCK_CLEAR` of its body on the plane: the way (as a fireball's flight, so the dodge's
+/// sideways is straight away from the body) and the blocks, else `None`. Never while it sits:
+/// the strike's time, and no knockback then.
+pub fn knock_risk(w: &World, feet: [f64; 3]) -> Option<([f64; 2], f64)> {
+    let (_, v) = view(w)?;
+    if !matches!(v.phase(), Some(Phase::Landing | Phase::Takeoff))
+        || flat(v.pos, [FOUNTAIN[0], 0.0, FOUNTAIN[1]]) > KNOCK_ZONE
+    {
+        return None;
+    }
+    let r = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+    let d = r[0].hypot(r[1]);
+    if !(1e-6..KNOCK_CLEAR).contains(&d) {
+        return None;
+    }
+    // The dodge goes sideways to its "flight": a flight square to the way out makes it outward.
+    Some(([r[1] / d, -r[0] / d], d))
+}
+
+/// Ground under every column from `c` out to `KNOCK_BEHIND` away from `from` on the plane (a
+/// knock from `from` lands on the island, never past its edge).
+pub fn ground_behind(w: &World, from: [f64; 3], c: [i32; 3]) -> bool {
+    let p = mid(c);
+    let r = [p[0] - from[0], p[2] - from[2]];
+    let d = r[0].hypot(r[1]);
+    if d < 1e-6 {
+        return true;
+    }
+    (1..=KNOCK_BEHIND).all(|k| {
+        let k = f64::from(k);
+        let (x, z) = (
+            (p[0] + r[0] / d * k).floor() as i32,
+            (p[2] + r[1] / d * k).floor() as i32,
+        );
+        ((c[1] - EDGE_DEPTH)..=(c[1] + 2)).any(|y| {
+            w.block_at(world::BlockPos::new(x, y, z))
+                .is_some_and(|b| b != BlockKind::Air)
+        })
+    })
+}
 /// The cosine of the angle off the strafing dragon's facing at which its fire is taken as due:
 /// it fires within 10 degrees after 5 ticks in sight (`DragonStrafePlayerPhase`), 20 gives the
 /// turn's last ticks to the walk.
@@ -1094,6 +1157,10 @@ pub fn head_stand_for(v: &DragonView, w: &World, low: bool) -> Option<[i32; 3]> 
                 continue;
             };
             if !head_stand_ok(v, &clouds, c, STRIKE_REACH - REACH_SLACK) {
+                continue;
+            }
+            // Ground behind, away from the body: a blow or the takeoff's knock lands on the island.
+            if !ground_behind(w, v.pos, c) {
                 continue;
             }
             if low
@@ -1890,6 +1957,9 @@ pub struct DragonState {
     pub pace_legs: u32,
     #[serde(default)]
     pub dodge_straight: bool,
+    /// The cell out of a breath pressed straight on toward when no walk planned (wall 36).
+    #[serde(default)]
+    pub breath_straight: Option<[i32; 3]>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -2577,9 +2647,15 @@ impl Plan {
             }
             return None;
         };
-        // In a notch already: down and roofed, never a walk out sideways.
-        if self.dragon.breath_notch {
-            return Some(self.notch_dig_step(w, tick, crouch, "breath"));
+        // Never a notch under a breath (wall 36: a cloud on the body reaches it there; dev race
+        // 45964846590 lanes 4, 5, 6 dug one under the cloud and died in it): out on foot, pressed
+        // straight on when no walk plans.
+        self.dragon.breath_notch = false;
+        if let Some(t) = self.dragon.breath_straight {
+            if cell_of(feet) != t && !clear_of_breath(&clouds, feet) {
+                return Some(toward(feet, mid(t)));
+            }
+            self.dragon.breath_straight = None;
         }
         // Shelter near (the bunker within `BUNKER_NEAR`): into it, down, never out sideways
         // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
@@ -2588,22 +2664,11 @@ impl Plan {
         // And only a bunker shut, roof and door: an open one lets the fireball in (frontier race
         // 45931225605 lane 1: sheltered in it, the cloud on the bot inside it).
         if let Some(b) = self.bunker
+            && cell_of(feet) != b
             && flat(feet, mid(b)) <= BUNKER_NEAR
-            && (cell_of(feet) == b || (clear_of_breath(&clouds, mid(b)) && self.bunker_shut(w)))
+            && clear_of_breath(&clouds, mid(b))
+            && self.bunker_shut(w)
         {
-            if cell_of(feet) == b {
-                self.dragon.breath_notch = true;
-                self.note(
-                    tick,
-                    format!("breath: in the bunker at {b:?}, a notch down"),
-                    format!(
-                        "a breath {:.1} off, radius {:.1}",
-                        flat(on.pos, feet),
-                        on.radius
-                    ),
-                );
-                return Some(self.notch_dig_step(w, tick, crouch, "breath"));
-            }
             let cell: Cell = (b[0], b[1], b[2]);
             if self
                 .dragon
@@ -2717,14 +2782,29 @@ impl Plan {
                 self.dragon.breath_refused.push(target);
             }
             if let TaskStatus::Failed(e) = status {
-                // No way out on foot: down a notch where the feet are, roofed, not a dig sideways
-                // through walls (E4's race 45912100302 lane 0; frontier lane 1 on the stair).
-                self.dragon.breath_notch = true;
+                // Walled in: the wall toward the cell out dug (the next tick's walk digs on).
+                if let Some(feet) = w.body.map(|b| b.pos)
+                    && let Some(n) = wall_toward(w, feet, target)
+                {
+                    self.dragon.breath_wall = Some(n);
+                    self.note(
+                        tick,
+                        format!("walk out of the breath to {target:?} failed: {e:?}"),
+                        format!("the wall toward it dug at {n:?}"),
+                    );
+                    return self.charge_dig_step(w, tick, n);
+                }
+                // No walk planned (water, a stair, a notch's floor): pressed straight on toward the
+                // cell out, never a notch under the cloud (wall 36).
+                self.dragon.breath_straight = Some(target);
                 self.note(
                     tick,
                     format!("walk out of the breath to {target:?} failed: {e:?}"),
-                    "a notch down where the feet are".to_owned(),
+                    "pressed straight on toward it".to_owned(),
                 );
+                if let Some(feet) = w.body.map(|b| b.pos) {
+                    return Some(toward(feet, mid(target)));
+                }
             }
         }
         if c.pitch.is_none() {
@@ -2756,6 +2836,16 @@ impl Plan {
             .is_none()
             .then(|| strafing_at(w, body.pos).or(fireball))
             .flatten();
+        // Landing or taking off with the bot by its body: out of the knock (wall 36), ahead of the
+        // rest (no charge, no strafe then).
+        if charge.is_none()
+            && strafe.is_none()
+            && knock_risk(w, body.pos).is_some()
+            && world::stage::open_sky(w)
+            && !self.spikes_up_high(w)
+        {
+            return self.fireball_dodge_step(w, tick);
+        }
         let Some(d) = charge.or(strafe) else {
             self.dragon.dodge_id = None;
             self.dragon.dodge_walk = None;
@@ -2797,8 +2887,10 @@ impl Plan {
         // the bot stood (wall 28: its cloud is put on a body within 4 of its hit, walls or not).
         // Ahead of the walk out of a cloud on the feet: the dodge cell is clear of every cloud,
         // and the walk out went the other way (dev race 45947481217 lane 2, wall 32).
-        if charge.is_none()
-            && (fireball.is_some() || fire_imminent(w, body.pos).is_some())
+        if (charge.is_some()
+            || fireball.is_some()
+            || fire_imminent(w, body.pos).is_some()
+            || knock_risk(w, body.pos).is_some())
             && world::stage::open_sky(w)
         {
             if let Some(c) = self.fireball_dodge_step(w, tick) {
@@ -2832,9 +2924,8 @@ impl Plan {
             if let Some(c) = self.strafe_seen_step(w, tick, body, cloud) {
                 return c;
             }
-            if fireball.is_some() && !cloud {
-                return None;
-            }
+            // No cover for a cloud (wall 36): the walk out of it is `breath_step`'s.
+            return None;
         }
         if !world::stage::open_sky(w) {
             return None;
@@ -2879,7 +2970,7 @@ impl Plan {
             // No bunker near: a notch two deep where the feet are, dug at once and dropped into,
             // under the charge's head and wings (E4's race 4; race 45895541443 lane 2 crouched on
             // the surface and took 10, then 5 and 5).
-            return Some(self.notch_dig_step(w, tick, crouch, "charge"));
+            return Some(crouch);
         };
         let cell: Cell = (b[0], b[1], b[2]);
         if self
@@ -3013,7 +3104,7 @@ impl Plan {
         // Hidden in its notch.
         if self.dragon.notch_from.is_some_and(|f| fc[1] <= f[1] - 2) {
             if cloud {
-                return Some(Some(self.notch_dig_step(w, tick, crouch, "strafe")));
+                return Some(Some(crouch));
             }
             let since = *self.dragon.hidden_since.get_or_insert(tick);
             if tick < since + STRAFE_HIDE_TICKS {
@@ -3139,15 +3230,33 @@ impl Plan {
                 )
             }
             // No fireball yet, the strafing dragon facing the bot: its fire is due (wall 34).
-            None => match fire_imminent(w, feet) {
+            None => match fire_imminent(w, feet)
+                .or_else(|| {
+                    // A charge: it flies at where the bot is, dodged sideways like a fireball (wall
+                    // 36: no notch for it).
+                    let (_, v) = view(w)?;
+                    charging_at(w, feet)?;
+                    let to = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+                    let d = to[0].hypot(to[1]);
+                    (d > 1e-6).then(|| ([to[0] / d, to[1] / d], d))
+                })
+                .or_else(|| knock_risk(w, feet))
+            {
                 Some((dir, d)) => {
                     // At the leg's end with the fire still due: a dodge again from here.
-                    if self.dragon.dodge_id == Some(IMMINENT)
+                    if matches!(self.dragon.dodge_id, Some(IMMINENT | CHARGE | KNOCK))
                         && self.dragon.dodge_to.is_some_and(|c| cell_of(feet) == c)
                     {
                         self.dragon.dodge_id = None;
                     }
-                    (IMMINENT, dir, d, 0.0)
+                    let key = if fire_imminent(w, feet).is_some() {
+                        IMMINENT
+                    } else if charging_at(w, feet).is_some() {
+                        CHARGE
+                    } else {
+                        KNOCK
+                    };
+                    (key, dir, d, 0.0)
                 }
                 None => {
                     self.dragon.dodge_id = None;
@@ -3183,7 +3292,14 @@ impl Plan {
                     self.dragon.dodges += 1;
                     self.note(
                         tick,
-                        format!("fireball: dodge to {c:?}"),
+                        format!(
+                            "{}: dodge to {c:?}",
+                            match id {
+                                CHARGE => "charge",
+                                KNOCK => "knock",
+                                _ => "fireball",
+                            }
+                        ),
                         format!(
                             "{}flight {:.2},{:.2}; ticks {eta:.0}; from {from:?}, {:.1} off its line; {} dodges",
                             if id == IMMINENT {
@@ -3202,7 +3318,7 @@ impl Plan {
                     tick,
                     format!("fireball: no dodge cell from {from:?}"),
                     format!(
-                        "flight {:.2},{:.2}; ticks {eta:.0}; stood in the open",
+                        "flight {:.2},{:.2}; ticks {eta:.0}; risen a block at a jump",
                         dir[0], dir[1]
                     ),
                 ),
@@ -3213,6 +3329,14 @@ impl Plan {
             ..Controls::default()
         };
         let Some(c) = self.dragon.dodge_to else {
+            // No way out on foot under the open sky (a pit, the bunker's shaft with its stair shut:
+            // frontier race 45969992660 lane 2): up a block at a jump, at most `DODGE_RISES`.
+            if let Some(from) = self.dragon.dodge_from
+                && cell_of(feet)[1] < from[1] + DODGE_RISES
+                && w.body.is_some()
+            {
+                return Some(self.rise_step(w, tick, body));
+            }
             return Some(stand);
         };
         let cell: Cell = (c[0], c[1], c[2]);
