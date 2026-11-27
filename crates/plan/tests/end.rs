@@ -59,6 +59,9 @@ fn world(solid: usize, cx: std::ops::RangeInclusive<i32>, pos: [f64; 3]) -> Worl
     w.player.pos = Some(pos);
     w.player.health = Some(20.0);
     w.player.food = Some(20);
+    // The bunker and the stock tunnels come after the crystals (the coordinator's decision after
+    // frontier race 45978279345): these worlds are past them unless a test says otherwise.
+    w.stage_reached = Some(world::stage::Stage::Crystals);
     w.inventory.slots.insert(36, (ItemKind::Cobblestone, 64));
     w.inventory.slots.insert(37, (ItemKind::Cobblestone, 64));
     w.inventory.slots.insert(38, (ItemKind::StonePickaxe, 1));
@@ -1249,4 +1252,105 @@ fn the_stock_arms_never_run_toward_the_bunkers_stair() {
         p.end.arms
     );
     assert!(p.end.arms.iter().any(|(d, _)| *d == stock_dir(door, 0)));
+}
+
+#[test]
+fn a_cloud_on_the_feet_holds_no_work_of_e3s_at_the_bunkers_stair() {
+    // Frontier race 45978279345 lane 2: the stair dug again and the open cut, in turn, 43 times
+    // each, with the bot standing in the cloud. The bunker (12, 60, 0) open, a step shut, the bot
+    // on its first step (11, 61, 0) with a cloud on it.
+    let mut w = world(4, 0..=7, [11.5, 61.0, 0.5]);
+    for c in [
+        (12, 60, 0),
+        (12, 61, 0),
+        (12, 62, 0),
+        (11, 61, 0),
+        (11, 62, 0),
+        (11, 63, 0),
+    ] {
+        set(&mut w, c, BlockKind::Air);
+    }
+    with_entity(&mut w, 13, EntityKind::AreaEffectCloud, [11.5, 61.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&13) {
+        e.metadata.insert(8, MetaValue::Float(3.0));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    p.end.stock_over = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((-1, 0));
+    p.end.work = Some(plan::end::Work::new(
+        plan::end::WorkKind::Open,
+        vec![plan::end::Op::Dig((10, 62, 0))],
+        0,
+    ));
+    for _ in 0..4 {
+        p.step(&w);
+    }
+    assert!(p.end.work.is_none(), "{:?}", p.end.work);
+    assert!(
+        !noted(&p, "end: the bunker's stair dug again"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: the open cut"), "{:?}", notes(&p));
+}
+
+#[test]
+fn from_arrival_to_the_crystals_no_bunker_or_tunnel_only_surface_mining() {
+    // The coordinator's decision after frontier race 45978279345: before the crystals are done
+    // the bot stays on the surface in the open and mines its end stone there.
+    let mut w = world(4, 0..=7, [20.5, 64.0, 0.5]);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0);
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("dig"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
+    for not in [
+        "end: dig the bunker",
+        "end: walk to the bunker site",
+        "end: stock run",
+    ] {
+        assert!(!noted(&p, not), "{not}: {:?}", notes(&p));
+    }
+    assert!(p.bunker.is_none());
+    // A bunker already dug (an old snapshot): still no stock tunnel, the surface instead.
+    let mut p = racer();
+    p.end.bridged = true;
+    p.bunker = Some([12, 60, 0]);
+    p.end.door = Some((1, 0));
+    let t = p.end_task(&w, 0);
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("dig"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(!noted(&p, "end: stock run"), "{:?}", notes(&p));
+    // Under the ground: stairs up to the open.
+    let mut w = world(4, 0..=7, [12.5, 52.0, 0.5]);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    set(&mut w, (12, 52, 0), BlockKind::Air);
+    set(&mut w, (12, 53, 0), BlockKind::Air);
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0);
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("stairs"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        noted(&p, "end: stairs up to the open from"),
+        "{:?}",
+        notes(&p)
+    );
 }

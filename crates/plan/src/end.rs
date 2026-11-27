@@ -400,6 +400,13 @@ pub fn surface_cell(w: &World, feet: Cell) -> Option<Cell> {
         .find(|c| *c != (feet.0, feet.1 - 1, feet.2) && !near_void(*c))
 }
 
+/// The crystals are done: the `crystals` stage reached (every crystal gone). Before it the End is
+/// worked in the open (no bunker, no tunnels).
+pub fn crystals_done(w: &World) -> bool {
+    w.stage_reached
+        .is_some_and(|s| s >= world::stage::Stage::Crystals)
+}
+
 /// The block a bunker or a bridge is laid with: end stone first (dragon-immune), then the walk's
 /// bridge blocks.
 pub fn lay_item(w: &World) -> Option<ItemKind> {
@@ -639,6 +646,9 @@ pub struct EndState {
     pub handed_back: bool,
     #[serde(default)]
     pub restocks: u32,
+    /// The surface stock before the crystals is over (the target held, or none in reach).
+    #[serde(default)]
+    pub open_stock_over: bool,
     /// Surface end stone digs begun and walks for it in this hand-back.
     #[serde(default)]
     pub surface_digs: u32,
@@ -819,7 +829,15 @@ impl Plan {
                 return None;
             }
         }
-        // 2. The bunker.
+        // Before the crystals are done, no bunker and no tunnels: the bot stays on the island's
+        // surface in the open and mines its end stone there, in sight (the coordinator's decision
+        // from frontier race 45978279345: five of eight died on or by the bunker's stair while it
+        // opened, the shaft taking away the dodge; a cloud lands on any body within 4 of a
+        // fireball's hit, through walls; lane 4 lived to 22,460 in the open with 27 dodges).
+        if !crystals_done(w) {
+            return self.open_task(w, feet, tick);
+        }
+        // 2. The bunker (after the crystals).
         let Some(b) = self.bunker.map(|[x, y, z]| (x, y, z)) else {
             return self.bunker_site(w, feet, tick);
         };
@@ -852,8 +870,10 @@ impl Plan {
         // The bunker open (its roof and first step dug) with a cell of its stair shut, the bot in
         // it or on its stair: the stair dug again (race 45969992660 lane 2: the step (12, 60, 0)
         // shut with the shaft open, no way out on foot). The open skips cells already dug.
-        let stair_shut =
-            open(w, roof) && open(w, door_cells[0]) && door_cells[..6].iter().any(|c| !open(w, *c));
+        let stair_shut = open(w, roof)
+            && open(w, door_cells[0])
+            && door_cells[..6].iter().any(|c| !open(w, *c))
+            && fire_near(w, door_cells[6], STAIR_CLEAR).is_none();
         if stair_shut
             && (inside || self.at_bunker(w))
             && !self
@@ -1394,6 +1414,7 @@ impl Plan {
     fn surface_mine(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
         let stone = craft::count(w, ItemKind::EndStone);
         if let Some(c) = surface_cell(w, feet).filter(|c| !self.refused_now(*c, tick)) {
+            self.end.surface_walks = 0;
             self.end.surface_digs += 1;
             if self.end.surface_digs % 8 == 1 {
                 self.note(
@@ -1450,6 +1471,71 @@ impl Plan {
             ),
         );
         Some(Task::Explore(walk))
+    }
+
+    /// The End before the crystals are done, all in the open: down a pillar first (E4's), out
+    /// from under the ground by stairs up, end stone from the surface up to `STOCK_WANTED`, then
+    /// the hand-off; nothing to hand over, the bot stays where it stands.
+    fn open_task(&mut self, w: &World, feet: Cell, tick: u64) -> Option<Task> {
+        let up = crate::spikes::on_pillar(w, feet, &self.spikes.pillars)
+            || crate::spikes::on_spike(w, feet)
+            || !self.spikes.pillars.is_empty();
+        if up && let Some(t) = self.end_spikes(w, tick) {
+            return Some(t);
+        }
+        if !world::stage::open_sky(w) {
+            if self.end.out_runs < OUT_RUNS {
+                self.end.out_runs += 1;
+                let dir = stock_dir(self.end.door.unwrap_or((1, 0)), self.end.out_runs);
+                self.note(
+                    tick,
+                    format!("end: stairs up to the open from {feet:?}"),
+                    format!(
+                        "before the crystals the bot stays on the surface; run {} of {OUT_RUNS}",
+                        self.end.out_runs
+                    ),
+                );
+                let mut st = Stairs::up(dir, tick);
+                st.dry = true;
+                return Some(Task::Stairs(Box::new(st)));
+            }
+            return None;
+        }
+        self.end.out_runs = 0;
+        let stone = craft::count(w, ItemKind::EndStone);
+        let want = STOCK_WANTED;
+        if stone < want && self.end.surface_walks <= SURFACE_WALKS && !self.end.open_stock_over {
+            if let Some(t) = self.surface_mine(w, feet, tick) {
+                return Some(t);
+            }
+            if self.end.surface_walks > SURFACE_WALKS {
+                // None in reach after the walks: on with what is held.
+                self.end.open_stock_over = true;
+            }
+        } else if stone >= want && !self.end.open_stock_over {
+            self.end.open_stock_over = true;
+            self.note(
+                tick,
+                "end: surface stock over".to_owned(),
+                format!("{stone} end stone held ({want} wanted), mined in the open"),
+            );
+        }
+        let next = if crystals_alive(w) > 0 {
+            let t = self.end_spikes(w, tick);
+            if t.is_none() && stone < STOCK_WANTED {
+                // Handed back (for blocks): mine again.
+                self.end.handed_back = true;
+                self.end.open_stock_over = false;
+                self.end.surface_walks = 0;
+            }
+            t
+        } else {
+            self.end_dragon(w, tick)
+        };
+        if next.is_some() {
+            self.end.handoffs += 1;
+        }
+        next
     }
 
     /// The crystals' hand-off: E4's `Plan::spikes_task` (issue 20f), the pillar and strike.
@@ -1721,6 +1807,28 @@ impl Plan {
     pub(crate) fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if !in_end(w) {
             return None;
+        }
+        // A cloud on the feet: nothing of E3's holds the bot there, not a work or a choice; E5's
+        // breath rule walks it out (frontier race 45978279345 lane 2: the stair dug again and the
+        // open cut for the cloud by the stair, 43 times each in turn over 60 ticks, the bot stood
+        // in the cloud, 20 to dead).
+        if let Some(body) = w.body
+            && cloud_on(w, &[path::stand_cell(w, body.pos)]).is_some()
+        {
+            if self.end.work.is_some() {
+                self.end.work = None;
+                self.note(
+                    tick,
+                    "end: work dropped for a cloud on the feet".to_owned(),
+                    "the breath rule walks the bot out".to_owned(),
+                );
+            }
+            // No choice of E3's either; an idle tick is a still one (the planner's other phases
+            // never run in the End).
+            return matches!(self.task, Task::Idle).then(|| Controls {
+                sneak: true,
+                ..down(w)
+            });
         }
         // A stock run under way when a strafe begins: cut, the run's end kept, up to be seen.
         if !self.end.stock_over
