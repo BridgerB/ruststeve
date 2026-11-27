@@ -59,6 +59,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[end-island]] - the End from the arrival platform: a pillar to the bridge's height, the bridge west over the void with rails, the bunker in the end stone, the stock (issue 20e).
 - [[overworld-arrival]] - the climb from the overworld portal by the lava sea: a sealed shaft straight up in rock, the pickaxe run's table at hand (issue 19).
 - [[end-crystals]] - the End's crystals by pillar and strike: an end stone pillar, a guard ring, the stand behind two blocks, the way back down (issue 20f).
+- [[end-bow]] - the End's open crystals shot from the ground with a bow: the arrow's flight from the jar, the low arc, the stands, the draw and release (the bow line, issue 20).
 - [[pathfinding]] - clojurecraft's path.clj in Rust, budgeted in expansions, route for route against clojurecraft.
 - [[walk-and-watchdog]] - following a route, replanning, and the progress invariant that fails a walk going nowhere.
 - [[parity-table]] - captured worlds, 160 moments in real and in the model, outcome classes compared against a stated tolerance; simrace.

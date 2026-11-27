@@ -1519,6 +1519,12 @@ impl Plan {
             return None;
         }
         self.end.out_runs = 0;
+        // >>> E8 (issue 20, the bow line): with a bow, the open crystals before any end stone
+        // stock (the stock is for the caged ones' pillars).
+        if let Some(t) = self.bow_task(w, tick) {
+            return Some(t);
+        }
+        // <<< E8
         let stone = craft::count(w, ItemKind::EndStone);
         // Enough for the tallest pillar and its walls, no more: the time on the ground before the
         // first climb is what kills (the coordinator); a hand-back for blocks mines again.
@@ -1559,6 +1565,12 @@ impl Plan {
 
     /// The crystals' hand-off: E4's `Plan::spikes_task` (issue 20f), the pillar and strike.
     fn end_spikes(&mut self, w: &World, tick: u64) -> Option<Task> {
+        // >>> E8 (issue 20, the bow line): an open crystal is shot from the ground first; the
+        // pillar takes the caged ones and any the bow leaves (docs/problems/end-bow.md).
+        if let Some(t) = self.bow_task(w, tick) {
+            return Some(t);
+        }
+        // <<< E8
         self.spikes_task(w, tick)
     }
 
