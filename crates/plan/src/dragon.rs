@@ -805,7 +805,7 @@ pub fn low_prep_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i32; 
             || flat(p, h) < FLAME_CLEAR
             || breath_on(&clouds, p).is_some()
             || !(under_wings(v, f64::from(c[1]))
-                || (under_wings(v, f64::from(c[1] - 1)) && lowerable(w, v, &clouds, c)))
+                || (under_wings(v, f64::from(c[1] - 1)) && notch_diggable(w, c)))
         {
             continue;
         }
@@ -1315,7 +1315,7 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
             if flat(feet, mid(c)) > STAND_NEAR {
                 return Want::Go(c, "to a low stand, through the flame");
             }
-            if body.on_ground && !under_wings(&v, feet[1]) && lowerable(w, &v, &clouds, feet_cell) {
+            if body.on_ground && !under_wings(&v, feet[1]) && notch_diggable(w, feet_cell) {
                 return Want::Dig([feet_cell[0], feet_cell[1] - 1, feet_cell[2]]);
             }
             return Want::Hold("in the low stand, the flame burning");
