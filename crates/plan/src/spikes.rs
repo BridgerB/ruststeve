@@ -260,6 +260,12 @@ pub fn open(k: Option<BlockKind>) -> bool {
     )
 }
 
+/// Is the cell a water source by the server's word (its block state's level 0)?
+pub fn source(w: &World, c: Cell) -> bool {
+    w.fluid(c.0, c.1, c.2)
+        .is_some_and(|f| f.kind == physics::FluidKind::Water && f.level == 0)
+}
+
 /// A cell a body passes through: open, or water (a waterfall's pour on a pillar's top).
 fn passable(k: Option<BlockKind>) -> bool {
     open(k) || k == Some(BlockKind::Water)
@@ -674,6 +680,9 @@ pub struct SpikeState {
     /// Digs begun for the pool's cells, and whether the pool was given up.
     pub pool_digs: u32,
     pub pool_off: bool,
+    /// Pool cells a refill got nothing from, with the block state then: tried again only once
+    /// the server shows them otherwise.
+    pub refill_failed: Vec<(Cell, u32)>,
     pub pool_stand: Option<Cell>,
     pub pool_made: bool,
     pub waterfalls: u32,
@@ -734,6 +743,7 @@ impl Default for SpikeState {
             pool_square: None,
             pool_digs: 0,
             pool_off: false,
+            refill_failed: Vec::new(),
             pool_stand: None,
             pool_made: false,
             waterfalls: 0,
@@ -2488,9 +2498,14 @@ impl Plan {
                     .pool_square
                     .unwrap_or([pour[0], pour[1], pour[0], pour[1]]);
                 let turn = usize::try_from(self.spikes.refills).unwrap_or(0);
-                (0..4)
-                    .map(|i| square[(turn + i) % 4])
-                    .find(|c| kind(w, *c) == Some(BlockKind::Water))
+                // A source by the server's word (water level 0), never by prediction; a cell
+                // that gave nothing waits for the server to show it otherwise (the
+                // orchestrator, after race 45937952400's give-ups).
+                let failed = &self.spikes.refill_failed;
+                (0..4).map(|i| square[(turn + i) % 4]).find(|c| {
+                    let state = w.state_at(BlockPos::new(c.0, c.1, c.2));
+                    source(w, *c) && !failed.iter().any(|(f, st)| f == c && Some(*st) == state)
+                })
             }
         {
             let target = [
@@ -2653,13 +2668,25 @@ impl Plan {
                         .filter(|(_, (k, _))| k == item)
                         .map(|(sl, _)| *sl)
                         .collect();
+                    let cell = (
+                        look[0].floor() as i32,
+                        look[1].floor() as i32,
+                        look[2].floor() as i32,
+                    );
+                    if why == "the refill"
+                        && let Some(st) = w.state_at(BlockPos::new(cell.0, cell.1, cell.2))
+                    {
+                        self.spikes.refill_failed.retain(|(c, _)| *c != cell);
+                        self.spikes.refill_failed.push((cell, st));
+                    }
                     self.note(
                         tick,
                         format!("spikes: {why} gave up"),
                         format!(
-                            "{want:?} held {}, wanted {count}; held {:?}, {item:?} in slots {slots:?}; aimed at {look:?}",
+                            "{want:?} held {}, wanted {count}; held {:?}, {item:?} in slots {slots:?}; aimed at {look:?}, the cell {cell:?} last seen {:?}",
                             craft::count(w, *want),
-                            crate::dig::held_item(w)
+                            crate::dig::held_item(w),
+                            w.fluid(cell.0, cell.1, cell.2)
                         ),
                     );
                     return None;
