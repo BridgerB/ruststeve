@@ -1698,6 +1698,12 @@ impl Plan {
             return self.held("spikes_clutch", c);
         }
         // <<< E4
+        // >>> E3 (issue 20e): the head out of water before it drowns, ahead of every row and task
+        // but a live dodge (`end::Plan::drown_guard`; race 46045482138 lane 5 drowned in a pit).
+        if let Some(c) = self.drown_guard(w, tick) {
+            return self.held("drown_guard", c);
+        }
+        // <<< E3
         // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
         // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
         if let Some(c) = self.charge_step(w, tick) {
