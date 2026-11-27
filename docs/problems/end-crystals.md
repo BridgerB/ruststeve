@@ -445,3 +445,15 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - **The clutch takes its water back on every landing, wherever it went.** If the cell it was poured over holds no source, the source in the feet's cell or the one under, or a cell beside either, is taken back ("clutch water found at"; `clutch_water`). The late pour of wall 28 uses the same search. Unit test `every_clutch_landing_takes_its_water_back_wherever_it_went`.
 - **The landing water after a descent** is taken back as before ("landing water taken back", unit-tested). Lane 2's spread water came from wall 29's pour into the feet's cell, which was never recorded as landing water; 06b1bc4 stops that pour.
 - **The pool's water stays inside its dug square.** A pour goes only into a dug cell whose floor is full and whose every side is full or part of the square. Otherwise the pool is given up ("no pool: not walled").
+
+## Frontier race 45959448248 (70ed49c, 6 lanes): 0 of 6 past the crystals; 3 crystals struck in lane 1 and 2 in lane 5
+
+### Wall 30: a climb begun with no blocks, one at a time, to the cap (lane 3; fixed)
+- **What happened:**
+  - E3's stock paused for a strafe at 3,840 with almost no end stone held, and the crystals' task took the bot.
+  - From 11,060 to the cap the bot did "pillar up from" (104 times), placed the one end stone the last dig down had given back, hit "climb out of blocks" and "out of blocks, dig down", and repeated. 10 crystals were left.
+  - While the pillar record stood, E3's gate ("up a pillar … the crystals' task first", end.rs) asked the crystals first every tick, so E3 never reached its lull check and its stock never resumed.
+- **The fix:**
+  - No climb begins at the foot without the end stone for the whole pillar plus `PILLAR_SPARE` (4: the two wall blocks and two for a lost click). Short of that it notes "no climb: too few blocks" and hands back (`None`) with no pillar begun, so E3's stock can run again.
+  - Unit test `no_climb_begins_without_the_blocks_for_the_whole_pillar`.
+  - E3's side: the stock should resume when the crystals hand back for blocks with it over or paused.

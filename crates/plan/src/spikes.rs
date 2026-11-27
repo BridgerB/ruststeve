@@ -132,6 +132,9 @@ pub const REFUSE_TICKS: u64 = 1200;
 /// How near a cell's centre (blocks, each axis) a step ends, and the most it takes. A body 0.6
 /// wide within 0.2 of the centre stands on its cell alone.
 pub const STEP_NEAR: f64 = 0.2;
+/// End stone over a pillar's own height a climb wants held before it begins: the stand's two
+/// wall blocks and two for a lost click.
+pub const PILLAR_SPARE: i32 = 4;
 /// Blocks past the landing cell's centre, away from the pillar, the landing pour aims at: from an
 /// eye over the column's centre (within `STEP_NEAR`) the ray then clears the first block's top
 /// edge (eye 1.62 over that top, 2.62 over the landing floor: at the edge the ray is past it).
@@ -1882,6 +1885,21 @@ impl Plan {
                 axis,
                 centre,
             } => {
+                // No climb begins without the blocks for the whole pillar and its two wall
+                // blocks: frontier race 45959448248 lane 3 held 0 end stone, put up the one block
+                // each dig down gave back, 104 times to the cap, and its standing pillar record
+                // kept E3's stock (paused for a strafe) from ever resuming. Handed back, so the
+                // stock runs again.
+                let need = top - feet.1 + PILLAR_SPARE;
+                let held = craft::count(w, PILLAR_ITEM);
+                if !climbing && held < need {
+                    self.spikes_note(
+                        tick,
+                        "spikes: no climb: too few blocks".to_owned(),
+                        format!("{held} end stone held, {need} wanted for the pillar to {top} from {feet:?}"),
+                    );
+                    return None;
+                }
                 // No climb begins without a full water bucket in the hotbar (the clutch's), the
                 // orchestrator's invariant after race 45908299055: with none, the pool refills
                 // it (`spikes_water`, ahead of this) or the bot climbs no pillar at all.
