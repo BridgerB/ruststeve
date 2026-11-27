@@ -361,3 +361,24 @@ fn a_crystal_untracked_after_a_shot_is_no_hit() {
             .any(|n| n == "bow: crystal 7 out of sight after the shot")
     );
 }
+
+/// A tall spike (obsidian of radius 3 up to y 95, the crystal on its bedrock at 96) 25 off the
+/// feet: the low arc meets the spike's top edge under the box, the high arc comes down onto it
+/// from above (race 46078921264: "0 stands with a shot" at every tall spike).
+#[test]
+fn a_tall_spike_is_shot_with_the_high_arc() {
+    let crystal = [8.5, 96.0, 8.5];
+    let feet = [8.5, 64.0, -16.5];
+    let mut spike = |c: (i32, i32, i32)| {
+        let (dx, dz) = (c.0 - 8, c.2 - 8);
+        dx * dx + dz * dz <= 10 && c.1 <= 95
+    };
+    let low = bow::solve_pitch(25.0, 33.4).expect("a low arc");
+    let a = bow::aim(feet, crystal, &mut spike).expect("a shot over the edge");
+    assert!(
+        f64::from(a.pitch) < low - 5.0,
+        "the high arc, steeper than the low {low}: {}",
+        a.pitch
+    );
+    assert!(a.ticks > 20, "a long flight: {}", a.ticks);
+}

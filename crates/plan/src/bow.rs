@@ -47,8 +47,9 @@ pub const SAFE_RANGE: f64 = 16.0;
 /// No shot from farther than this: the spread's deviation is 0.0070 of the range an axis (0.34
 /// at 48), against the box's half width 1.3 with the margin; and the entity is sent within 112.
 pub const MAX_RANGE: f64 = 48.0;
-/// The flight followed at most this many ticks (a shot of 48 at 3.0 a tick takes about 20).
-pub const FLIGHT_TICKS: usize = 80;
+/// The flight followed at most this many ticks (a low shot of 48 takes about 20; a high arc onto
+/// a tall spike up to about 70).
+pub const FLIGHT_TICKS: usize = 120;
 /// Samples a block along each tick's segment when looking for a block in the way.
 const STEP: f64 = 0.1;
 
@@ -179,6 +180,37 @@ pub fn solve_pitch(flat: f64, rise: f64) -> Option<f64> {
     None
 }
 
+/// The high arc's pitch through the same point: scanned from 88 up down a degree at a time for
+/// the first that reaches the height, then bisected toward the steep side. It comes down onto
+/// the crystal from above, over its spike's top (race 46078921264: every low arc from the ground
+/// at a tall spike met the obsidian's edge under the box). `None` when none reaches it.
+pub fn solve_pitch_high(flat: f64, rise: f64) -> Option<f64> {
+    let reaches = |p: f64| height_at(flat, p).is_some_and(|y| y >= rise);
+    let mut steep = -88.0f64;
+    if reaches(steep) {
+        return Some(steep);
+    }
+    let mut p = steep;
+    while p < 60.0 {
+        let next = p + 1.0;
+        if reaches(next) {
+            let mut lower = next;
+            for _ in 0..40 {
+                let mid = (steep + lower) / 2.0;
+                if reaches(mid) {
+                    lower = mid;
+                } else {
+                    steep = mid;
+                }
+            }
+            return Some(lower);
+        }
+        steep = next;
+        p = next;
+    }
+    None
+}
+
 /// Why no shot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Miss {
@@ -222,7 +254,29 @@ pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Resul
         return Err(Miss::Far);
     }
     let flat = (mid[0] - from[0]).hypot(mid[2] - from[2]);
-    let pitch = solve_pitch(flat, mid[1] - from[1]).ok_or(Miss::NoArc)?;
+    let low = solve_pitch(flat, mid[1] - from[1]).ok_or(Miss::NoArc)?;
+    match fly_check(from, crystal, flat, range, low, blocked) {
+        Err(Miss::Blocked(c)) => match solve_pitch_high(flat, mid[1] - from[1]) {
+            Some(high) if (high - low).abs() > 1.0 => {
+                fly_check(from, crystal, flat, range, high, blocked).map_err(|_| Miss::Blocked(c))
+            }
+            _ => Err(Miss::Blocked(c)),
+        },
+        other => other,
+    }
+}
+
+/// The flight along `pitch` from `from` toward the crystal's middle, checked against its box
+/// and the cells `blocked` says no arrow passes.
+fn fly_check(
+    from: P,
+    crystal: P,
+    flat: f64,
+    range: f64,
+    pitch: f64,
+    blocked: &mut impl FnMut(Cell) -> bool,
+) -> Result<Aim, Miss> {
+    let mid = crystal_middle(crystal);
     let yaw = yaw_toward(from, mid);
     // The pitch as it is sent (f32), so the check flies what the server will.
     #[allow(clippy::cast_possible_truncation)]
