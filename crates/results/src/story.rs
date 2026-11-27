@@ -106,7 +106,10 @@ pub struct EndCounts {
     /// Crystals seen, and gone by how (`struck`, `blast`, `far`, `gone`).
     pub crystals_seen: u32,
     pub crystals_gone: BTreeMap<String, u32>,
-    /// Crystals alive at the end (the last row in the End).
+    /// Crystals left at the end: the ten spikes less those destroyed (`struck` and `blast`);
+    /// `far` and `gone` are untrackings (the bot far off, a resume's re-send) and never count
+    /// (issue 20 part 2: race 45994686575 lane 3 read "1 left" with 6 standing). `None` with no
+    /// crystal seen.
     pub crystals_left: Option<u32>,
     /// Pillars up and down, and the highest.
     pub pillars_up: u32,
@@ -172,13 +175,19 @@ pub fn end_counts(l: &Ledger, rows: &[Senses]) -> Option<EndCounts> {
             next = r.at + DRAGON_TRAIL_TICKS;
         }
     }
-    if let Some(last) = rows.iter().rev().find(|r| r.fountain.is_some()) {
-        c.crystals_left = last.crystals;
-        if let Some(h) = last.dragon_health
-            && c.dragon_health.last().map(|x| x.0) != Some(last.at)
-        {
-            c.dragon_health.push((last.at, h));
-        }
+    if c.crystals_seen > 0 {
+        let destroyed: u32 = ["struck", "blast"]
+            .iter()
+            .filter_map(|how| c.crystals_gone.get(*how))
+            .sum();
+        let spikes = u32::try_from(world::stage::SPIKES.len()).unwrap_or(u32::MAX);
+        c.crystals_left = Some(spikes.saturating_sub(destroyed));
+    }
+    if let Some(last) = rows.iter().rev().find(|r| r.fountain.is_some())
+        && let Some(h) = last.dragon_health
+        && c.dragon_health.last().map(|x| x.0) != Some(last.at)
+    {
+        c.dragon_health.push((last.at, h));
     }
     (c != EndCounts::default()).then_some(c)
 }
@@ -823,5 +832,39 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("escape trails (whole):"), "{text}");
+    }
+
+    /// The end row's crystals left: the ten spikes less those struck or blasted. A resume's
+    /// re-send (seen, gone, seen again) and the far ones untracked are not gone (race
+    /// 45994686575 lane 3: 4 struck, 2 gone and 5 far read "1 left"; 6 stood).
+    #[test]
+    fn crystals_left_counts_only_the_destroyed() {
+        let at = |at: u64, fact: Fact| Stamped { at, fact };
+        let seen = |id: i32| Fact::CrystalSeen {
+            id,
+            pos: [0.5, 80.0, 0.5],
+            d: 40.0,
+        };
+        let gone = |id: i32, how: &str| Fact::CrystalGone {
+            id,
+            pos: [0.5, 80.0, 0.5],
+            how: how.to_owned(),
+        };
+        let mut facts: Vec<Stamped> = (0..10).map(|i| at(20, seen(i))).collect();
+        facts.extend([
+            at(40, gone(0, "gone")),
+            at(40, gone(1, "gone")),
+            at(100, seen(10)),
+            at(100, seen(11)),
+            at(900, gone(2, "far")),
+            at(900, gone(3, "far")),
+            at(1000, gone(4, "struck")),
+            at(2000, gone(5, "struck")),
+            at(3000, gone(6, "blast")),
+        ]);
+        let c = end_counts(&ledger(Vec::new(), facts), &[]).unwrap();
+        assert_eq!(c.crystals_left, Some(7));
+        let none = end_counts(&ledger(Vec::new(), Vec::new()), &[]);
+        assert_eq!(none.and_then(|c| c.crystals_left), None);
     }
 }

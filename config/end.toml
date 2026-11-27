@@ -119,11 +119,13 @@ portal_radius = 2.5
 rim_radius = 3.5
 
 [crystals]
-# Stage `crystals`: the feet within this of the fountain (every spike then within 102, inside
+# The feet within this of the fountain (the stages once counted crystals here; they now count
+# the destroyed, issue 20 part 2) (every spike then within 102, inside
 # the entity tracking distance of 112: view distance 8 less one chunk, ChunkMap.TrackedEntity).
 near = 60.0
 # Stages `crystals_5` and `crystals_1` (issue 20 part 2, Bridger 2026-11-27): checkpoints at
-# this many crystals left alive or fewer, counted under `near` with every spike's column loaded
+# this many crystals left or fewer: the ten spikes less those seen destroyed (a removal with its
+# blast at its spot; an untracked crystal is never gone: race 46044026128's resume transient)
 # (race 45994686575: three bots reached 1 left, one 2 left, and none was saved).
 left_5 = 5
 left_1 = 1

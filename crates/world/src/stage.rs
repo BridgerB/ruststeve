@@ -325,7 +325,7 @@ pub const RING_FRAMES: i64 = 12;
 pub const FOUNTAIN: [f64; 2] = [0.5, 0.5];
 /// `island`: the feet on end stone within this (horizontal) of the fountain (`[island] near`).
 pub const ISLAND_NEAR: f64 = 30.0;
-/// `crystals`: the feet within this of the fountain, so every spike (42 off on a ring, probe
+/// The feet within this of the fountain: every spike (42 off on a ring, probe
 /// 45863427332) is within 102, inside the entity tracking distance (view distance 8 less one
 /// chunk, 112): every crystal still alive has been sent (`[crystals] near`).
 pub const CRYSTALS_NEAR: f64 = 60.0;
@@ -465,24 +465,21 @@ pub fn crystals_alive(w: &World) -> usize {
         .count()
 }
 
-/// The crystals left alive, when the count can be trusted: in the End with the feet within
-/// `CRYSTALS_NEAR` of the fountain and every spike's column loaded, so every crystal still
-/// alive is inside the entity tracking distance and was sent (no X-ray: entities the server
-/// sent, against the seed's fixed spikes). `None` when a spike may hold one not sent.
+/// The crystals left, in the End: the ten spikes less those whose crystal was seen destroyed
+/// (memory's record: a removal with its blast at its spot). A crystal untracked (the bot far
+/// off, or the server re-sending them on a resume: race 46044026128, every lane "at 5 left" on
+/// tick 40) is not gone. `None` outside the End.
 pub fn crystals_left(w: &World) -> Option<usize> {
-    let known = in_end(w)
-        && from_fountain(w).is_some_and(|d| d <= CRYSTALS_NEAR)
-        && SPIKES.iter().all(|[x, z]| {
-            w.columns.contains_key(&crate::ChunkPos {
-                x: x.div_euclid(16),
-                z: z.div_euclid(16),
-            })
-        });
-    known.then(|| crystals_alive(w))
+    in_end(w).then(|| {
+        SPIKES
+            .len()
+            .saturating_sub(w.memory.crystals_destroyed().len())
+    })
 }
 
-/// Every spike's column loaded (so its crystal, if alive, was sent), the feet within
-/// `CRYSTALS_NEAR` of the fountain, and no crystal alive, in the End.
+/// Every spike's crystal seen destroyed, in the End (`crystals_left`). It was once "none alive
+/// near the fountain with every spike loaded", which a resume's re-send of the crystals could
+/// satisfy for a tick.
 pub fn crystals_gone(w: &World) -> bool {
     crystals_left(w) == Some(0)
 }
@@ -564,7 +561,7 @@ pub enum Stage {
     /// `crystals_left` at most `CRYSTALS_LEFT_1` (issue 20 part 2): the last spike's attempts
     /// resume from it.
     Crystals1,
-    /// In the End near the fountain, every spike's column loaded and no crystal alive (issue 20).
+    /// In the End with every spike's crystal seen destroyed (`crystals_gone`; issue 20).
     Crystals,
     /// The credits (`win_game`) with the dragon seen dead before them (issue 20's done
     /// condition).

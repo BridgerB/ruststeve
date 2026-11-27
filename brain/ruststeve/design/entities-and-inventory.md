@@ -5,8 +5,8 @@ type: reference
 tags: [world, entities, metadata, inventory, slots]
 aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@eaa4a50 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -38,6 +38,8 @@ related:
 - `container_set_content` (window 0) replaces it, `container_set_slot` sets one menu slot, `set_player_inventory` sets one by inventory index, mapped by `Inventory::menu_slot`: 0-8 → 36-44, 9-35 stay, 36-39 armour (feet to head) → 8-5, 40 → 45.
 - Since issue 10a: `held` (the hotbar slot, set by `Act::Hold` and by the server's `set_held_slot`), `click` (the one pending click, cleared when window 0's state id moves, [[wire-container-click]]) with `clicks_sent`/`clicks_answered`, and `pickups`: the bot's own `take_item_entity`s (item entity, amount, tick), a ring of recent ones. `Entity::item` reads an item entity's stack at metadata index 8. `container_close` from the server drops the pending click. `set_cursor_item` (10b) sets the cursor; a click empties it first ([[wire-container-click]]). `window` (11a): a window besides the inventory, its last 36 slots mirrored into window 0's view ([[table-window]]).
 - Slots read the components clojurecraft reads (`max_stack_size`, `max_damage`, `damage`, `repair_cost`, `unbreakable`); any other ends the frame as `Slot::Truncated` (the item and count still right) and is counted in `truncated` ([[wire-slots]]).
+
+- An `end_crystal` removed is held in `crystals_removed` for `CRYSTAL_BLAST_TICKS` (20): an `explode` within `CRYSTAL_BLAST_NEAR` (1.0) of it, before or after (the server removes, then explodes: `EndCrystal.hurtServer`), is its destruction, recorded in memory against the spike within `CRYSTAL_SPIKE_NEAR` (2.0). A removal with no blast is an untracking, never a destruction (issue 20 part 2). A spike seen with no crystal for `CRYSTAL_ABSENT_TICKS` (400) running, the bot within 60 of the fountain and its column loaded (`crystals_absent`), is recorded gone too: a resume's re-send ends within about 80 ticks.
 
 ## Tests
 `crates/world/tests/acts.rs`: digs count their sequence and acks raise it; a click waits for the window to move; holding and pickups. `crates/world/tests/properties.rs`: any sequence of adds, moves, syncs, teleports, data, removals, inventory packets, chunks and block updates folds without panic; no entity holds the player's id; every position is finite; every count is at least 1.

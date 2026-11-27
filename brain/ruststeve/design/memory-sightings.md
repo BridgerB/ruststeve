@@ -5,8 +5,8 @@ type: reference
 tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@34ec399 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@eaa4a50 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#/// A block seen with an exposed face. Only `Seen::check` makes one."
   - "ruststeve:crates/memory/src/lib.rs#pub fn record_source(&mut self, seen: SeenSource) -> bool {"
@@ -54,6 +54,10 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 - **The world's scan** (`World::observe_column_signs`): a column's sections tested by palette (`is_sign`), each sign cell's six faces read inside the section where it can, a sign whose record is full skipped. A changed block is checked by `observe`. Faces on the edge towards an unloaded column are not re-checked when it loads (the watched kinds' edge pass does not cover signs).
 - **Seen columns** (`seen_columns(dimension)`): the column keys of `by_column` for one dimension, by a range of the index (issue 17d's heading counts seen columns).
 - Bridger, 2026-11-24 ([[strict-no-xray]]): the planner may know biomes only from its feet and from these signs, never from an unseen column's biome.
+
+## Issue 20 part 2: crystals destroyed
+
+- `crystals_destroyed` (`record_crystal_destroyed`): the End's spikes (centre columns, `world::stage::SPIKES`) whose crystal was seen destroyed, a removal with its blast at its spot (the world decides, `World::crystal_removed` and `crystal_blast`), or a spike seen bare for `CRYSTAL_ABSENT_TICKS` (400) running with the bot within 60 of the fountain (`crystals_absent_tick`: a development start's RCON kill). It lives in memory so a snapshot's resume keeps the count; older stores read it as empty. The stages `crystals_5`, `crystals_1` and `crystals` count from it, never from the crystals tracked (race 46044026128: a resume's re-send read as "5 left" on tick 40 in every lane).
 
 ## See also
 - [[hist-no-xray]] - why the rule.
