@@ -2631,4 +2631,23 @@ fill = [["air", -2, 0, -3, 44, 26, 3], ["stone", -2, -3, -3, 44, -1, 3], ["obsid
 set = [["bedrock", 40, 20, 0]]
 summon = [["end_crystal", 40, 21, 0]]
 watch = [[40, 20, 0], [40, 19, 0]]
+
+# e07-bow-high: a tall spike 20 east (obsidian 5 by 5, 30 high, bedrock on its middle at 30, the
+# crystal at 31): the low arc meets the spike's top edge, so `plan::bow::aim` takes the high arc
+# (race 46078921264: "0 stands with a shot" at every tall spike), down onto it from above.
+[[moment]]
+id = "e07-bow-high"
+landing = 10
+dx = 60
+dz = -180
+script = "bow:20"
+ticks = 220
+difficulty = "normal"
+give = ["bow 1", "arrow 16"]
+armor = ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"]
+report = true
+fill = [["air", -2, 0, -4, 24, 60, 4], ["stone", -2, -3, -4, 24, -1, 4], ["obsidian", 18, 0, -2, 22, 29, 2]]
+set = [["bedrock", 20, 30, 0]]
+summon = [["end_crystal", 20, 31, 0]]
+watch = [[20, 30, 0], [20, 29, 0]]
 # <<< E8

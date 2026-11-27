@@ -169,7 +169,7 @@ fn the_aim_meets_the_crystals_box_from_the_ground() {
         "inside the blast's reach"
     );
     assert_eq!(
-        bow::aim([8.5, 64.0, -60.5], CRYSTAL_AT, &mut open),
+        bow::aim([8.5, 64.0, -80.5], CRYSTAL_AT, &mut open),
         Err(Miss::Far)
     );
     let mut wall = |c: (i32, i32, i32)| c.2 == -5 && c.1 < 75;
@@ -188,7 +188,7 @@ fn the_stands_go_toward_the_middle_first() {
     assert_eq!(cols[0], [22, 0], "18 toward the fountain first");
     assert!(cols.iter().all(|c| {
         let d = f64::from(c[0] - 40).hypot(f64::from(c[1]));
-        (16.0..=41.0).contains(&d)
+        (16.0..=71.0).contains(&d)
     }));
     assert!(cols.iter().all(|c| c[0] <= 41), "never behind the spike");
 }
@@ -381,4 +381,49 @@ fn a_tall_spike_is_shot_with_the_high_arc() {
         a.pitch
     );
     assert!(a.ticks > 20, "a long flight: {}", a.ticks);
+}
+
+/// A tall spike (to y 89, its bedrock at 90, the crystal at 91) with the feet 18 off toward the
+/// island's middle: no low arc clears its edge from here, and the bot walks to a far stand with
+/// a clear low arc (45 off and more) before any high arc (the orchestrator: the shortest clear
+/// flight, the low arc spreading far less).
+#[test]
+fn a_far_stand_with_a_low_arc_comes_before_the_high_arc() {
+    let feet = [-4.5, 64.0, -4.5];
+    let mut w = world(feet);
+    for dx in -2i32..=2 {
+        for dz in -2i32..=2 {
+            if dx * dx + dz * dz <= 5 {
+                for y in 70..90 {
+                    set(&mut w, (8 + dx, y, 8 + dz), BlockKind::Obsidian);
+                }
+            }
+        }
+    }
+    set(&mut w, (8, 70, 8), BlockKind::Obsidian);
+    set(&mut w, (8, 90, 8), BlockKind::Bedrock);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![CRYSTAL] }));
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 8,
+        uuid: [2; 16],
+        kind: EntityKind::EndCrystal.id(),
+        x: 8.5,
+        y: 91.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    let mut p = Plan::new(Aim::Race);
+    let t = p.bow_task(&w, 100);
+    assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {:?}", told(&p));
+    let stand = p.bow.stand.map(|(c, _)| c).expect("a stand");
+    let off = f64::from(stand.0 - 8).hypot(f64::from(stand.2 - 8));
+    assert!(
+        off > 22.0,
+        "a stand farther out than the feet's 18: {stand:?}, {off:.0} off"
+    );
+    assert!(
+        told(&p).iter().any(|n| n.contains("the low arc")),
+        "{:?}",
+        told(&p)
+    );
 }
