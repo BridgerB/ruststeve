@@ -319,10 +319,7 @@ fn with_no_shot_from_here_the_bot_walks_to_a_stand() {
     }
     let mut p = Plan::new(Aim::Race);
     let t = p.bow_task(&w, 100);
-    assert!(
-        matches!(t, Some(Task::Explore(_)) | Some(Task::Idle)),
-        "{t:?}"
-    );
+    assert!(matches!(t, Some(Task::Explore(_)) | None), "{t:?}");
     assert!(
         notes(&p)
             .iter()

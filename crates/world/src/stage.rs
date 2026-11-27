@@ -557,7 +557,7 @@ pub enum Stage {
     /// 2026-11-26): the overworld prep is never replayed.
     Armed,
     // >>> E8 (issue 20, the bow line, docs/problems/end-bow.md)
-    /// `armed` with a bow and `BOW_ARROWS` arrows, in the overworld: the bow line's first
+    /// `armed` reached, then a bow and `BOW_ARROWS` arrows in the overworld: the bow line's first
     /// checkpoint. Accreted between `armed` and `end` so `Ord` stays the ladder.
     BowArmed,
     // <<< E8
@@ -706,7 +706,10 @@ impl Stage {
                 dim == Some("minecraft:overworld")
                     && has(ItemKind::Bow, 1)
                     && has(ItemKind::Arrow, BOW_ARROWS)
-                    && armed_kit(w)
+                    // `armed` reached, not held now: the bow phase eats into the kit's food
+                    // (race 46072716511 lane 1 held a bow and 12 arrows and never read armed
+                    // again).
+                    && w.stage_reached.is_some_and(|s| s >= Stage::Armed)
             }
             Stage::End => dim == Some("minecraft:the_end"),
             Stage::Island => on_island(w),

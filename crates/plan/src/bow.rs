@@ -351,10 +351,23 @@ pub struct BowState {
     /// The stand a walk last went to, and for which crystal.
     pub stand: Option<(Cell, i32)>,
     pub noted_caged: Vec<i32>,
+    /// Crystals with no stand walked to, and when they are asked again.
+    #[serde(default)]
+    pub no_stand: Vec<(i32, u64)>,
 }
 
 /// Shots that miss one crystal before it is left to the pillar.
 pub const MISSES: u32 = 4;
+/// A crystal with no stand to walk to is asked again after this.
+const NO_STAND_WAIT: u64 = 400;
+/// The feet within this of the fountain (flat) are on the island for the bow (the island's
+/// radius is about 64 on three axes, 72 on +x: E1's probe; the spikes stand 42 out).
+const ON_ISLAND: f64 = 60.0;
+
+fn flat_to_fountain(p: P) -> f64 {
+    p[0].hypot(p[2])
+}
+
 /// Walks to stands for one crystal before it is left to the pillar.
 pub const STAND_WALKS: u32 = 6;
 /// Stand columns tried for a route each choice.
@@ -476,6 +489,7 @@ impl Plan {
     /// bow, no arrows, every open crystal gone or left to the pillar): the pillar's turn.
     pub fn bow_task(&mut self, w: &World, tick: u64) -> Option<Task> {
         if !in_end(w) || !armed(w) {
+            self.spikes.bow_keep.clear();
             return None;
         }
         if self.bow.doing.is_some() {
@@ -494,6 +508,9 @@ impl Plan {
             return None;
         }
         let targets = self.bow_targets(w, tick);
+        // The pillar keeps off the crystals the bow may still take (a fenced filter in
+        // `spikes::next`): set every ask, emptied when the bow is out of arrows.
+        self.spikes.bow_keep = targets.iter().map(|t| t.0).collect();
         if targets.is_empty() {
             return None;
         }
@@ -535,59 +552,82 @@ impl Plan {
                 }
             }
         }
-        // A walk to a stand for the nearest crystal still to be shot.
-        let (id, pos) = targets[0];
-        if count(&self.bow.walks, id) >= STAND_WALKS {
-            if !self.bow.refused.contains(&id) {
-                self.bow.refused.push(id);
-                self.note(
-                    tick,
-                    format!("bow: crystal {id} left to the pillar"),
-                    format!("{STAND_WALKS} walks to stands; from here {first_miss:?}"),
-                );
-            }
-            return Some(Task::Idle);
+        // Off the island (the platform, the bridge: race 46072716511 lane 3 asked for stands from
+        // (77, 50, 0) and gave six crystals up in 2,000 ticks): E3's way onto it first.
+        if flat_to_fountain(body.pos) > ON_ISLAND {
+            return None;
         }
-        let spike = crate::spikes::spike_for(w, &self.spikes.geography, pos);
-        let centre = spike.map_or([pos[0].floor() as i32, pos[2].floor() as i32], |s| s.centre);
+        // A walk to a stand, for the nearest crystals still to be shot that have one.
         let feet = path::feet_cell(body.pos);
-        let mut stands: Vec<(i32, Cell)> = Vec::new();
-        let mut cells = path::Cells::new(w);
-        for col in stand_columns(centre, [0.0, 0.0]) {
-            let Some(c) = ground_in(w, &mut cells, col[0], col[1]) else {
-                continue;
-            };
-            let mut blocked = |q: Cell| blocks_arrow(&mut cells, q);
-            if aim(centre_of(c), pos, &mut blocked).is_err() {
+        for (id, pos) in targets.iter().copied().take(3) {
+            if count(&self.bow.walks, id) >= STAND_WALKS {
+                if !self.bow.refused.contains(&id) {
+                    self.bow.refused.push(id);
+                    self.note(
+                        tick,
+                        format!("bow: crystal {id} left to the pillar"),
+                        format!("{STAND_WALKS} walks to stands; from here {first_miss:?}"),
+                    );
+                }
                 continue;
             }
-            let d = (c.0 - feet.0).abs() + (c.2 - feet.2).abs() + 2 * (c.1 - feet.1).abs();
-            stands.push((d, c));
-        }
-        stands.sort();
-        for (_, c) in stands.into_iter().take(STAND_TRIES) {
-            let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
-            if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
-                let n = bump(&mut self.bow.walks, id);
-                self.bow.stand = Some((c, id));
-                self.walks += 1;
-                self.note(
-                    tick,
-                    format!("bow: to the stand at {c:?} for crystal {id}"),
-                    format!("from {feet:?}; walk {n} of {STAND_WALKS}; from here {first_miss:?}"),
-                );
-                return Some(Task::Explore(walk));
+            if self
+                .bow
+                .no_stand
+                .iter()
+                .any(|(c, until)| *c == id && tick < *until)
+            {
+                continue;
             }
-            self.expanded += walk.expanded;
+            let spike = crate::spikes::spike_for(w, &self.spikes.geography, pos);
+            #[allow(clippy::cast_possible_truncation)]
+            let centre = spike.map_or([pos[0].floor() as i32, pos[2].floor() as i32], |s| s.centre);
+            let mut stands: Vec<(i32, Cell)> = Vec::new();
+            let mut cells = path::Cells::new(w);
+            for col in stand_columns(centre, [0.0, 0.0]) {
+                let Some(c) = ground_in(w, &mut cells, col[0], col[1]) else {
+                    continue;
+                };
+                let mut blocked = |q: Cell| blocks_arrow(&mut cells, q);
+                if aim(centre_of(c), pos, &mut blocked).is_err() {
+                    continue;
+                }
+                let d = (c.0 - feet.0).abs() + (c.2 - feet.2).abs() + 2 * (c.1 - feet.1).abs();
+                stands.push((d, c));
+            }
+            stands.sort();
+            let found = stands.len();
+            for (_, c) in stands.into_iter().take(STAND_TRIES) {
+                let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    let n = bump(&mut self.bow.walks, id);
+                    self.bow.stand = Some((c, id));
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("bow: to the stand at {c:?} for crystal {id}"),
+                        format!(
+                            "from {feet:?}; walk {n} of {STAND_WALKS}; from here {first_miss:?}"
+                        ),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+            }
+            // None now: asked again later, the pillar kept off it meanwhile.
+            self.bow
+                .no_stand
+                .retain(|(c, until)| *c != id && tick < *until);
+            self.bow.no_stand.push((id, tick + NO_STAND_WAIT));
+            self.note(
+                tick,
+                format!("bow: no stand for crystal {id}"),
+                format!(
+                    "from {feet:?}; {found} stands with a shot, none walked to; asked again in {NO_STAND_WAIT}; from here {first_miss:?}"
+                ),
+            );
         }
-        let n = bump(&mut self.bow.walks, id);
-        self.note(
-            tick,
-            format!("bow: no stand for crystal {id}"),
-            format!("from {feet:?}; try {n} of {STAND_WALKS}; from here {first_miss:?}"),
-        );
-        self.retry_at = tick + 20;
-        Some(Task::Idle)
+        None
     }
 
     /// The shot in hand, a tick at a time while no task runs: the bow to hand, still, the use,

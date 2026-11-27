@@ -298,6 +298,9 @@ pub fn bow_row(
     }
     push("item:stone_pickaxe", r.bow_pickaxes);
     push("item:stick", r.bow_sticks);
+    // Planks for a table where the bow is made (race 46072716511 lane 2 had 3 string in the room
+    // and 2 planks: "no wood underground" for the table, no bow).
+    push("tag:planks", 4);
     make::Row {
         id: BOW_ROW.to_owned(),
         needs: Vec::new(),

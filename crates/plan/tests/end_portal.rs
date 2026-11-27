@@ -476,20 +476,25 @@ fn the_bow_row_is_makeable_from_the_armed_pack() {
     .into_iter()
     .collect();
     let row = end_portal::bow_row(&r, false, 0, 3, 2);
-    assert_eq!(row.provides.len(), 4, "bow, arrows, pickaxe, sticks");
+    assert_eq!(
+        row.provides.len(),
+        5,
+        "bow, arrows, pickaxe, sticks, planks"
+    );
     let c = plan::make::make_with_wear(&t, &pack, &near, true, &plan::make::Wear::default(), &row);
     assert!(matches!(c, plan::make::Choice::Act(_)), "{c:?}");
     let bare = end_portal::bow_row(&r, false, 0, 0, 0);
     assert_eq!(
         bare.provides.len(),
-        2,
-        "no string, no feathers: pickaxe and sticks"
+        3,
+        "no string, no feathers: pickaxe, sticks, planks"
     );
     let held: plan::make::Counts = [
         (ItemKind::Bow, 1),
         (ItemKind::Arrow, 32),
         (ItemKind::StonePickaxe, 4),
         (ItemKind::Stick, 16),
+        (ItemKind::OakPlanks, 4),
     ]
     .into_iter()
     .collect();
