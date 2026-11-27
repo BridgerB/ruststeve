@@ -1122,3 +1122,19 @@ entry_walks = 4
 entry_clicks = 9
 entries = 3
 # <<< E2
+# >>> E8 (issue 20, the bow line, docs/problems/end-bow.md): the bow kit, a phase after the eat.
+# The bow line runs it; the pillar line's merge would set it false until it switches.
+bow = true
+# 32 arrows: 8 open crystals at up to 4 shots each (bow::MISSES); 16 is the least that counts as
+# armed with a bow (world::stage::BOW_ARROWS). One flint, one stick and one feather make 4.
+arrows = 32
+# 16 sticks spare (no wood in the End: race 45994686575 lane 5 sat 15,240 ticks with no pickaxe
+# and no sticks) and a 4th stone pickaxe (the armed snapshot holds 3 and 90 cobblestone).
+bow_sticks = 16
+bow_pickaxes = 4
+# A whole day: the armed snapshot is at dusk, so the night's hut comes first.
+bow_ticks = 24000
+bow_fails = 24
+# Chickens and spiders hunted within 48 (the forest base's stem_radius, as log_reach).
+bow_radius = 48.0
+# <<< E8
