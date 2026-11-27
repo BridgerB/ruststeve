@@ -262,3 +262,17 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Landed ("waterfall down to"), the water is taken back ("landing water taken back at").
   - The pour on the pillar's top is gone.
   - Unit test `the_landing_water_is_poured_at_the_foot_and_dropped_into_from_the_top`.
+
+## Twelfth race: 45920382795 (dev-end-island, c61e98a, development only)
+- **Lane 0:** 2 crystals.
+  - The pool was made, but only one bucket came back from it: "refilled" once, then "the refill gave up".
+  - With one bucket there was no landing water, so the way down was the dig. The clutch saved one fall of 18.6.
+  - The second clutch sent its pour at 2.9 over the ground, and the bot died of the fall (`death.fell.assist`): no "poured" was seen before the landing killed it.
+- **Lane 1:** killed by endermen during E5's "dig a notch" (E5's).
+
+### Wall 18: a 2 by 1 pool is no infinite source (fixed)
+- **The cause:** a water source regenerates only with two sources beside it. In a 2 by 1 pit each cell has one, so the first bucket taken empties a cell for good.
+- **The fix:**
+  - The pool is a 2 by 2 square, dug whole ("water pool dug at" ×4). Water goes in two diagonal corners ("water pool poured at"), which fills the other two, and every cell then has two sources beside it.
+  - It refills from any cell of the square.
+  - "no landing water" is now noted with its reason (buckets, end stone, or no clear side).
