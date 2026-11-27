@@ -1325,3 +1325,21 @@ fn the_low_stand_for_the_takeoff_strike_is_dug_through_the_flame() {
         Want::Go(_, "out of the flame's way") | Want::Hold("out of the flame's way")
     ));
 }
+
+#[test]
+fn a_fireball_in_flight_is_sheltered_from_after_its_strafe() {
+    // Frontier race 45931225605 lane 0: the strafe over, the fireball 40 ticks in the air.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [-40.5, 80.0, 0.5], 0, 90.0);
+    add(&mut w, 51, EntityKind::DragonFireball, [-10.5, 74.0, 0.5]);
+    assert!(dragon::fireball_at(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "strafe: shelter before the fireball (a notch)")
+    );
+}

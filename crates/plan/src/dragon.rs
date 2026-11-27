@@ -613,6 +613,24 @@ pub fn strafing_at(w: &World, feet: [f64; 3]) -> Option<f64> {
     (d <= STRAFE_RANGE).then_some(d)
 }
 
+/// The distance of the nearest dragon fireball in flight within `FIREBALL_RANGE` of `feet`.
+pub fn fireball_at(w: &World, feet: [f64; 3]) -> Option<f64> {
+    w.entities
+        .values()
+        .filter(|e| e.kind == EntityKind::DragonFireball)
+        .map(|e| {
+            ((e.pos[0] - feet[0]).powi(2)
+                + (e.pos[1] - feet[1]).powi(2)
+                + (e.pos[2] - feet[2]).powi(2))
+            .sqrt()
+        })
+        .filter(|d| *d <= FIREBALL_RANGE)
+        .min_by(f64::total_cmp)
+}
+
+/// Blocks from the feet a fireball in flight is sheltered from.
+pub const FIREBALL_RANGE: f64 = 64.0;
+
 /// Blocks the strafing dragon fires within (`DragonStrafePlayerPhase`; E4's `THREAT_NEAR`).
 pub const STRAFE_RANGE: f64 = 64.0;
 
@@ -2448,7 +2466,13 @@ impl Plan {
         // the shelter is taken before it (frontier race 45924970608: two bots died of breath on
         // open ground, the cloud already on them before the notch was dug).
         let charge = charging_at(w, body.pos);
-        let strafe = charge.is_none().then(|| strafing_at(w, body.pos)).flatten();
+        // A fireball in flight counts as the strafe that sent it: the strafe may end, or start
+        // beyond 64, before it lands (frontier race 45931225605 lane 0: the strafe 56 off at its
+        // end, the fireball 40 ticks in the air with the phase holding, the cloud on the bot).
+        let strafe = charge
+            .is_none()
+            .then(|| strafing_at(w, body.pos).or_else(|| fireball_at(w, body.pos)))
+            .flatten();
         let Some(d) = charge.or(strafe) else {
             if self.dragon.charging {
                 // Stayed in until no cloud lies within reach.
