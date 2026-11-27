@@ -1751,3 +1751,47 @@ fn a_clutch_landed_in_its_own_water_takes_it_back() {
         "the water taken back"
     );
 }
+
+#[test]
+fn the_landing_pour_waits_for_the_body_centred_and_aims_past_the_first_block() {
+    // Frontier race 45954274931 lanes 1 and 2: off the column's centre, the ray met the first
+    // block's top and the water went into the feet's own cell; the pillar was dug away.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
+    w.inventory.slots.insert(38, (ItemKind::WaterBucket, 1));
+    set(&mut w, (8, 64, 5), BlockKind::EndStone);
+    at(&mut w, [8.2, 65.0, 5.5]);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: centre for the landing water at (8, 65, 5)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.spikes.landings.is_empty());
+    // Centred: the pour, aimed past the landing cell's centre, away from the pillar.
+    at(&mut w, [8.5, 65.0, 5.5]);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    p.spikes_task(&w, 100);
+    match &p.spikes.doing {
+        Some(spikes::Doing::Bucket { look, .. }) => {
+            assert!(
+                (look[0] - (9.5 + spikes::LANDING_AIM)).abs() < 1e-9,
+                "{look:?}"
+            );
+        }
+        d => panic!("{d:?} {:?}", notes(&p)),
+    }
+}

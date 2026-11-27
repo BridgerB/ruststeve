@@ -421,3 +421,22 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - Landed with the pour sent and water in the feet's cell or the one under, the clutch counts as poured ("clutch poured late at") and the water is taken back.
   - The refill trip now notes each way it fails: "no refill: no source seen", "no refill: no way to the pool", and "no refill: the pool too far".
   - Unit test `a_clutch_landed_in_its_own_water_takes_it_back`.
+
+### Wall 29: the landing pour from the first block up went into the feet's own cell (lanes 1 and 2; fixed)
+- **What happened:**
+  - Both lanes did the same thing. At the first block up (lane 1 at 11,160, lane 2 at 12,800): "climb paused for the landing water", "landing water poured", then at once "dig down at (the first block) (on a pillar)". The pillar was gone, and the bot was back at its foot, in water.
+  - `why` on lane 2's recording at tick 12,805: water at (12, 63, 36), the feet's own cell on top of the first block, not in the landing cell (13, 62, 36).
+  - The pour aimed at the landing floor's centre. With the body off the column's centre, the ray met the first block's top. With water in the column, `approach_along` read it as shut, `next` fell through to `on_pillar`, and the bot dug down.
+- **The fix:**
+  - Before the pour, the body is centred over the column ("centre for the landing water at"; within `STEP_NEAR`).
+  - The pour aims `LANDING_AIM` 0.35 past the landing cell's centre, away from the pillar. From an eye 0.2 off centre on the far side, the ray crosses the first block's top at x + 0.26 past its edge.
+  - Unit test `the_landing_pour_waits_for_the_body_centred_and_aims_past_the_first_block`.
+
+### The race's end (cap 36,000): 0 of 6 past the crystals stage; 1 crystal struck (lane 1)
+- **Five deaths, all to dragon clouds (indirectMagic):**
+  - Lane 0 at 7,640: wall 27's pit, then E5's strafe.
+  - Lane 2 at 14,880, in water at (8, 61, 37), after wall 29 took its pillar.
+  - Lane 3 at 14,000, exploring, after a clutch drop judged "missed" at health 20 (wall 28).
+  - Lane 4 at 10,860, in E5's breath notch.
+  - Lane 5 at 3,040, before any crystal work.
+- **Lane 1** reached the cap with "no climb: no water" after wall 28.

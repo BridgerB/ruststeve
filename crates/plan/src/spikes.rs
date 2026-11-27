@@ -132,6 +132,10 @@ pub const REFUSE_TICKS: u64 = 1200;
 /// How near a cell's centre (blocks, each axis) a step ends, and the most it takes. A body 0.6
 /// wide within 0.2 of the centre stands on its cell alone.
 pub const STEP_NEAR: f64 = 0.2;
+/// Blocks past the landing cell's centre, away from the pillar, the landing pour aims at: from an
+/// eye over the column's centre (within `STEP_NEAR`) the ray then clears the first block's top
+/// edge (eye 1.62 over that top, 2.62 over the landing floor: at the edge the ray is past it).
+pub const LANDING_AIM: f64 = 0.35;
 pub const STEP_TICKS: u64 = 60;
 /// One blow of the dragon's (its breath's 6 through iron, race 45875049490; a wing's 5, a head's
 /// 10): on the way down under danger plus this, the bot holds in its shaft while the dragon is
@@ -1890,14 +1894,43 @@ impl Plan {
                 // the foot's cell and a body in water cannot jump-place (race 45949063425 lane 0:
                 // three climbs, none rose). Two buckets held (one stays for the clutch).
                 if let Some(l) = self.landing_due(w, column, feet, top) {
+                    // Centred over the column, and aimed at the landing floor's far side: off the
+                    // centre the ray met the first block's top and the water went into the feet's
+                    // own cell, the column read as shut and the pillar dug away (frontier race
+                    // 45954274931 lanes 1 and 2; `why` at tick 12805: water at (12, 63, 36)).
+                    let off = (f64::from(feet.0) + 0.5 - body.pos[0])
+                        .abs()
+                        .max((f64::from(feet.2) + 0.5 - body.pos[2]).abs());
+                    if off > STEP_NEAR {
+                        self.spikes_note(
+                            tick,
+                            format!("spikes: centre for the landing water at {feet:?}"),
+                            format!("{off:.2} off before the pour"),
+                        );
+                        self.spikes.doing = Some(Doing::Step {
+                            to: feet,
+                            sneak: true,
+                            until: tick + STEP_TICKS,
+                        });
+                        self.retry_at = tick + 1;
+                        return Some(Task::Idle);
+                    }
                     self.spikes.landings.push((column, l));
                     self.spikes_note(
                         tick,
                         format!("spikes: landing water poured at {l:?}"),
                         format!("from the first block up at {feet:?}, the drop from {top}"),
                     );
+                    let (sx, sz) = (
+                        f64::from((l.0 - column.0).signum()),
+                        f64::from((l.2 - column.1).signum()),
+                    );
                     self.spikes.doing = Some(Doing::Bucket {
-                        look: [f64::from(l.0) + 0.5, f64::from(l.1), f64::from(l.2) + 0.5],
+                        look: [
+                            f64::from(l.0) + 0.5 + LANDING_AIM * sx,
+                            f64::from(l.1),
+                            f64::from(l.2) + 0.5 + LANDING_AIM * sz,
+                        ],
                         item: ItemKind::WaterBucket,
                         want: ItemKind::Bucket,
                         count: craft::count(w, ItemKind::Bucket) + 1,
