@@ -267,3 +267,9 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - All three deaths in this race fit: the cloud "0.0 from its edge" of the bot, on it in the bunker (lanes 0 and 1) and in a half-dug notch (lane 2), the splash 1 to 2 blocks off.
   - A notch or bunker within 4 blocks of where a fireball lands puts its cloud on the bot. Only distance shelters: the bot more than 4 from the impact, and the cloud's growing reach kept clear after.
   - The notch still answers a charge (a body blow) and the perched flame (no fireball).
+  - **Fix (the dodge, `Plan::fireball_dodge_step`):** a dragon fireball in flight within 64, aimed within `DODGE_AIM` (6) of the bot (its velocity, else straight at it), is dodged on open ground.
+    - **Where:** sideways to its flight, `DODGE_MIN` to `DODGE_MAX` (6 to 10) from the cell the bot stood in, the side away from the dragon first (`dodge_cell`).
+    - **Which cells:** a cell stood on in the open (two sides open, the sky over it), never in the bunker's or its stair's columns, ground under every column within 3 (no void edge), and clear of every cloud.
+    - **Note:** "fireball: dodge to … (flight …, ticks …, from …)".
+    - **Never cover for a fireball:** the shelter rows, `breath_step` and `breath_ahead` read clouds only (`clouds_only`).
+    - **The notch is kept** for a charge and the perched flame. A strafe with no fireball is met standing in sight ("strafe: stood in sight at …"); the notch beside is gone.
