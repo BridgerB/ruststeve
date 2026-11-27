@@ -207,8 +207,9 @@ fn a_look_down_from_a_pillar_over_an_enderman_is_bent_a_little() {
     assert!(p > 45.0, "still near the feet: {p}");
 }
 
-/// A clutch drop: falling 2 a tick, the bucket aimed straight down at the landing, an enderman
-/// beside the landing whose eyes the look meets only from the feet after the tick's move.
+/// A clutch drop: falling 2 a tick past an enderman on a ledge 15 off, its eyes level with the
+/// eye after the tick's move: the look along the level meets them only from there (from the eye
+/// now they are 7.6 degrees under it, outside the cone's 3.3 and the guard's 6.6).
 #[test]
 fn a_clutch_look_while_falling_is_judged_from_the_eyes_after_the_move() {
     let mut w = end_world([0.5, 90.0, 0.5]);
@@ -218,9 +219,9 @@ fn a_clutch_look_while_falling_is_judged_from_the_eyes_after_the_move() {
     }
     // From the feet 2 lower, the look at pitch p meets its eyes.
     let next_eye = [0.5, 88.0 + physics::EYE_HEIGHT, 0.5];
-    let at = [6.5, 64.0, 0.5];
+    let at = [15.5, 88.0 + physics::EYE_HEIGHT - ENDERMAN_EYE, 0.5];
     let (_, p) = plan::walk::look_at(next_eye, [at[0], at[1] + ENDERMAN_EYE, at[2]]);
-    let (yaw, _) = plan::walk::look_at(next_eye, [at[0], 0.0, at[2]]);
+    let (yaw, _) = plan::walk::look_at(next_eye, [at[0], next_eye[1], at[2]]);
     enderman(&mut w, 45, at);
     #[allow(clippy::cast_possible_truncation)]
     let y = yaw as f32;
