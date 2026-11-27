@@ -2140,7 +2140,12 @@ impl Plan {
             if let Some(b) = self.bunker
                 && breathed(&clouds, feet, BUNKER_HOLD)
             {
+                // With nothing in hand the End's own rows keep the bunker shut (E3's "stays
+                // shut for a … near its stair"); a task in hand is held.
                 if cell_of(feet) == b {
+                    if matches!(self.task, Task::Idle) {
+                        return None;
+                    }
                     return Some(crouch);
                 }
                 if self

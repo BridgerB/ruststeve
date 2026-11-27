@@ -1186,7 +1186,14 @@ fn in_the_bunker_under_a_breath_the_bot_stays_there() {
     );
     let mut p = Plan::new(Aim::Race);
     p.bunker = Some([12, 60, 0]);
-    let c = p.breath_step(&w, 0).expect("held in the bunker");
+    assert!(
+        p.breath_step(&w, 0).is_none(),
+        "nothing in hand: the End's own rows keep it shut"
+    );
+    p.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    let c = p
+        .breath_step(&w, 0)
+        .expect("a task in hand: held in the bunker");
     assert!(c.sneak && !c.forward);
 }
 
