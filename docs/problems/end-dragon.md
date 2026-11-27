@@ -391,3 +391,5 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix:** charges and the body's knock are dodged 12 to 16 off (`CHARGE_SPAN`, routes up to 32 steps).
   - While the dragon scans, a bot not fighting it within 48 of the fountain is already pacing sideways in legs of 12 to 16, since walking 12 takes about 55 ticks and the charge about 20.
   - Out of pits from the landing approach (wall 40).
+- **Dev race 46048455555 (c09bf25, dev-end-two-crystals):** lane 1 struck #64 at (42.5, 83, 0.5), the crystal that cannot heal the perch, and left #98 at (12, 39), which can. So four perches went unfought, as the rule says, each one sitting-scanning to charging within about 100 ticks. It died in E4's clutch drop (`fell.assist`). Lane 0 was stared into an enderman's anger at tick 60 and killed in the enderman's notch by tick 240.
+  - The order the crystals go in decides when the fight can begin: the ones in the perch's heal box (all but (42, 0) and (-42, -1)) are the ones to take first.
