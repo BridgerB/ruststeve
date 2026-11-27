@@ -1101,12 +1101,13 @@ fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
     let mut w = end_at([12.5, 64.0, 0.5]);
     cloud(&mut w, 50, [12.5, 64.0, 0.5], 3.0);
     let mut p = Plan::new(Aim::Race);
-    p.bunker = Some([15, FLOOR, 0]);
+    // A bunker 4 down: clear of the cloud on the surface.
+    p.bunker = Some([15, FLOOR - 4, 0]);
     assert!(p.breath_step(&w, 0).is_some());
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == format!("breath: into the bunker at {:?}", [15, FLOOR, 0])),
+            .any(|e| e.what == format!("breath: into the bunker at {:?}", [15, FLOOR - 4, 0])),
         "{:?}",
         p.events_since(0)
     );
@@ -1172,4 +1173,19 @@ fn a_notch_with_no_step_out_is_risen_out_of_a_block_at_a_jump() {
         pos: world::BlockPos::new(12, 61, 0),
         face: 1
     }));
+}
+
+#[test]
+fn in_the_bunker_under_a_breath_the_bot_stays_there() {
+    // Race 45918669138 lane 2: in and out of the bunker 40 times at the stair's top, 20 to dead.
+    let mut w = end_at([12.5, 60.0, 0.5]);
+    cloud(&mut w, 50, [12.5, 64.0, 0.5], 3.0);
+    assert!(
+        dragon::breath_on(&breaths(&w), [12.5, 60.0, 0.5]).is_none(),
+        "under it"
+    );
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([12, 60, 0]);
+    let c = p.breath_step(&w, 0).expect("held in the bunker");
+    assert!(c.sneak && !c.forward);
 }

@@ -187,5 +187,17 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - But the notch was 2 under the bunker's floor, walled all round. No step out was found, and E3's retreat said "no walk to the bunker" every tick from 1,700 on.
 - **Fix:** with no step to dig, the notch is risen out of, a block put under the feet at each jump (`rise_step`), to the height it was begun from. Notes: "notch: risen out at …".
 
+### Race 45918669138 in full (d7f7a01): went backwards
+- **Wall 19: the way into the bunker flapped.**
+  - Lane 2 stood at the bunker's stair top (13, 58..59, -1) under a flame's cloud. The body's height put it in and out of the cloud from tick to tick: "into the bunker" and "out of the breath" 40 times each. Between them the fight's own walk climbed the stair back into the cloud, 3.0 a time, 20 to dead.
+  - Lane 0 died the same way after 7 strikes (dragon at 168).
+  - **Fix:**
+    - The way into the bunker is kept to its end while a breath lies within its reach plus 2 on the plane.
+    - In the bunker the bot stays, crouched, while one does.
+    - A bunker not clear of every breath (on the plane and in height) is not gone to; the notch where the bot stands is dug instead.
+- **Wall 20: held in cover while the dragon sat.**
+  - Lane 1 was in its notch under the bunker (wall 18), and "end: covered" from an angry enderman ran the whole race: 0 strikes.
+  - **Fix:** a fight walk that fails NoPath in cover while the dragon is grounded climbs out by a shaft straight up: the block over the head dug, a block put under the feet at each jump, until the sky is over the head. Notes: "out by a shaft up", "dragon: out of cover".
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

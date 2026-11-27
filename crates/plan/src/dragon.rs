@@ -523,6 +523,10 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Blocks beyond a breath's reach on the plane that the way into the bunker is kept, and the bot
+/// held in it.
+pub const BUNKER_HOLD: f64 = 2.0;
+
 /// Blocks on the plane from the bunker a breath on the body sends the bot into it.
 pub const BUNKER_NEAR: f64 = 6.0;
 
@@ -1468,6 +1472,9 @@ pub struct DragonState {
     /// The height a notch is risen out to, a block at a jump, and the cell the last jump left.
     #[serde(default)]
     pub notch_rise_to: Option<i32>,
+    /// Out of cover by a shaft up, the dragon on its perch.
+    #[serde(default)]
+    pub climb_out: bool,
     #[serde(default)]
     pub rise_from: Option<[i32; 3]>,
     /// The wall cell dug to get out of a pocket in a breath.
@@ -1742,6 +1749,31 @@ impl Plan {
                 .phase_at
                 .map_or(0, |at| w.session.server_ticks.saturating_sub(at)),
         };
+        // Out of cover by a shaft up, the dragon on its perch: the block over the head dug, else
+        // a block put under the feet at a jump, until the sky is over the head.
+        if self.dragon.climb_out {
+            if world::stage::open_sky(w) || !view(w).is_some_and(|(_, v)| grounded(&v)) {
+                self.dragon.climb_out = false;
+                self.dragon.rise_from = None;
+                self.note(
+                    tick,
+                    "dragon: out of cover".to_owned(),
+                    format!("at {:?}", w.body.map(|b| cell_of(b.pos))),
+                );
+            } else if let Some(body) = w.body {
+                let fc = cell_of(body.pos);
+                let head = [fc[0], fc[1] + 2, fc[2]];
+                let solid = w
+                    .block_at(world::BlockPos::new(head[0], head[1], head[2]))
+                    .is_some_and(|k| k != BlockKind::Air);
+                if solid && body.on_ground {
+                    return self
+                        .charge_dig_step(w, tick, head)
+                        .unwrap_or_else(|| looking_down(w));
+                }
+                return self.rise_step(w, tick, body);
+            }
+        }
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {
             return Controls::default();
@@ -1998,6 +2030,18 @@ impl Plan {
             // Sealed in cover, a walk out has no way: the next choice waits a while, the End's
             // own rows (the pocket's, the bunker's) open it.
             let covered = crate::end::covered(w);
+            // In cover with the dragon on its perch: out by a shaft straight up, the roof dug and a
+            // block put under the feet at each jump (race 45918669138 lane 1: held covered from an
+            // angry enderman the whole race, 0 strikes in 24,000 ticks).
+            if covered && view(w).is_some_and(|(_, v)| grounded(&v)) {
+                self.dragon.climb_out = true;
+                self.note(
+                    tick,
+                    format!("dragon walk to {cell:?} failed: {e:?}"),
+                    "in cover with the dragon on its perch: out by a shaft up".to_owned(),
+                );
+                return Controls::default();
+            }
             self.note(
                 tick,
                 format!("dragon walk to {cell:?} failed: {e:?}"),
@@ -2080,6 +2124,26 @@ impl Plan {
             if let Some(c) = self.notch_exit_step(w, tick) {
                 return Some(c);
             }
+            // The way into the bunker kept to the end while a breath lies near on the plane, and
+            // in it the bot stays while one lies over it: the body's height at the stair's top is
+            // in and out of the cloud from tick to tick (race 45918669138 lane 2: "into the
+            // bunker" and "out of the breath" 40 times each, the stair climbed back into the cloud
+            // between, 20 to dead).
+            if let Some(b) = self.bunker
+                && breathed(&clouds, feet, BUNKER_HOLD)
+            {
+                if cell_of(feet) == b {
+                    return Some(crouch);
+                }
+                if self
+                    .dragon
+                    .breath_walk
+                    .as_ref()
+                    .is_some_and(|wk| wk.target == (b[0], b[1], b[2]))
+                {
+                    return self.breath_walk_step(w, tick, b);
+                }
+            }
             self.dragon.breath_refused.clear();
             self.dragon.breath_noted = None;
             self.dragon.breath_wall = None;
@@ -2104,8 +2168,10 @@ impl Plan {
         // Shelter near (the bunker within `BUNKER_NEAR`): into it, down, never out sideways
         // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
         // NoPath, then dead). In it with the breath still on: a notch from there.
+        // Only a bunker clear of every breath (on the plane and in height); else a notch here.
         if let Some(b) = self.bunker
             && flat(feet, mid(b)) <= BUNKER_NEAR
+            && (cell_of(feet) == b || clear_of_breath(&clouds, mid(b)))
         {
             if cell_of(feet) == b {
                 self.dragon.breath_notch = true;
