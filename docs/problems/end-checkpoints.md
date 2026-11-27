@@ -11,7 +11,7 @@ A bot near the goal is saved as a snapshot: at 5 or fewer crystals left (`crysta
 - **Fix:** a crystal is gone only when destroyed: its removal with its blast at its spot (the server removes, then explodes, `EndCrystal.hurtServer`). The destroyed spikes are kept in memory (`crystals_destroyed`), so a snapshot's resume keeps them. An untracking is never a destruction.
 - **The End row** in the race summary had the same flaw: `left` was the last senses row's tracked count. It is now 10 less `struck` and `blast`. Race 45994686575 recounted from the ledgers: lane 5 had 1 left (true as reported), lane 4 had 2 (not 1), lane 3 had 6 (not 1), lane 0 had 3 (not 2).
 
-## Risks
+- **A gone the bot did not see go:** a spike seen with no crystal on it for `CRYSTAL_ABSENT_TICKS` (400, 20 s) running counts too, if the bot is within 60 of the fountain and the spike's column is loaded. That covers a development start's RCON kill (`dev-end-no-crystals`) and the sim's bare island (`bot/tests/end_loop.rs` `on_the_island_endermen_about_are_never_stared_at`, whose bunker waits on `crystals`; it failed on the blast-only first fix, CI 46047840723). A resume's re-send is done within about 80 ticks.
 
-- A development start that kills the crystals by RCON (`dev-end-no-crystals`) has no blasts, so it never reaches `crystals`. The plan's `end::crystals_done` (the bunker after the crystals) then stays false there. Development only; never evidence.
+## Risks
 - A crystal destroyed out of the bot's hearing (its blast packet goes to players within 64) is not counted, and the count stays high. That is safe (no false checkpoint) but can hold a stage back.

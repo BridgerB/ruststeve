@@ -57,7 +57,7 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 
 ## Issue 20 part 2: crystals destroyed
 
-- `crystals_destroyed` (`record_crystal_destroyed`): the End's spikes (centre columns, `world::stage::SPIKES`) whose crystal was seen destroyed, a removal with its blast at its spot (the world decides, `World::crystal_removed` and `crystal_blast`). It lives in memory so a snapshot's resume keeps the count; older stores read it as empty. The stages `crystals_5`, `crystals_1` and `crystals` count from it, never from the crystals tracked (race 46044026128: a resume's re-send read as "5 left" on tick 40 in every lane).
+- `crystals_destroyed` (`record_crystal_destroyed`): the End's spikes (centre columns, `world::stage::SPIKES`) whose crystal was seen destroyed, a removal with its blast at its spot (the world decides, `World::crystal_removed` and `crystal_blast`), or a spike seen bare for `CRYSTAL_ABSENT_TICKS` (400) running with the bot within 60 of the fountain (`crystals_absent_tick`: a development start's RCON kill). It lives in memory so a snapshot's resume keeps the count; older stores read it as empty. The stages `crystals_5`, `crystals_1` and `crystals` count from it, never from the crystals tracked (race 46044026128: a resume's re-send read as "5 left" on tick 40 in every lane).
 
 ## See also
 - [[hist-no-xray]] - why the rule.

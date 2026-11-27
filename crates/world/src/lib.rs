@@ -178,6 +178,11 @@ fn blast_near(center: [f64; 3], pos: [f64; 3]) -> bool {
     (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= CRYSTAL_BLAST_NEAR
 }
 
+/// A spike seen with no crystal this many world ticks running is one gone (20 s: a resume's
+/// re-send of the crystals is done within about 80, race 46044026128 lane 0: untracked on tick
+/// 40, every one sent again by tick 100).
+pub const CRYSTAL_ABSENT_TICKS: u64 = 400;
+
 /// Entity-event statuses kept per entity.
 pub const ENTITY_STATUSES_KEPT: usize = 4;
 /// Damage events kept per entity.
@@ -639,6 +644,13 @@ pub struct World {
     /// `explode`), so a removal waits `CRYSTAL_BLAST_TICKS` for one (issue 20 part 2).
     #[serde(default)]
     pub crystals_removed: Vec<(u64, [f64; 3])>,
+    /// Spikes (centre columns) seen with no crystal on them, since this world tick: the bot
+    /// within `stage::CRYSTALS_NEAR` of the fountain (every crystal then inside the tracking
+    /// distance) and the spike's column loaded. Held `CRYSTAL_ABSENT_TICKS`, it is a crystal gone
+    /// that the bot did not see go (a development start's RCON kill, a synthetic island). Counted
+    /// from `ticks` before its increment: recorded on the `CRYSTAL_ABSENT_TICKS` + 1th tick.
+    #[serde(default)]
+    pub crystals_absent: BTreeMap<(i32, i32), u64>,
     /// Each spawner's mob from its block-entity data (`blaze`): which spawner is the blaze one,
     /// with no blaze in sight (blaze wall 4 took a dungeon spawner for it).
     #[serde(default)]
@@ -790,6 +802,37 @@ impl World {
         }
     }
 
+    /// Each spike with no crystal on it, seen as `crystals_absent` says: held
+    /// `CRYSTAL_ABSENT_TICKS`, recorded gone. Any break (a crystal there, the bot far off, the
+    /// column unloaded, out of the End) starts it again.
+    fn crystals_absent_tick(&mut self) {
+        let near = stage::in_end(self)
+            && stage::from_fountain(self).is_some_and(|d| d <= stage::CRYSTALS_NEAR);
+        let now = self.ticks;
+        let done = self.memory.crystals_destroyed().clone();
+        for [x, z] in stage::SPIKES {
+            let loaded = self.columns.contains_key(&ChunkPos {
+                x: x.div_euclid(16),
+                z: z.div_euclid(16),
+            });
+            let crystal = self.entities.values().any(|e| {
+                e.kind == EntityKind::EndCrystal
+                    && !e.dead
+                    && (e.pos[0] - (f64::from(x) + 0.5)).hypot(e.pos[2] - (f64::from(z) + 0.5))
+                        <= CRYSTAL_SPIKE_NEAR
+            });
+            if !near || !loaded || crystal || done.contains(&(x, z)) {
+                self.crystals_absent.remove(&(x, z));
+                continue;
+            }
+            let since = *self.crystals_absent.entry((x, z)).or_insert(now);
+            if now >= since + CRYSTAL_ABSENT_TICKS {
+                self.memory.record_crystal_destroyed((x, z));
+                self.crystals_absent.remove(&(x, z));
+            }
+        }
+    }
+
     /// Record the spike under a destroyed crystal; one off every spike is not counted.
     fn crystal_destroyed(&mut self, pos: [f64; 3]) {
         let spike = stage::SPIKES.iter().find(|[x, z]| {
@@ -831,6 +874,7 @@ impl World {
                 // thousands of sightings a tick (callgrind of a replay of race 45350933958 lane 1:
                 // `Stage::highest` -> `kind_near` -> `Memory::in_column`).
                 let scans = self.ticks.is_multiple_of(stage::STAGE_EVERY_TICKS);
+                self.crystals_absent_tick();
                 if let Some(s) = Stage::highest_above(self, self.stage_reached, scans) {
                     self.stage_reached = Some(s);
                 }

@@ -848,6 +848,42 @@ fn crystals_5_and_1_count_the_destroyed() {
     assert_eq!(r.stage_reached, Some(Stage::Crystals1));
 }
 
+/// A spike seen with no crystal on it for `CRYSTAL_ABSENT_TICKS` running (near the fountain,
+/// its column loaded) is one gone the bot did not see go (a development start's RCON kill). A
+/// crystal on a spike, or the bot far off, keeps it standing.
+#[test]
+fn a_spike_long_seen_bare_is_a_crystal_gone() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(0.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    w.step(&crystal(100, 3));
+    for _ in 0..world::CRYSTAL_ABSENT_TICKS {
+        w.step(&tick());
+    }
+    assert_eq!(world::stage::crystals_left(&w), Some(10), "not yet");
+    w.step(&tick());
+    assert_eq!(world::stage::crystals_left(&w), Some(1), "spike 3's stands");
+    assert_eq!(w.stage_reached, Some(Stage::Crystals1));
+    // Far off, the bare spikes are not counted.
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    w.step(&teleport_to(70.5, 70.0, 0.5));
+    for [x, z] in world::stage::SPIKES {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    for _ in 0..world::CRYSTAL_ABSENT_TICKS + 10 {
+        w.step(&tick());
+    }
+    assert_eq!(
+        world::stage::crystals_left(&w),
+        Some(10),
+        "70 off the fountain"
+    );
+}
+
 /// `win`: the credits with the dragon seen dead before them (its death event, or its boss bar
 /// removed in the End). The credits alone are not.
 #[test]
