@@ -85,3 +85,7 @@ From the `end` frontier (or `dev-end-arrival` for development only), the ledger 
 - **What happened**: a dragon fireball landed on the bunker's stair up; its cloud (0.5 tall, radius 3 to 7) reached the bot under the end stone at 6 a second, 20 to dead in 4 s, too fast for E5's dig-out. The stair's top cells are the ground's own top layer.
 - **Fix**: the bunker is not opened, and its stair not climbed, while a dragon fireball or an area cloud lies within `STAIR_CLEAR` 8 of the stair's top ("end: the bunker stays shut for a … near its stair at", `fire_waits`); opened and waiting, it is sealed again (the open re-digs it). Test `the_bunker_is_not_left_while_a_fireball_or_cloud_lies_by_its_stair`.
 - **Open**: the stair itself is still one block under the ground's top at its upper steps; a roof two deep over every step is not built.
+
+### 12. The arrival stare again, after wall 8 (E5's dev race 45913296602 lane 1, on e67f786)
+- **What happened**: an enderman angered at tick 60 of the arrival; the bot was killed fighting it in the open. `end_gaze` asked for pitch 90 from the first End tick, but no look packet went out: `World::move_body` sends only the once-a-second status while the column under the feet is not loaded, so the server held the teleport's pitch 0 and judged the stare by it.
+- **Fix** (world, fenced): with no column loaded, a look the controls ask for that differs from the last one sent goes out as `MovePlayerPosRot` at the body's position (the server's own after the teleport). Test `crates/world/tests/end_look.rs`.
