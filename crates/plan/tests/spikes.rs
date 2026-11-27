@@ -1842,3 +1842,22 @@ fn every_clutch_landing_takes_its_water_back_wherever_it_went() {
     );
     assert_eq!(spikes::clutch_water(&w, (20, 64, 20)), Some((21, 64, 20)));
 }
+
+#[test]
+fn no_climb_begins_without_the_blocks_for_the_whole_pillar() {
+    // Frontier race 45959448248 lane 3: 0 end stone, the one block each dig down gave back put up
+    // 104 times to the cap, and E3's stock never resumed.
+    let mut w = world(2, [8.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 3));
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), None, "handed back for the stock");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: no climb: too few blocks"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(p.spikes.pillars.is_empty(), "no pillar begun");
+}
