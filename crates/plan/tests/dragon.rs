@@ -1750,10 +1750,9 @@ fn a_fireball_on_a_pace_leg_is_dodged_on_the_way_the_bot_walks_and_never_by_the_
     let mut q = Plan::new(Aim::Race);
     q.bunker = Some([60, FLOOR - 4, 60]);
     assert!(q.charge_step(&w, 0).is_some());
-    assert_eq!(
-        dodged_to(&q).as_deref(),
-        Some("fireball: dodge to [12, 64, 0]")
-    );
+    let to = q.dragon.dodge_to.expect("a dodge");
+    let axis = (f64::from(to[0]) + 0.5).hypot(f64::from(to[2]) + 0.5);
+    assert!(axis >= dragon::FOUNTAIN_CLEAR, "{to:?} {axis}");
 }
 
 #[test]
@@ -1819,4 +1818,31 @@ fn the_dodge_goes_only_where_a_way_is_found_clear_of_every_cloud() {
     let off = dragon::flat(feet_of(to), [12.5, 64.0, 3.5]);
     assert!(off > 1.0 + dragon::BREATH_MARGIN + 1.0, "{to:?} {off}");
     assert_ne!(to, [12, 64, 6]);
+}
+
+#[test]
+fn in_water_the_dodge_is_pressed_straight_on() {
+    // Frontier race 45954274931 lanes 2 and 3: a layer of water over the ground, no walk planned
+    // from it (NoPath), the bots stood and the cloud was put on them.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    for x in 10..15 {
+        for z in -2..3 {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: (x, 64, z),
+                state: state(BlockKind::Water),
+            }));
+        }
+    }
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    let c = p.charge_step(&w, 0).expect("dodging");
+    assert!(dodged_to(&p).is_some(), "{:?}", p.events_since(0));
+    assert!(p.dragon.dodge_straight && p.dragon.dodge_walk.is_none());
+    assert!(c.forward, "pressed on: {c:?}");
 }

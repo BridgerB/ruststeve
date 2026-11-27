@@ -665,6 +665,11 @@ pub const SKY_CLEAR: i32 = 6;
 /// so across, the portal round it).
 pub const FOUNTAIN_CLEAR: f64 = 5.0;
 
+/// Is the feet cell `c` water (the planner has no start there)?
+pub fn in_water(w: &World, c: [i32; 3]) -> bool {
+    w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Water)
+}
+
 /// Controls that walk straight from `feet` toward `to` on the plane.
 pub fn toward(feet: [f64; 3], to: [f64; 3]) -> Controls {
     Controls {
@@ -727,7 +732,19 @@ pub fn dodge_cell(
         })
     };
     let start: Cell = (from[0], from[1], from[2]);
+    // In water the planner has no start (frontier race 45954274931 lanes 2 and 3: a layer of
+    // water over the ground, every walk NoPath): the straight way is kept off the clouds instead,
+    // and pressed straight (`in_water`).
+    let wet = in_water(w, from);
     let walked = |c: [i32; 3]| {
+        if wet {
+            let off_start: Vec<Breath> = clouds
+                .iter()
+                .filter(|b| flat(b.pos, mid(from)) > b.reach())
+                .copied()
+                .collect();
+            return !breath_on_way(&off_start, mid(from), mid(c), 0.0);
+        }
         let r = crate::path::plan(
             w,
             start,
@@ -3088,7 +3105,8 @@ impl Plan {
             }
             self.dragon.dodge_id = Some(id);
             self.dragon.dodge_walk = None;
-            self.dragon.dodge_straight = false;
+            // From water no walk plans: pressed straight on from the first tick.
+            self.dragon.dodge_straight = in_water(w, cell_of(feet));
             let from = cell_of(feet);
             self.dragon.dodge_from = Some(from);
             let banned = self.bunker_columns();
@@ -3254,6 +3272,11 @@ impl Plan {
         let Some(c) = self.dragon.pace_to else {
             return self.strafe_stood(tick, fc, stand);
         };
+        // From water no walk plans: straight on toward the leg's end (wall 33).
+        if in_water(w, fc) {
+            self.dragon.pace_walk = None;
+            return toward(feet, mid(c));
+        }
         let cell: Cell = (c[0], c[1], c[2]);
         if self
             .dragon
