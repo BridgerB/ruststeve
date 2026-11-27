@@ -570,3 +570,14 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - No clutch pour while the vertical speed is upward.
   - Unit tests `the_clutchs_water_counts_as_taken_back_only_with_more_water_buckets`, `no_clutch_pour_while_rising` and `an_empty_bucket_refills_from_the_water_left_behind`.
 - **Lane 5** dug down through a charge (33,620 to 34,020), the same as lane 3: wall 38's descent and the no-dig hold cover it.
+
+### Wall 41: the far caged crystal first, while a near one healed the dragon (dev race 46048455555 lane 1; fixed)
+- **What happened:** lane 1 took (42, 0) first, the caged spike and the most work. It left (12, 39), which healed the dragon back to 200 at every perch.
+- **The fix:** E5's jar read (`EnderDragon.checkCrystals`, javap probe 46039100437; `dragon::HEAL_RANGE` 32 plus `dragon::HEAL_BOX_HALF` 8, from `dragon::PERCH_POINT`): the perched dragon heals from crystals within 40 on x and z of the perch.
+  - Those crystals are worked first, nearest first among them (`heals_the_perch`, `crystals_in_order`). (42, 0) and (-42, -1) come last, so with only those two left the bot can go to the fight.
+  - E5's constants are used rather than a second copy of the number.
+  - Unit test `the_crystals_that_heal_the_perch_are_taken_first`.
+- **Lane 1's death at 5,920** (on c09bf25, before walls 35 to 40), checked against today's rules:
+  - Its climbs began at 2,820 (landing approach, 72 off), 3,080 (landing, 90 off) and 3,260 (landing, 42 off). Each is refused now: a climb begins only with the dragon holding over 64 off.
+  - After the strike at 3,400 it dug down. Today the clutch descent runs first (`spikes_water` comes before the hurt rule), and at 3,480 (a charge 17 off) the knock rule holds it.
+  - What killed it was "eat in the shaft" on the open pillar at y 81: an Eat task that ran 2,360 ticks, from 3,560 to 5,920, through two perch-and-charge cycles. Today the hurt rule eats only when no water way down exists. An Eat lasting 2,360 ticks is a fault of its own, in the shared eat task.
