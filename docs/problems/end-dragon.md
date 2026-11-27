@@ -166,5 +166,20 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - Note: "end: no pocket for enderman N (…)".
 - E3's covered guard and E4's up-high guard inside `ender_threat` stay as they are.
 
+**Wall 16: breath near the bunker, answered sideways** (E4's race 45912100302 lane 0; frontier 45910659261 lane 1 on the stair). The bot was at y 59 in the bunker's hole, and a fireball's cloud lay in the hole with it. Every cell out was up on the surface (y 61): nine walks out failed NoPath, and the wall dig went sideways through end stone. 20 to dead in 3 s.
+- **Fix:** breath is answered down.
+  - Within 6 of the bunker, into it ("breath: into the bunker at …").
+  - In it with the breath still on, a notch down from there.
+  - A walk out that fails NoPath anywhere digs a notch two deep where the feet are and roofs it ("breath: dig a notch at …"). The notch is held while a cloud lies over it on the plane, then left by the roof and the step ("breath: out of the notch").
+  - The sideways wall dig is no longer begun.
+- The notch is the charge's code (`notch_dig_step`, `notch_leave`, `notch_exit_step`), shared.
+
+### Race 45913296602 (e67f786, dev, 3 lanes, cap 24,000): the first fight with no pockets, 0/3
+- **Dragon's lowest health:** 145 (lane 0, 10 strikes) and 156 (lane 2, 9 strikes). One "dragon takeoff count over" fired (wall 10's fix, counted).
+- **Lane 0:** died of breath in the fight, on e67f786 before wall 16's fix.
+- **Lane 2:** died in a fall during E4's clutch.
+- **Wall 17: an enderman fought in the open** (lane 1, ticks 140 to 260). Angry from a stare at the arrival ("near miss"), with no bunker yet, it was struck 6 times for 26. It hit back for 7, 6.6 and 6.9 (20 → 2.3), and the bot died with the enderman at 13.6.
+  - **Fix:** with no bunker near, a notch two deep where the feet are, roofed ("end: no pocket for enderman N (a notch down, no bunker near)"). An enderman can neither enter nor see into it. Out by the roof and the step once it is calm.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

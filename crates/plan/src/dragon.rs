@@ -523,6 +523,9 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Blocks on the plane from the bunker a breath on the body sends the bot into it.
+pub const BUNKER_NEAR: f64 = 6.0;
+
 /// Blocks on the plane a bunker is gone into from at an angry enderman.
 pub const ENDER_BUNKER_REACH: f64 = 24.0;
 
@@ -1450,6 +1453,14 @@ pub struct DragonState {
     pub ender_noted: Option<String>,
     #[serde(default)]
     pub ender_noted_at: u64,
+    /// Down a notch from a breath, and from an enderman.
+    #[serde(default)]
+    pub breath_notch: bool,
+    #[serde(default)]
+    pub ender_notch: bool,
+    /// The notch's dig failed: crouched where the feet are, no dig tried again.
+    #[serde(default)]
+    pub notch_failed: bool,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -2036,7 +2047,30 @@ impl Plan {
         // <<< E4
         let feet = w.body?.pos;
         let clouds = breaths(w);
+        let crouch = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
         let Some(on) = breath_on(&clouds, feet) else {
+            // Down a notch from a breath: held there while a cloud lies over it on the plane,
+            // then out by the roof and the step.
+            if self.dragon.breath_notch {
+                if breathed(&clouds, feet, 0.0) {
+                    return Some(crouch);
+                }
+                self.dragon.breath_notch = false;
+                self.note(
+                    tick,
+                    "breath: out of the notch".to_owned(),
+                    format!("no breath over {:?}", cell_of(feet)),
+                );
+                self.notch_leave(w);
+            }
+            if let Some(c) = self.notch_exit_step(w, tick) {
+                return Some(c);
+            }
             self.dragon.breath_refused.clear();
             self.dragon.breath_noted = None;
             self.dragon.breath_wall = None;
@@ -2054,6 +2088,54 @@ impl Plan {
             }
             return None;
         };
+        // In a notch already: down and roofed, never a walk out sideways.
+        if self.dragon.breath_notch {
+            return Some(self.notch_dig_step(w, tick, crouch, "breath"));
+        }
+        // Shelter near (the bunker within `BUNKER_NEAR`): into it, down, never out sideways
+        // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
+        // NoPath, then dead). In it with the breath still on: a notch from there.
+        if let Some(b) = self.bunker
+            && flat(feet, mid(b)) <= BUNKER_NEAR
+        {
+            if cell_of(feet) == b {
+                self.dragon.breath_notch = true;
+                self.note(
+                    tick,
+                    format!("breath: in the bunker at {b:?}, a notch down"),
+                    format!(
+                        "a breath {:.1} off, radius {:.1}",
+                        flat(on.pos, feet),
+                        on.radius
+                    ),
+                );
+                return Some(self.notch_dig_step(w, tick, crouch, "breath"));
+            }
+            let cell: Cell = (b[0], b[1], b[2]);
+            if self
+                .dragon
+                .breath_walk
+                .as_ref()
+                .is_none_or(|wk| wk.target != cell)
+            {
+                self.dragon.breath_walk = Some(Walk::new(
+                    cell,
+                    Goal::Block { pos: cell },
+                    Arrive::Goal,
+                    tick,
+                ));
+                self.note(
+                    tick,
+                    format!("breath: into the bunker at {b:?}"),
+                    format!(
+                        "a breath {:.1} off, radius {:.1}",
+                        flat(on.pos, feet),
+                        on.radius
+                    ),
+                );
+            }
+            return self.breath_walk_step(w, tick, b);
+        }
         // The cell held while no breath reaches it; else the nearest one anew.
         let held = self
             .dragon
@@ -2112,8 +2194,7 @@ impl Plan {
 
     /// One tick of the walk out of a breath to `target`.
     fn breath_walk_step(&mut self, w: &World, tick: u64, target: [i32; 3]) -> Option<Controls> {
-        // Walled in (a pocket sealed for an enderman, race 45901376114 lane 2: 140 walks out
-        // failed NoPath while a flame burned it from 20 to dead): the wall toward the cell is dug.
+        // A wall dig begun before the notch rule finishes (none is begun now).
         if let Some(cell) = self.dragon.breath_wall {
             let air = |c: [i32; 3]| {
                 w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Air)
@@ -2143,16 +2224,13 @@ impl Plan {
                 self.dragon.breath_refused.push(target);
             }
             if let TaskStatus::Failed(e) = status {
-                let feet = w.body.map_or([0.0; 3], |b| b.pos);
-                let wall = wall_toward(w, feet, target);
-                self.dragon.breath_wall = wall;
+                // No way out on foot: down a notch where the feet are, roofed, not a dig sideways
+                // through walls (E4's race 45912100302 lane 0; frontier lane 1 on the stair).
+                self.dragon.breath_notch = true;
                 self.note(
                     tick,
                     format!("walk out of the breath to {target:?} failed: {e:?}"),
-                    match wall {
-                        Some(c) => format!("walled in: dig {c:?} toward it"),
-                        None => "the next tick looks again".to_owned(),
-                    },
+                    "a notch down where the feet are".to_owned(),
                 );
             }
         }
@@ -2178,48 +2256,14 @@ impl Plan {
                 self.dragon.charging = false;
                 self.dragon.charge_walk = None;
                 self.dragon.charge_dig = None;
-                // Down a notch two deep: a step one up beside it is dug before the bot goes on,
-                // the way out a jump at a time.
-                let side = self.dragon.notch_side.take();
-                self.dragon.notch_step = self
-                    .dragon
-                    .notch_from
-                    .take()
-                    .filter(|f| cell_of(body.pos)[1] <= f[1] - 2)
-                    .and_then(|f| notch_step_except(w, f, side));
                 self.note(
                     tick,
                     "charge: over".to_owned(),
-                    format!(
-                        "at {:?}; the step out {:?}",
-                        cell_of(body.pos),
-                        self.dragon.notch_step
-                    ),
+                    format!("at {:?}", cell_of(body.pos)),
                 );
+                self.notch_leave(w);
             }
-            // The roof dug back first: the jump out needs the head clear.
-            if let Some(r) = self.dragon.notch_roof
-                && w.block_at(world::BlockPos::new(r[0], r[1], r[2]))
-                    .is_some_and(|k| k != BlockKind::Air)
-            {
-                return self.charge_dig_step(w, tick, r);
-            }
-            self.dragon.notch_roof = None;
-            // The step out of the notch, dug from inside it.
-            if let Some(s) = self.dragon.notch_step {
-                if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
-                    self.dragon.notch_step = None;
-                    self.dragon.charge_dig = None;
-                    self.note(
-                        tick,
-                        format!("charge: the step out dug at {s:?}"),
-                        "on with the task".to_owned(),
-                    );
-                    return None;
-                }
-                return self.charge_dig_step(w, tick, s);
-            }
-            return None;
+            return self.notch_exit_step(w, tick);
         };
         if !world::stage::open_sky(w) || breath_on(&breaths(w), body.pos).is_some() {
             return None;
@@ -2256,30 +2300,7 @@ impl Plan {
             // No bunker near: a notch two deep where the feet are, dug at once and dropped into,
             // under the charge's head and wings (E4's race 4; race 45895541443 lane 2 crouched on
             // the surface and took 10, then 5 and 5).
-            let fc = cell_of(body.pos);
-            let from = *self.dragon.notch_from.get_or_insert(fc);
-            if fc[1] > from[1] - 2 && body.on_ground && notch_diggable(w, fc) {
-                if self.dragon.charge_dig.is_none() {
-                    self.note(
-                        tick,
-                        format!("charge: dig a notch at {:?}", [fc[0], fc[1] - 1, fc[2]]),
-                        format!(
-                            "{} of 2 down; no bunker within {CHARGE_BUNKER_REACH:.0}",
-                            from[1] - fc[1] + 1
-                        ),
-                    );
-                }
-                return self.charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]]);
-            }
-            // Down in it: roofed over the head, a block on a side first for the roof to go
-            // against (a fireball's cloud on an open notch is on the body).
-            if fc[1] <= from[1] - 2 {
-                let roof = [fc[0], from[1], fc[2]];
-                if let Some(c) = self.notch_roof_step(w, tick, roof, crouch) {
-                    return Some(c);
-                }
-            }
-            return Some(crouch);
+            return Some(self.notch_dig_step(w, tick, crouch, "charge"));
         };
         let cell: Cell = (b[0], b[1], b[2]);
         if self
@@ -2322,6 +2343,87 @@ impl Plan {
             c.pitch = Some(90.0);
         }
         Some(c)
+    }
+
+    /// One tick of the notch two deep where the feet are: the end stone under them dug, twice,
+    /// then roofed (`notch_roof_step`); crouched still when there is nothing more to dig. Begun
+    /// where the feet are the first time; `why` names it in the notes.
+    fn notch_dig_step(&mut self, w: &World, tick: u64, crouch: Controls, why: &str) -> Controls {
+        let Some(body) = w.body else {
+            return crouch;
+        };
+        let fc = cell_of(body.pos);
+        if self.dragon.notch_from.is_none() {
+            self.dragon.notch_from = Some(fc);
+            self.dragon.roof_tries = 0;
+            self.dragon.notch_failed = false;
+        }
+        if self.dragon.notch_failed {
+            return crouch;
+        }
+        let from = self.dragon.notch_from.unwrap_or(fc);
+        if fc[1] > from[1] - 2 && body.on_ground && notch_diggable(w, fc) {
+            if self.dragon.charge_dig.is_none() {
+                self.note(
+                    tick,
+                    format!("{why}: dig a notch at {:?}", [fc[0], fc[1] - 1, fc[2]]),
+                    format!("{} of 2 down", from[1] - fc[1] + 1),
+                );
+            }
+            return self
+                .charge_dig_step(w, tick, [fc[0], fc[1] - 1, fc[2]])
+                .unwrap_or(crouch);
+        }
+        // Down in it: roofed over the head, a block on a side first for the roof to go against
+        // (a fireball's cloud on an open notch is on the body).
+        if fc[1] <= from[1] - 2 {
+            let roof = [fc[0], from[1], fc[2]];
+            if let Some(c) = self.notch_roof_step(w, tick, roof, crouch) {
+                return c;
+            }
+        }
+        crouch
+    }
+
+    /// The notch done with: its step out found (never under the roof's side block), the roof
+    /// left for `notch_exit_step` to dig back.
+    fn notch_leave(&mut self, w: &World) {
+        let Some(body) = w.body else {
+            return;
+        };
+        let side = self.dragon.notch_side.take();
+        self.dragon.notch_step = self
+            .dragon
+            .notch_from
+            .take()
+            .filter(|f| cell_of(body.pos)[1] <= f[1] - 2)
+            .and_then(|f| notch_step_except(w, f, side));
+    }
+
+    /// The way out of a notch, a tick at a time: the roof dug back (the jump needs the head
+    /// clear), then the step beside it; `None` once done.
+    fn notch_exit_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if let Some(r) = self.dragon.notch_roof
+            && w.block_at(world::BlockPos::new(r[0], r[1], r[2]))
+                .is_some_and(|k| k != BlockKind::Air)
+        {
+            return self.charge_dig_step(w, tick, r);
+        }
+        self.dragon.notch_roof = None;
+        if let Some(s) = self.dragon.notch_step {
+            if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
+                self.dragon.notch_step = None;
+                self.dragon.charge_dig = None;
+                self.note(
+                    tick,
+                    format!("notch: the step out dug at {s:?}"),
+                    "on with the task".to_owned(),
+                );
+                return None;
+            }
+            return self.charge_dig_step(w, tick, s);
+        }
+        None
     }
 
     /// The notch's roof over the head at `roof`: a block on a side of it first when nothing holds
@@ -2414,6 +2516,10 @@ impl Plan {
                     "crouched where the feet are".to_owned(),
                 );
                 self.dragon.notch_step = None;
+                // Never the same failed dig again each tick (race 45913263506 lane 2: a wall cell
+                // in water, "failed: Gone" 289 times while a fireball's cloud burned it).
+                self.dragon.breath_wall = None;
+                self.dragon.notch_failed = true;
             }
             self.dragon.charge_dig = None;
         }
@@ -2481,7 +2587,17 @@ impl Plan {
     pub fn end_enderman_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
         let Some(id) = crate::endermen::angry(w) else {
             self.dragon.ender_walk = None;
-            return None;
+            // Down a notch from an enderman: out once it is calm, by the roof and the step.
+            if self.dragon.ender_notch {
+                self.dragon.ender_notch = false;
+                self.note(
+                    tick,
+                    "end: out of the enderman's notch".to_owned(),
+                    "it is calm or gone".to_owned(),
+                );
+                self.notch_leave(w);
+            }
+            return self.notch_exit_step(w, tick);
         };
         let body = w.body?;
         // E3's and E4's own answers first, as inside `ender_threat`: covered (the bunker, a
@@ -2546,6 +2662,24 @@ impl Plan {
                 c.pitch = Some(90.0);
             }
             return Some(c);
+        }
+        // No bunker near: down a notch two deep where the feet are, roofed, which it can neither
+        // enter nor see into (race 45913296602 lane 1: fought in the open, 7 a blow, dead at tick
+        // 260 with the enderman at 13.6). A fight in the open is lost: 40 health against 6 a
+        // strike, 7 a blow every second.
+        let crouch = Controls {
+            sneak: true,
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        if body.on_ground || self.dragon.ender_notch {
+            if !self.dragon.ender_notch {
+                self.dragon.ender_notch = true;
+                self.dragon.notch_from = None;
+            }
+            self.ender_note(tick, id, "a notch down, no bunker near");
+            return Some(self.notch_dig_step(w, tick, crouch, "enderman"));
         }
         if !above {
             self.ender_note(

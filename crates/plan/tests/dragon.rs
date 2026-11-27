@@ -1048,15 +1048,13 @@ fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
     let mut p = Plan::new(Aim::Race);
     assert!(p.end_enderman_step(&w, 0).is_some());
     assert!(
-        p.take_acts()
-            .iter()
-            .any(|a| matches!(a, Act::Attack { entity: 70 })),
-        "over the danger line, in reach: struck"
+        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
+        "no bunker near: a notch down, never a fight in the open (race 45913296602 lane 1)"
     );
     assert!(
         p.events_since(0)
             .iter()
-            .any(|e| e.what == "end: no pocket for enderman 70 (struck over the danger line)")
+            .any(|e| e.what == "end: no pocket for enderman 70 (a notch down, no bunker near)")
     );
     // The bunker within reach: into it.
     let mut q = Plan::new(Aim::Race);
@@ -1094,4 +1092,45 @@ fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
         "{:?}",
         s.events_since(0)
     );
+}
+
+#[test]
+fn a_breath_by_the_bunker_is_answered_down_into_it_never_out_sideways() {
+    // E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
+    // NoPath, then dead.
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [12.5, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([15, FLOOR, 0]);
+    assert!(p.breath_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == format!("breath: into the bunker at {:?}", [15, FLOOR, 0])),
+        "{:?}",
+        p.events_since(0)
+    );
+    // In the bunker with the breath still on: a notch down from there.
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([12, FLOOR, 0]);
+    assert!(q.breath_step(&w, 0).is_some());
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("breath: in the bunker at")),
+    );
+    assert!(q.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })));
+    assert!(q.dragon.breath_notch);
+    // Two down under the cloud: held there, crouched, while it lies over the notch.
+    let mut down = end_at([12.5, 62.0, 0.5]);
+    for y in [62, 63] {
+        down.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, y, 0),
+            state: state(BlockKind::Air),
+        }));
+    }
+    cloud(&mut down, 50, [12.5, 64.0, 0.5], 3.0);
+    q.dragon.notch_from = Some([12, 64, 0]);
+    let c = q.breath_step(&down, 20).expect("held in the notch");
+    assert!(c.sneak && !c.forward);
 }
