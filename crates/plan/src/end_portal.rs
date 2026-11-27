@@ -262,6 +262,8 @@ pub struct EndPortalState {
 // >>> E8 (issue 20, the bow line)
 /// The bow kit's goal row's id (built where the bot stands from what it holds).
 pub const BOW_ROW: &str = "bow-kit";
+/// The portal room's row: the bow alone.
+pub const BOW_ROOM_ROW: &str = "bow-room";
 
 /// A goal row's step: a task (or a wait), or the row over with why.
 #[allow(clippy::large_enum_variant)]
@@ -1154,25 +1156,33 @@ impl Plan {
         }
         let n = |k: ItemKind| craft::count(w, k);
         if n(ItemKind::Bow) >= 1 {
-            self.end_portal.room_bow_over = true;
+            self.room_bow_done(w, tick, "the bow held");
             return None;
         }
         if n(ItemKind::String) >= 3 {
-            let row = bow_row(&r, false, n(ItemKind::Arrow), n(ItemKind::String), 0);
+            // The bow alone: no pickaxe or sticks wanted down here, so no trip for wood (race
+            // 46067009450 lane 2 walked off for logs from the stronghold with 3 string).
+            let row = make::Row {
+                id: BOW_ROOM_ROW.to_owned(),
+                needs: Vec::new(),
+                provides: make::Need::parse("item:bow")
+                    .map(|need| vec![(need, 1)])
+                    .unwrap_or_default(),
+                holds: Vec::new(),
+                spares: Vec::new(),
+                wants: Vec::new(),
+                act: None,
+            };
             return match self.kit_row_step(w, &r, &row, tick) {
                 RowStep::Task(t) => Some(t.unwrap_or(Task::Idle)),
                 RowStep::Over(why) => {
-                    self.end_portal.room_bow_over = true;
-                    let line = bow_line(w);
-                    self.note(tick, format!("end kit: the room's bow over ({why})"), line);
+                    self.room_bow_done(w, tick, &format!("the room's bow over ({why})"));
                     None
                 }
             };
         }
         if self.end_portal.web_tries >= WEB_TRIES {
-            self.end_portal.room_bow_over = true;
-            let line = bow_line(w);
-            self.note(tick, "end kit: no more cobwebs tried".to_owned(), line);
+            self.room_bow_done(w, tick, "no more cobwebs tried");
             return None;
         }
         let feet = path::feet_cell(w.body?.pos);
@@ -1211,12 +1221,10 @@ impl Plan {
             }
         }
         let Some((_, c)) = best else {
-            self.end_portal.room_bow_over = true;
-            let line = bow_line(w);
-            self.note(
+            self.room_bow_done(
+                w,
                 tick,
-                "end kit: no cobweb in reach of the room".to_owned(),
-                format!("within {WEB_REACH} of {feet:?}; {line}"),
+                &format!("no cobweb within {WEB_REACH} of {feet:?}"),
             );
             return None;
         };
@@ -1258,6 +1266,26 @@ impl Plan {
         );
         self.refuse(c, tick);
         Some(Task::Idle)
+    }
+
+    /// The room's bow step over, noted; after a trip to the cobwebs the way down runs again to
+    /// the room's standing cell (race 46067009450 lane 0 made its bow 16 off in its tunnel, and
+    /// the frames had no standing cell from there).
+    fn room_bow_done(&mut self, w: &World, tick: u64, why: &str) {
+        self.end_portal.room_bow_over = true;
+        let line = bow_line(w);
+        self.note(tick, format!("end kit: room bow step over ({why})"), line);
+        if self.end_portal.web_tries > 0 {
+            self.end_portal.phase = KitPhase::Down;
+            self.end_portal.since = tick;
+            self.end_portal.down_at = None;
+            self.end_portal.down_noted = false;
+            self.note(
+                tick,
+                "end kit: back to the room after the cobwebs".to_owned(),
+                format!("{} cobweb tries", self.end_portal.web_tries),
+            );
+        }
     }
 
     /// The bow kit (docs/problems/end-bow.md): by day, what can be made is made (the bow from 3
@@ -1794,6 +1822,9 @@ impl Plan {
                     );
                 }
                 sm.map(|sm| Task::Smelt(Box::new(sm)))
+            }
+            Some(make::Act::Gather) if label == BOW_ROOM_ROW => {
+                return RowStep::Over("no wood underground".to_owned());
             }
             Some(make::Act::Gather) => {
                 // Wood short for the row: one more log by hand.

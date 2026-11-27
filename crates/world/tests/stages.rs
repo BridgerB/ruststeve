@@ -663,9 +663,9 @@ fn armed_needs_the_whole_kit_in_the_overworld() {
 }
 
 // >>> E8 (issue 20, the bow line)
-/// `bow_armed` is `armed` with a bow and 16 arrows, between `armed` and `end` on the ladder.
+/// `bow_armed` is `armed` with a bow and 8 arrows, between `armed` and `end` on the ladder.
 #[test]
-fn bow_armed_is_armed_with_a_bow_and_sixteen_arrows() {
+fn bow_armed_is_armed_with_a_bow_and_eight_arrows() {
     assert!(Stage::Armed < Stage::BowArmed && Stage::BowArmed < Stage::End);
     assert_eq!(Stage::from_name("bow_armed"), Some(Stage::BowArmed));
     let kit = |w: &mut World| {
@@ -684,13 +684,13 @@ fn bow_armed_is_armed_with_a_bow_and_sixteen_arrows() {
     w.step(&teleport());
     kit(&mut w);
     w.step(&give(9, ItemKind::Bow, 1));
-    w.step(&give(10, ItemKind::Arrow, 15));
+    w.step(&give(10, ItemKind::Arrow, 7));
     second(&mut w);
     assert!(
         Stage::Armed.holds(&w) && !Stage::BowArmed.holds(&w),
-        "15 arrows"
+        "7 arrows"
     );
-    w.step(&give(10, ItemKind::Arrow, 16));
+    w.step(&give(10, ItemKind::Arrow, 8));
     second(&mut w);
     assert!(Stage::BowArmed.holds(&w));
     assert_eq!(w.stage_reached, Some(Stage::BowArmed));

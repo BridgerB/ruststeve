@@ -320,9 +320,10 @@ pub const ARMED_COOKED: i64 = 24;
 /// `armed`: building blocks (`[kit] blocks`).
 pub const ARMED_BLOCKS: i64 = 128;
 // >>> E8 (issue 20, the bow line)
-/// `bow_armed`: arrows held with the bow (`[end_kit] arrows` wants 32; 16 is the least: the
-/// eight open crystals at two shots each).
-pub const BOW_ARROWS: i64 = 16;
+/// `bow_armed`: arrows held with the bow (`[end_kit] arrows` wants 32; 8 is the least: one
+/// for each open crystal, parity e07's two shots both hit; race 46067009450's bots made 8 to 12
+/// in a morning of chickens).
+pub const BOW_ARROWS: i64 = 8;
 // <<< E8
 /// Frames in a ring: the empty ones are these less those on record with an eye.
 pub const RING_FRAMES: i64 = 12;
