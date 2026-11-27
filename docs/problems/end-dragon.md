@@ -293,3 +293,10 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - Dodge and pace cells keep `FOUNTAIN_CLEAR` (5) from the fountain's axis.
   - A failed dodge walk presses straight on toward its cell instead of standing.
   - Sprint (about ×1.3) needs physics, protocol, the bot loop and the sim; it is left to its own issue, pending these races.
+
+### Dev race 45947481217 (723e4d8, dev-end-no-crystals, 3 lanes, cap 24,000): the dragon killed in 2 of 3 lanes
+- **Lane 0:** dragon dead at tick 19,500, credits, home (47 strikes, 9 or more dodges, 2 breath hits).
+- **Lane 1:** dragon dead at 19,840, credits, back in the overworld (56 strikes, 4 breath hits).
+- **Lane 2:** died of breath at about 8,440, the dragon at 145.
+- The first kills on a real server, from a development start (never the issue's evidence: `brain/ruststeve/decisions/development-starts.md`). They ran before wall 31's pacing.
+- **Wall 32 (lane 2's death):** dodging at 8,320, the bot stood on an older cloud's edge. `charge_step` left a cloud on the feet to `breath_step`, whose walk out went the other way, and the next fireball's cloud was put on it at 8,360. **Fix:** the dodge comes ahead of the walk out of a cloud (its cell is clear of every cloud).

@@ -2703,23 +2703,25 @@ impl Plan {
             }
             return self.notch_exit_step(w, tick);
         };
-        // Clouds only: a fireball in flight is answered by the dodge, never by cover (wall 28).
-        let clouds = clouds_only(w);
-        if breath_on(&clouds, body.pos).is_some() {
-            return None;
-        }
         // Up a pillar or a spike the crystals' own holds answer (E4's guard ring, the way down).
         if self.spikes_up_high(w) {
             return None;
         }
         // A fireball in flight aimed near: dodged on open ground, at least `DODGE_MIN` from where
         // the bot stood (wall 28: its cloud is put on a body within 4 of its hit, walls or not).
+        // Ahead of the walk out of a cloud on the feet: the dodge cell is clear of every cloud,
+        // and the walk out went the other way (dev race 45947481217 lane 2, wall 32).
         if charge.is_none() && fireball.is_some() && world::stage::open_sky(w) {
             if let Some(c) = self.fireball_dodge_step(w, tick) {
                 return Some(c);
             }
             // Not aimed near: the strafe met in sight, else on as it was.
             strafing_at(w, body.pos)?;
+        }
+        // Clouds only: a fireball in flight is answered by the dodge, never by cover (wall 28).
+        let clouds = clouds_only(w);
+        if breath_on(&clouds, body.pos).is_some() {
+            return None;
         }
         // E3's bunker in the making answers a strafe itself: no bunker yet (its dig waits for
         // the dragon) or its shaft being dug, roofed as it goes (E3's test

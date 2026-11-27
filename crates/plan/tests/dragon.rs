@@ -1755,3 +1755,24 @@ fn a_fireball_on_a_pace_leg_is_dodged_on_the_way_the_bot_walks_and_never_by_the_
         Some("fireball: dodge to [12, 64, 0]")
     );
 }
+
+#[test]
+fn a_fireball_is_dodged_ahead_of_the_walk_out_of_a_cloud_on_the_feet() {
+    // Dev race 45947481217 lane 2: dodging, the bot stood on an old cloud's edge; the walk out of
+    // it went the other way and the new fireball's cloud was put on it.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = fireball_world(
+        feet,
+        [-30.5, 80.0, 0.5],
+        [-10.5, 74.0, 0.5],
+        [1.0, -0.3, 0.0],
+    );
+    cloud(&mut w, 60, [12.5, 64.0, 0.5], 3.0);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert_eq!(
+        dodged_to(&p).as_deref(),
+        Some("fireball: dodge to [12, 64, 6]")
+    );
+}
