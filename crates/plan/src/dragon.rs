@@ -648,6 +648,10 @@ pub const IDLE_NOTE_TICKS: u64 = 600;
 pub const DODGE_MIN: i32 = 6;
 pub const DODGE_MAX: i32 = 10;
 pub const DODGE_AIM: f64 = 6.0;
+/// The route to a dodge cell: nodes searched, and waypoints at most (a detour longer than about
+/// twice the farthest cell is no dodge: the fireball flies about 20 to 40 ticks).
+pub const DODGE_NODES: u32 = 800;
+pub const DODGE_STEPS: usize = 16;
 /// Blocks a tick a fireball flies, for the note's ticks to its hit (dev race 45940964839: about
 /// 40 ticks over 30 to 40 blocks).
 pub const FIREBALL_SPEED: f64 = 1.0;
@@ -660,6 +664,11 @@ pub const SKY_CLEAR: i32 = 6;
 /// Blocks on the plane from the fountain's axis a dodge or pace cell keeps (its bedrock is 3 or
 /// so across, the portal round it).
 pub const FOUNTAIN_CLEAR: f64 = 5.0;
+
+/// Is the feet cell `c` water (the planner has no start there)?
+pub fn in_water(w: &World, c: [i32; 3]) -> bool {
+    w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Water)
+}
 
 /// Controls that walk straight from `feet` toward `to` on the plane.
 pub fn toward(feet: [f64; 3], to: [f64; 3]) -> Controls {
@@ -691,8 +700,11 @@ pub fn dist3(a: [f64; 3], b: [f64; 3]) -> f64 {
 /// `from`: sideways to its flight, `DODGE_MIN` to `DODGE_MAX` off, the side away from the dragon
 /// at `dragon` first; a cell stood on (within 2 up or down) in the open (never a notch's floor:
 /// two sides open at the feet, the sky over it), never in a `banned` column (the bunker and its
-/// stair), ground under every column within `EDGE_CLEAR` (no void edge), and clear of every
-/// cloud. `None` when no such cell is known.
+/// stair), ground under every column within `EDGE_CLEAR` (no void edge), clear of every cloud,
+/// and walked to: a route found from the feet in `DODGE_NODES`, at most `DODGE_STEPS` long,
+/// none of its cells within a cloud's reach (frontier race 45954274931: lanes 2 and 3's dodge
+/// walks failed NoPath at once, lane 5's crossed a cloud). Sideways first, then 30 degrees
+/// either way off it; never along the fireball's line. `None` when no such cell is known.
 pub fn dodge_cell(
     w: &World,
     from: [i32; 3],
@@ -719,12 +731,56 @@ pub fn dodge_cell(
                 .is_some_and(|k| k != BlockKind::Air)
         })
     };
-    sides.iter().find_map(|side| {
+    let start: Cell = (from[0], from[1], from[2]);
+    // In water the planner has no start (frontier race 45954274931 lanes 2 and 3: a layer of
+    // water over the ground, every walk NoPath): the straight way is kept off the clouds instead,
+    // and pressed straight (`in_water`).
+    let wet = in_water(w, from);
+    let walked = |c: [i32; 3]| {
+        if wet {
+            let off_start: Vec<Breath> = clouds
+                .iter()
+                .filter(|b| flat(b.pos, mid(from)) > b.reach())
+                .copied()
+                .collect();
+            return !breath_on_way(&off_start, mid(from), mid(c), 0.0);
+        }
+        let r = crate::path::plan(
+            w,
+            start,
+            &Goal::Block {
+                pos: (c[0], c[1], c[2]),
+            },
+            DODGE_NODES,
+        );
+        matches!(r.status, crate::path::Status::Found)
+            && r.waypoints.len() <= DODGE_STEPS
+            && r.waypoints.iter().all(|p| {
+                // A cloud already on the start is walked out of; any other is kept off the way.
+                !clouds.iter().any(|b| {
+                    flat(b.pos, mid(from)) > b.reach()
+                        && flat(b.pos, mid([p.0, p.1, p.2])) <= b.reach()
+                })
+            })
+    };
+    // Each side sideways, then turned 30 degrees toward and away from the fireball's flight.
+    let turns = [0.0_f64, 30.0, -30.0];
+    let dirs: Vec<[f64; 2]> = sides
+        .iter()
+        .flat_map(|side| {
+            turns.iter().map(move |t| {
+                let (sn, cs) = t.to_radians().sin_cos();
+                let p = [perp[0] * side, perp[1] * side];
+                [p[0] * cs - p[1] * sn, p[0] * sn + p[1] * cs]
+            })
+        })
+        .collect();
+    dirs.iter().find_map(|d| {
         (DODGE_MIN..=DODGE_MAX).find_map(|k| {
-            let k = f64::from(k) * side;
+            let k = f64::from(k);
             let (x, z) = (
-                (cx + perp[0] * k).floor() as i32,
-                (cz + perp[1] * k).floor() as i32,
+                (cx + d[0] * k).floor() as i32,
+                (cz + d[1] * k).floor() as i32,
             );
             [0, 1, -1, 2, -2].iter().find_map(|dy| {
                 let c = [x, from[1] + dy, z];
@@ -747,7 +803,8 @@ pub fn dodge_cell(
                     && (-EDGE_CLEAR..=EDGE_CLEAR).all(|ex| {
                         (-EDGE_CLEAR..=EDGE_CLEAR).all(|ez| ground(x + ex, c[1], z + ez))
                     })
-                    && clear_of_breath(&clouds, mid(c)))
+                    && clear_of_breath(&clouds, mid(c))
+                    && walked(c))
                 .then_some(c)
             })
         })
@@ -3048,7 +3105,8 @@ impl Plan {
             }
             self.dragon.dodge_id = Some(id);
             self.dragon.dodge_walk = None;
-            self.dragon.dodge_straight = false;
+            // From water no walk plans: pressed straight on from the first tick.
+            self.dragon.dodge_straight = in_water(w, cell_of(feet));
             let from = cell_of(feet);
             self.dragon.dodge_from = Some(from);
             let banned = self.bunker_columns();
@@ -3214,6 +3272,11 @@ impl Plan {
         let Some(c) = self.dragon.pace_to else {
             return self.strafe_stood(tick, fc, stand);
         };
+        // From water no walk plans: straight on toward the leg's end (wall 33).
+        if in_water(w, fc) {
+            self.dragon.pace_walk = None;
+            return toward(feet, mid(c));
+        }
         let cell: Cell = (c[0], c[1], c[2]);
         if self
             .dragon
