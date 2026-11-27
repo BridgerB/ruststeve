@@ -380,15 +380,8 @@ pub const PICK_RESERVE: i32 = 40;
 /// carried (E4 builds from any; the frontier bot carries about 92: the first pillar may need no
 /// mining at all).
 pub fn pillar_blocks(w: &World) -> i32 {
-    [
-        ItemKind::EndStone,
-        ItemKind::Cobblestone,
-        ItemKind::CobbledDeepslate,
-        ItemKind::Netherrack,
-    ]
-    .iter()
-    .map(|k| craft::count(w, *k))
-    .sum()
+    // E4's own count, so the stock and the climb agree (frontier race 46055289196).
+    crate::spikes::pillar_blocks(w)
 }
 
 /// The hotbar slot (0 to 8) of the most worn pickaxe there, used first so another stays fresh.
@@ -1762,9 +1755,9 @@ impl Plan {
         Some(Task::Explore(walk))
     }
 
-    /// The blocks the next pillar wants, as the crystals' own check counts them: E4's last "too few
-    /// blocks (… N wanted …)" note within `WANTED_RECENT` ticks as a backstop, else
-    /// `next_pillar_need`, else `STOCK_ENOUGH`; at most `STOCK_ENOUGH` unless E4 asks for more.
+    /// The blocks the next pillar wants, as the crystals' own check counts them: E4's
+    /// `spikes::blocks_wanted`, else `next_pillar_need` (at most `STOCK_ENOUGH`); E4's last "too few
+    /// blocks (… N wanted …)" note within `WANTED_RECENT` ticks raises it, a backstop.
     pub fn blocks_wanted(&self, w: &World, tick: u64) -> i32 {
         let asked = self
             .events
@@ -1773,10 +1766,13 @@ impl Plan {
             .take_while(|e| tick.saturating_sub(e.tick) <= WANTED_RECENT)
             .find(|e| e.what.starts_with("spikes:") && e.what.contains("too few blocks"))
             .and_then(|e| wanted_in(&e.what).or_else(|| wanted_in(&e.why)));
-        let ours = self
-            .next_pillar_need(w)
-            .unwrap_or(STOCK_ENOUGH)
-            .min(STOCK_ENOUGH);
+        // E4's exact number first (`spikes::blocks_wanted`: the next pillar's height plus its
+        // spare); with no crystal to work, the estimate.
+        let ours = crate::spikes::blocks_wanted(self, w).unwrap_or_else(|| {
+            self.next_pillar_need(w)
+                .unwrap_or(STOCK_ENOUGH)
+                .min(STOCK_ENOUGH)
+        });
         asked.map_or(ours, |a| a.max(ours))
     }
 
