@@ -276,3 +276,11 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The pool is a 2 by 2 square, dug whole ("water pool dug at" ×4). Water goes in two diagonal corners ("water pool poured at"), which fills the other two, and every cell then has two sources beside it.
   - It refills from any cell of the square.
   - "no landing water" is now noted with its reason (buckets, end stone, or no clear side).
+
+### Wall 19: a dig-out that never got out (the frontier race 45918666403 lane 2; fixed)
+- **What happened:** after a breath put the bot in a notch 2 under its bunker, the hand-off came from (14, 56, 0). The dig-out toward (39, 59, 0) dug a three-step stair, eight cells from tick 10,920 to 12,260, rising only to the foot's height, 59, still under the ground at 62. The bot never moved, every walk was refused, and it sat 19,560 ticks with no pillar and no strike.
+- **The fix:**
+  - The stair rises to the higher of the target's height and the ground over the feet (or over the next column).
+  - With its steps open the bot walks up to the top step, and the dig-out goes on from there.
+  - The progress invariant: a dig-out no nearer its target in 600 ticks fails ("dig-out: no progress at …", with the next cell and the distance) and hands back for 1,200 ticks.
+  - Unit test `a_dig_out_climbs_to_the_ground_and_fails_when_it_gets_no_nearer`.
