@@ -1947,3 +1947,55 @@ fn a_cloud_on_the_body_is_walked_out_of_never_a_notch_under_it() {
         q.events_since(0)
     );
 }
+
+#[test]
+fn at_the_takeoff_the_bot_walks_out_of_the_bodys_knockback() {
+    // E4's read of race 45964846590 lane 3: 10 off the fountain at the takeoff, two blows flung
+    // the bot 85 east over the void.
+    let feet = [6.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [0.5, 67.0, 0.5], 4, 0.0);
+    assert!(dragon::knock_risk(&w, feet).is_some());
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&w, 0).is_some());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("knock: dodge to")),
+        "{:?}",
+        p.events_since(0)
+    );
+    let to = p.dragon.dodge_to.expect("a cell out");
+    assert!(
+        dragon::flat(feet_of(to), [0.5, 0.0, 0.5]) > dragon::KNOCK_CLEAR,
+        "{to:?}"
+    );
+    // Sitting: no knock, the strike's time.
+    let mut sat = end_at(feet);
+    with_dragon(&mut sat, [0.5, 67.0, 0.5], 6, 0.0);
+    assert!(dragon::knock_risk(&sat, feet).is_none());
+    // Far enough already: none.
+    let far = [14.5, 64.0, 0.5];
+    let mut out = end_at(far);
+    with_dragon(&mut out, [0.5, 67.0, 0.5], 4, 0.0);
+    assert!(dragon::knock_risk(&out, far).is_none());
+}
+
+#[test]
+fn a_strike_stand_has_ground_behind_and_a_breath_walk_goes_off_the_fountain_at_a_perch() {
+    // Ground behind, away from the body: none past the loaded ground (z and x over 31 here).
+    let w = end_at([12.5, 64.0, 0.5]);
+    assert!(dragon::ground_behind(&w, [0.5, 67.0, 0.5], [9, FLOOR, 0]));
+    assert!(!dragon::ground_behind(&w, [0.5, 67.0, 0.5], [20, FLOOR, 0]));
+    // A cloud on the feet by the perch, the dragon sitting: the cell out is off the fountain.
+    let feet = [8.5, 64.0, 0.5];
+    let mut b = end_at(feet);
+    with_dragon(&mut b, [0.5, PERCH_Y, 0.5], 6, 270.0);
+    cloud(&mut b, 50, [8.5, 64.0, 0.5], 3.0);
+    let c = dragon::out_of_breath(&b, feet).expect("a cell out");
+    assert!(
+        dragon::flat(feet_of(c), [0.5, 0.0, 0.5]) >= dragon::KNOCK_CLEAR,
+        "{c:?}"
+    );
+}

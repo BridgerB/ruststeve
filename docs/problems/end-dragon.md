@@ -333,3 +333,7 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - The enderman's notch is kept: a different cause, with no cloud in it.
 - Lanes 2 and 7 ("no dodge cell" 5 and 6 ticks out, from y 58 and a pit at y 56): c8ae2bc's heights (`DODGE_YS`) and early dodge (`fire_imminent`) answer them.
 - Lane 0 was drowning in water (E4's) when its cloud came. Lane 1 died on a `NoPath` walk out (now pressed straight on).
+- **Lane 3 (E4's read): the takeoff's knock.** At tick 4,880 the breath walk had the bot at (5, 62, -3), about 10 off the fountain, as the dragon took off. Two blows (20 to 13.5) flung it about 85 east to (90, 92, -20) over the void ("fell.assist ender_dragon"). The dragon's wings knock back what is within their boxes grown by 4 whenever it is not sitting.
+  - **Fix:** while it lands or takes off within `KNOCK_ZONE` (20) of the fountain, the bot walks out to more than `KNOCK_CLEAR` (10) from its body (`knock_risk`, "knock: dodge to …"); never while it sits (the strike's time).
+  - A strike's stand needs ground under the `KNOCK_BEHIND` (16) columns behind it, away from the body (`ground_behind`).
+  - The walk out of a breath prefers cells off the fountain while the dragon lands, sits or takes off.
