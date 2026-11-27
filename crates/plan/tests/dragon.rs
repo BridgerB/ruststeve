@@ -2396,12 +2396,35 @@ fn two_angry_endermen_are_answered_with_water_at_the_feet_taken_back_after() {
         state: state(BlockKind::Water),
     }));
     bucket(&mut calm, data::ItemKind::Bucket);
+    let mut lost = p.clone();
     assert!(p.ender_water_step(&calm, 40).is_some());
     assert!(p.take_acts().contains(&Act::UseItem));
-    assert!(
+    // Noted only once the bucket is full again (wall 49: 67 take-back notes for 9 pours).
+    let taken = |p: &Plan| {
         p.events_since(0)
             .iter()
             .any(|e| e.what == "end: the water against endermen taken back at [12, 64, 0]")
+    };
+    assert!(!taken(&p));
+    let mut full = end_at(feet);
+    bucket(&mut full, data::ItemKind::WaterBucket);
+    assert_eq!(p.ender_water_step(&full, 60), None);
+    assert!(taken(&p));
+    assert_eq!(p.dragon.ender_water, None);
+    // A take-back that fails 3 times: the water lost there, left for the refill.
+    for t in [40, 60, 80, 100] {
+        let _ = lost.ender_water_step(&calm, t);
+        let _ = lost.take_acts();
+    }
+    assert!(
+        lost.spikes.left_water.contains(&(12, 64, 0)),
+        "{:?}",
+        lost.spikes.left_water
+    );
+    assert!(
+        lost.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: the water against endermen lost at [12, 64, 0]")
     );
     // One angry: water all the same (wall 48: a single one beat a full-iron bot with the sword).
     let mut one = end_at(feet);

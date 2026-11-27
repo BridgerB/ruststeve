@@ -1027,6 +1027,9 @@ pub const ENDER_WATER_NEAR: f64 = 16.0;
 pub const ENDER_WATER_MOST: usize = 1;
 pub const DRAGON_HURT_TICKS: u64 = 400;
 pub const BUCKET_RETRY: u64 = 10;
+/// Ticks a pour's source is looked for, and the take-back's uses at most (wall 49).
+pub const POUR_WAIT: u64 = 20;
+pub const TAKE_TRIES: u32 = 3;
 /// Recovery (wall 46): health it begins under and ends over, and the blocks a cloud's reach and the
 /// dragon are kept by while it lasts.
 pub const RECOVER_BELOW: f32 = 10.0;
@@ -2145,6 +2148,12 @@ pub struct DragonState {
     pub ender_hand: Option<ItemKind>,
     #[serde(default)]
     pub ender_hand_at: Option<u64>,
+    /// A pour against endermen sent (the feet's cell, the tick), and the take-back's water
+    /// buckets before it and its uses (wall 49).
+    #[serde(default)]
+    pub ender_pour: Option<([i32; 3], u64)>,
+    #[serde(default)]
+    pub ender_take: Option<(i32, u32)>,
 }
 
 /// The fight in hand: a task (`Task::Dragon`).
@@ -4461,21 +4470,58 @@ impl Plan {
         let feet = body.pos;
         let fc = cell_of(feet);
         let (n, hurt) = angry_endermen(w, feet);
+        let held = |k: ItemKind| crate::craft::count(w, k);
         let look = |to: [f64; 3]| {
             let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
             crate::walk::look_at(eye, to)
         };
-        if let Some(cell) = self.dragon.ender_water {
-            if !in_water(w, cell) {
-                self.dragon.ender_water = None;
+        // A pour sent: its source found at the feet or beside them, else, after `POUR_WAIT`, the
+        // water is lost there (wall 49: race 46071506005 lanes 4 and 6, a bucket emptied with no
+        // note and the water never recorded).
+        if let Some((at, sent)) = self.dragon.ender_pour {
+            let found = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(|(dx, dz)| [at[0] + dx, at[1], at[2] + dz])
+                .find(|c| crate::spikes::source(w, (c[0], c[1], c[2])));
+            if let Some(c) = found {
+                self.dragon.ender_pour = None;
+                self.dragon.ender_water = Some(c);
+                self.dragon.ender_take = None;
                 self.note(
                     tick,
-                    format!("end: the water against endermen gone at {cell:?}"),
-                    format!("{n} angry within {ENDER_WATER_NEAR}"),
+                    format!("end: water against endermen standing at {c:?}"),
+                    format!("{n} angry within {ENDER_WATER_NEAR}; poured from {at:?}"),
                 );
+            } else if tick >= sent + POUR_WAIT {
+                self.dragon.ender_pour = None;
+                self.ender_water_lost(tick, at, "no source after the pour");
+                return None;
+            } else {
+                return Some(Controls {
+                    yaw: f64::from(w.player.yaw),
+                    pitch: Some(ENDER_LOOK_PITCH),
+                    ..Controls::default()
+                });
+            }
+        }
+        if let Some(cell) = self.dragon.ender_water {
+            if !crate::spikes::source(w, (cell[0], cell[1], cell[2])) {
+                // Gone: taken back (the bucket count rose) or flowed away.
+                let full = held(ItemKind::WaterBucket);
+                match self.dragon.ender_take {
+                    Some((before, _)) if full > before => self.note(
+                        tick,
+                        format!("end: the water against endermen taken back at {cell:?}"),
+                        format!("{full} water buckets held"),
+                    ),
+                    _ => self.ender_water_lost(tick, cell, "the source gone, not taken back"),
+                }
+                self.dragon.ender_water = None;
+                self.dragon.ender_take = None;
                 return None;
             }
             if n > 0 {
+                self.dragon.ender_take = None;
                 // In the source, looking at its body (`keep_look` keeps it off the eyes).
                 if fc != cell {
                     return Some(toward(feet, mid(cell)));
@@ -4486,7 +4532,26 @@ impl Plan {
                     ..Controls::default()
                 });
             }
-            // None angry near: the water taken back.
+            // None angry near: the water taken back, at most `TAKE_TRIES` uses.
+            let full = held(ItemKind::WaterBucket);
+            if let Some((before, tries)) = self.dragon.ender_take {
+                if full > before {
+                    self.note(
+                        tick,
+                        format!("end: the water against endermen taken back at {cell:?}"),
+                        format!("{full} water buckets held"),
+                    );
+                    self.dragon.ender_water = None;
+                    self.dragon.ender_take = None;
+                    return None;
+                }
+                if tries >= TAKE_TRIES && tick >= self.dragon.ender_water_at + BUCKET_RETRY {
+                    self.dragon.ender_water = None;
+                    self.dragon.ender_take = None;
+                    self.ender_water_lost(tick, cell, "not taken back in 3 uses");
+                    return None;
+                }
+            }
             let target = [
                 f64::from(cell[0]) + 0.5,
                 f64::from(cell[1]) + 0.2,
@@ -4500,12 +4565,10 @@ impl Plan {
                             || tick >= self.dragon.ender_water_at + BUCKET_RETRY)
                     {
                         self.dragon.ender_water_at = tick;
+                        let tries = self.dragon.ender_take.map_or(0, |(_, t)| t) + 1;
+                        let before = self.dragon.ender_take.map_or(full, |(b, _)| b);
+                        self.dragon.ender_take = Some((before, tries));
                         self.acts.push(Act::UseItem);
-                        self.note(
-                            tick,
-                            format!("end: the water against endermen taken back at {cell:?}"),
-                            "none angry near".to_owned(),
-                        );
                     }
                 }
                 Hold::Act(a) => {
@@ -4516,6 +4579,7 @@ impl Plan {
                 Hold::Wait => {}
                 Hold::Missing => {
                     self.dragon.ender_water = None;
+                    self.ender_water_lost(tick, cell, "no empty bucket to take it back");
                     return None;
                 }
             }
@@ -4528,26 +4592,19 @@ impl Plan {
         if (n < ENDER_WATER_MOST && !hurt) || n == 0 || !body.on_ground {
             return None;
         }
-        if in_water(w, fc) {
+        if crate::spikes::source(w, (fc[0], fc[1], fc[2])) {
             self.dragon.ender_water = Some(fc);
             self.note(
                 tick,
-                format!("end: water poured at {fc:?} against {n} angry endermen"),
-                format!(
-                    "{}; stood in the source",
-                    if hurt {
-                        "one hurt by the dragon"
-                    } else {
-                        "more than one"
-                    }
-                ),
+                format!("end: water against endermen standing at {fc:?}"),
+                format!("{n} angry within {ENDER_WATER_NEAR}; a source already there"),
             );
             return None;
         }
-        if crate::craft::count(w, ItemKind::WaterBucket) == 0 {
+        if held(ItemKind::WaterBucket) == 0 {
             return None;
         }
-        // Poured on the floor's top under the feet.
+        // Poured on the floor's top under the feet, noted as the use goes.
         let target = [
             f64::from(fc[0]) + 0.5,
             f64::from(fc[1]) + 0.02,
@@ -4561,7 +4618,21 @@ impl Plan {
                         || tick >= self.dragon.ender_water_at + BUCKET_RETRY)
                 {
                     self.dragon.ender_water_at = tick;
+                    self.dragon.ender_pour = Some((fc, tick));
                     self.acts.push(Act::UseItem);
+                    self.note(
+                        tick,
+                        format!("end: water poured at {fc:?} against {n} angry endermen"),
+                        format!(
+                            "{}; {} water buckets held",
+                            if hurt {
+                                "one hurt by the dragon"
+                            } else {
+                                "within 16"
+                            },
+                            held(ItemKind::WaterBucket)
+                        ),
+                    );
                 }
             }
             Hold::Act(a) => {
@@ -4576,6 +4647,20 @@ impl Plan {
             pitch: Some(pitch),
             ..Controls::default()
         })
+    }
+
+    /// Water against endermen lost at `cell` (`why`): noted, and given to E4's refill as a source
+    /// left on the ground (`spikes.left_water`).
+    fn ender_water_lost(&mut self, tick: u64, cell: [i32; 3], why: &str) {
+        let c = (cell[0], cell[1], cell[2]);
+        if !self.spikes.left_water.contains(&c) {
+            self.spikes.left_water.push(c);
+        }
+        self.note(
+            tick,
+            format!("end: the water against endermen lost at {cell:?}"),
+            format!("{why}; left for the refill"),
+        );
     }
 
     /// Recovery first at low health in the End (wall 46: race 46063334187 lane 4 walked through

@@ -428,3 +428,10 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - In lane 5, enderman 93 was struck 6 times from 400 to 480 and killed. Enderman 38, stared into anger at 500, struck back about 3.8 a blow (16.2, 12.4, 8.7, 4.9, 1.1): 40 health wants 7 full strikes of 6, about 7 seconds, against about 26 taken.
   - The strikes of 1.3 between full ones of 6.0 were swaps: the dig in hand brought the pickaxe back, and a swap resets the attack's charge.
   - **Fix:** any angry enderman within 16 gets the water (`ENDER_WATER_MOST` 1); the sword is the fallback with no water bucket held. A strike waits a full charge from the sword's coming to hand as well as from the last swing.
+- **Wall 49: the water against endermen went unaccounted** (race 46071506005).
+  - Lanes 4 and 6: a water bucket emptied with no note (the pour was noted only once a source showed at the feet), and E4 then had "no climb: no water".
+  - Lane 7: 67 take-back notes for 9 pours.
+  - **Fix:**
+    - Every pour is noted as its use goes, and its source is looked for at and beside the feet for 20 ticks ("standing at …"), else the water is lost there.
+    - The take-back is noted only when the water buckets held rise; 3 uses without that, and it is lost.
+    - Lost water ("end: the water against endermen lost at …") goes into E4's `spikes.left_water` for the refill.
