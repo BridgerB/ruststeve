@@ -365,6 +365,13 @@ pub fn lull(w: &World) -> bool {
     dragon(w).is_none_or(|(pos, phase)| phase == Some(0) && dist(pos, body.pos) > STRAFE_RANGE)
 }
 
+/// The calm gate (the coordinator's rule, shared with E4): the dragon holding (phase 0), at least
+/// `CALM_FROM` off, and not closing: its distance not fallen by more than `CALM_CLOSING` over the
+/// last `CALM_TICKS` (holding over 64 off is seldom true for long: race 46071506005).
+pub const CALM_FROM: f64 = 40.0;
+pub const CALM_TICKS: u64 = 20;
+pub const CALM_CLOSING: f64 = 1.0;
+
 /// The dragon is strafing (any distance): a hold for a cloud alone is capped.
 pub fn strafing(w: &World) -> bool {
     dragon(w).is_some_and(|(_, phase)| phase == Some(STRAFE_PHASE))
@@ -790,6 +797,9 @@ pub struct EndState {
     /// Wooden pickaxe runs begun.
     #[serde(default)]
     pub wood_runs: u32,
+    /// The dragon's distance by tick, the last `CALM_TICKS` and a few (the calm gate).
+    #[serde(default)]
+    pub dragon_dists: Vec<(u64, f64)>,
     /// Mining ground walked to, the newest last.
     #[serde(default)]
     pub mine_tried: Vec<Cell>,
@@ -1009,7 +1019,7 @@ impl Plan {
             && feet.1 >= b.1 - 3
             && body.on_ground
             && fire_near(w, door_cells[6], STAIR_CLEAR).is_none()
-            && lull(w)
+            && self.calm(w, tick)
         {
             let rises = b.1 - feet.1;
             self.note(
@@ -1124,7 +1134,7 @@ impl Plan {
             );
         }
         // Into the bunker to heal and eat only in a lull (wall 17); else the hand-off's way.
-        if (self.end.healing || food_held.is_some()) && (inside || lull(w)) {
+        if (self.end.healing || food_held.is_some()) && (inside || self.calm(w, tick)) {
             if !inside {
                 return self.walk_home(w, b, tick, "to heal and eat");
             }
@@ -1151,7 +1161,7 @@ impl Plan {
             && crystals_alive(w) > 0
             && stone < STOCK_ENOUGH
             && (self.end.stock_over || self.end.strafe_paused)
-            && lull(w)
+            && self.calm(w, tick)
         {
             self.end.handed_back = false;
             self.end.stock_over = false;
@@ -1204,7 +1214,7 @@ impl Plan {
                     ),
                 );
             }
-        } else if self.end.strafe_paused && lull(w) {
+        } else if self.end.strafe_paused && self.calm(w, tick) {
             self.end.strafe_paused = false;
             self.note(
                 tick,
@@ -1214,7 +1224,7 @@ impl Plan {
         }
         if !self.end.stock_over && !self.end.strafe_paused {
             // The first run waits for a lull, as a resume does.
-            if self.end.stock_runs == 0 && !lull(w) {
+            if self.end.stock_runs == 0 && !self.calm(w, tick) {
                 if !self.end.lull_wait_noted {
                     self.end.lull_wait_noted = true;
                     self.note(
@@ -1788,7 +1798,7 @@ impl Plan {
                 && body.on_ground
                 && cloud_on(w, &[feet]).is_none()
                 && fire_near(w, feet, STAIR_CLEAR).is_none()
-                && lull(w);
+                && self.calm(w, tick);
             if uses >= PICK_RESERVE || wood < 2 || self.end.wood_runs >= WOOD_RUNS || !calm {
                 return None;
             }
@@ -2948,6 +2958,32 @@ impl Plan {
             yaw,
             pitch: Some(crate::endermen::EYES_DOWN),
         })
+    }
+
+    /// The calm gate, the dragon's distance sampled each tick it is asked (`CALM_FROM`,
+    /// `CALM_TICKS`, `CALM_CLOSING`): no dragon sent, or holding at least 40 off and not closing.
+    pub fn calm(&mut self, w: &World, tick: u64) -> bool {
+        let Some(body) = w.body else {
+            return true;
+        };
+        let Some((pos, phase)) = dragon(w) else {
+            self.end.dragon_dists.clear();
+            return true;
+        };
+        let d = dist(pos, body.pos);
+        if self.end.dragon_dists.last().is_none_or(|(t, _)| *t != tick) {
+            self.end.dragon_dists.push((tick, d));
+            self.end
+                .dragon_dists
+                .retain(|(t, _)| tick.saturating_sub(*t) <= CALM_TICKS + 5);
+        }
+        let closing = self
+            .end
+            .dragon_dists
+            .iter()
+            .find(|(t, _)| tick.saturating_sub(*t) >= CALM_TICKS)
+            .is_some_and(|(_, old)| old - d > CALM_CLOSING);
+        phase == Some(0) && d >= CALM_FROM && !closing
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes
