@@ -835,12 +835,12 @@ fn crystals_5_and_1_count_the_destroyed() {
     }
     w.step(&tick());
     assert_eq!(world::stage::crystals_left(&w), Some(10));
-    assert_eq!(w.stage_reached, Some(Stage::End), "the re-send");
+    assert_eq!(w.stage_reached, Some(Stage::Island), "the re-send");
     for i in 0..4 {
         destroy(&mut w, if i == 0 { 100 } else { 110 + i as i32 }, i, false);
     }
     assert_eq!(world::stage::crystals_left(&w), Some(6));
-    assert_eq!(w.stage_reached, Some(Stage::End), "6 left");
+    assert_eq!(w.stage_reached, Some(Stage::Island), "6 left");
     destroy(&mut w, 114, 4, false);
     assert!(Stage::Crystals5.holds(&w) && !Stage::Crystals1.holds(&w));
     assert_eq!(w.stage_reached, Some(Stage::Crystals5));
