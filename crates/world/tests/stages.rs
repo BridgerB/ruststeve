@@ -744,13 +744,25 @@ fn destroy(w: &mut World, id: i32, i: usize, blast_first: bool) {
     w.step(&tick());
 }
 
-fn in_the_end() -> World {
+/// The End with the fountain's chunk end stone to y 63 and the bot standing on it, every
+/// spike's column loaded (as air).
+fn on_the_ground_in_the_end() -> World {
     let mut w = World::new();
     w.step(&login("minecraft:the_end"));
-    w.step(&teleport_to(0.5, 70.0, 0.5));
     for [x, z] in world::stage::SPIKES {
         w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
     }
+    w.step(&column_with(0, 0, state(data::BlockKind::EndStone)));
+    w.step(&teleport_to(8.5, 64.0, 8.5));
+    for _ in 0..3 {
+        w.step(&tick());
+    }
+    assert!(world::stage::grounded(&w), "on the ground");
+    w
+}
+
+fn in_the_end() -> World {
+    let mut w = on_the_ground_in_the_end();
     for i in 0..10 {
         w.step(&crystal(100 + i as i32, i));
     }
@@ -836,8 +848,11 @@ fn crystals_5_and_1_count_the_destroyed() {
     let mut r = World::new();
     r.memory = w.memory.clone();
     r.step(&login("minecraft:the_end"));
-    r.step(&teleport_to(0.5, 70.0, 0.5));
-    r.step(&tick());
+    r.step(&column_with(0, 0, state(data::BlockKind::EndStone)));
+    r.step(&teleport_to(8.5, 64.0, 8.5));
+    for _ in 0..3 {
+        r.step(&tick());
+    }
     assert_eq!(world::stage::crystals_left(&r), Some(5));
     assert_eq!(r.stage_reached, Some(Stage::Crystals5));
     for i in 5..9 {
@@ -848,19 +863,57 @@ fn crystals_5_and_1_count_the_destroyed() {
     assert_eq!(r.stage_reached, Some(Stage::Crystals1));
 }
 
+/// `crystals_5` and `crystals_1` only on the ground: on a 1x1 pillar (none of the four
+/// cells beside the block under the feet full) the count is there but the stage is not; once
+/// the feet are back on the island it is.
+#[test]
+fn crystals_5_waits_for_the_ground() {
+    let mut w = World::new();
+    w.step(&login("minecraft:the_end"));
+    for [x, z] in world::stage::SPIKES {
+        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
+    }
+    // A pillar: one end stone block at (40, 70, 0) in the air column of chunk (2, 0).
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (40, 70, 0),
+        state: state(data::BlockKind::EndStone),
+    }));
+    w.step(&teleport_to(40.5, 71.0, 0.5));
+    for _ in 0..3 {
+        w.step(&tick());
+    }
+    for i in 0..5 {
+        w.step(&crystal(100 + i as i32, i));
+        destroy(&mut w, 100 + i as i32, i, false);
+    }
+    assert_eq!(world::stage::crystals_left(&w), Some(5));
+    assert!(!world::stage::grounded(&w), "on a pillar");
+    assert!(!Stage::Crystals5.holds(&w));
+    assert_eq!(w.stage_reached, Some(Stage::End));
+    // A spike's top: obsidian all round, still not ground.
+    w.step(&column_with(-1, 0, state(data::BlockKind::Obsidian)));
+    w.step(&teleport_to(-8.5, 64.0, 8.5));
+    for _ in 0..3 {
+        w.step(&tick());
+    }
+    assert!(!world::stage::grounded(&w), "on obsidian");
+    assert_eq!(w.stage_reached, Some(Stage::End));
+    w.step(&column_with(0, 0, state(data::BlockKind::EndStone)));
+    w.step(&teleport_to(8.5, 64.0, 8.5));
+    for _ in 0..3 {
+        w.step(&tick());
+    }
+    assert_eq!(w.stage_reached, Some(Stage::Crystals5));
+}
+
 /// A spike seen with no crystal on it for `CRYSTAL_ABSENT_TICKS` running (near the fountain,
 /// its column loaded) is one gone the bot did not see go (a development start's RCON kill). A
 /// crystal on a spike, or the bot far off, keeps it standing.
 #[test]
 fn a_spike_long_seen_bare_is_a_crystal_gone() {
-    let mut w = World::new();
-    w.step(&login("minecraft:the_end"));
-    w.step(&teleport_to(0.5, 70.0, 0.5));
-    for [x, z] in world::stage::SPIKES {
-        w.step(&air_column(x.div_euclid(16), z.div_euclid(16)));
-    }
+    let mut w = on_the_ground_in_the_end();
     w.step(&crystal(100, 3));
-    for _ in 0..world::CRYSTAL_ABSENT_TICKS {
+    for _ in 0..world::CRYSTAL_ABSENT_TICKS - 3 {
         w.step(&tick());
     }
     assert_eq!(world::stage::crystals_left(&w), Some(10), "not yet");
@@ -959,6 +1012,10 @@ fn the_stage_constants_are_config_end_toml() {
     assert_eq!(
         t["crystals"]["left_1"].as_integer(),
         Some(world::stage::CRYSTALS_LEFT_1 as i64)
+    );
+    assert_eq!(
+        t["crystals"]["ground_sides"].as_integer(),
+        Some(world::stage::GROUND_SIDES as i64)
     );
     let spikes: Vec<[i32; 2]> = t["spike"]
         .as_array()

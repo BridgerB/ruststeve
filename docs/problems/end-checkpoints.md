@@ -13,5 +13,11 @@ A bot near the goal is saved as a snapshot: at 5 or fewer crystals left (`crysta
 
 - **A gone the bot did not see go:** a spike seen with no crystal on it for `CRYSTAL_ABSENT_TICKS` (400, 20 s) running counts too, if the bot is within 60 of the fountain and the spike's column is loaded. That covers a development start's RCON kill (`dev-end-no-crystals`) and the sim's bare island (`bot/tests/end_loop.rs` `on_the_island_endermen_about_are_never_stared_at`, whose bunker waits on `crystals`; it failed on the blast-only first fix, CI 46047840723). A resume's re-send is done within about 80 ticks.
 
+## Wall 2: the snapshot on a stand (fixed)
+
+- **Seen:** race 46059621531 (4b23f55), 10 lanes resumed from `crystals_5` (46055583508 lane 2, taken at its 5th strike on the stand at (-33.4, 79, 27.6) by spike [-34, 24]). 7 of 10 were dead within 3,460 ticks with 0 struck: 6 to breath, 1 to an enderman. Lane 3's ledger: 80 "dig the way out ... shut in a pocket"; 160 "spikes: wait (stranded on a spike's top with no pillar down at (-33, 79, 25))"; 220 a breath cloud on the feet; dead at 300. "Stranded" fired 5 to 15 times per lane.
+- **Cause:** the stage first holds at a strike, high on a stand. The plan's pillar record is not in a snapshot, so the resumed bot has no way down.
+- **Fix:** `crystals_5` and `crystals_1` hold only when `grounded`: on ground, on end stone, with at least 3 of the 4 cells beside the block under the feet full. That is the island, not a 1x1 pillar, a stand, or a spike's obsidian top. `crystals` is unchanged.
+
 ## Risks
 - A crystal destroyed out of the bot's hearing (its blast packet goes to players within 64) is not counted, and the count stays high. That is safe (no false checkpoint) but can hold a stage back.
