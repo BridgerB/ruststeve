@@ -273,3 +273,9 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
     - **Note:** "fireball: dodge to … (flight …, ticks …, from …)".
     - **Never cover for a fireball:** the shelter rows, `breath_step` and `breath_ahead` read clouds only (`clouds_only`).
     - **The notch is kept** for a charge and the perched flame. A strafe with no fireball is met standing in sight ("strafe: stood in sight at …"); the notch beside is gone.
+- **Wall 29: a hold from an angry enderman never ended** (E4's race 45942992471 lane 0: 12,000 ticks, "end: the walk from enderman … to the bunker failed" 3,071 times). An enderman with a target keeps its anger for good (its timer restarts every tick), so a hold "until it calms" never ends.
+  - **Fix (`Plan::end_enderman_step`):**
+    - Beyond `ENDER_NEAR` (8) the task goes on: it teleports to the bot only from over 16 and cannot come into a 2-high cell.
+    - Within 8 in a roofed 2-high cell: struck from there in reach over the danger line, else held.
+    - Within 8 on open ground: into the bunker (a failed walk is never tried again for that enderman), else a notch.
+    - Every hold from one enderman is capped at `ENDER_HOLD_CAP` (600), then the choice is made again ("end: the hold from enderman N capped").

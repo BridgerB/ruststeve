@@ -1081,7 +1081,13 @@ fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
     }
     angry(&mut c);
     let mut r = Plan::new(Aim::Race);
-    assert!(r.end_enderman_step(&c, 0).is_none(), "in cover");
+    assert!(r.end_enderman_step(&c, 0).is_some(), "in cover, in reach");
+    assert!(
+        r.take_acts()
+            .iter()
+            .any(|a| matches!(a, Act::Attack { entity: 70 })),
+        "struck from the covered cell over the danger line"
+    );
     // And Plan::step never seals one in the End.
     let mut s = Plan::new(Aim::Race);
     s.step(&w);
@@ -1571,5 +1577,87 @@ fn the_dodge_goes_away_from_the_dragon_off_the_edge_and_out_of_the_bunker() {
     assert_eq!(
         dodged_to(&r).as_deref(),
         Some("fireball: dodge to [12, 64, 7]")
+    );
+}
+
+#[test]
+fn an_angry_endermans_hold_is_near_only_and_capped() {
+    // E4's race 45942992471 lane 0: 12,000 ticks covered from an enderman whose anger never ends.
+    let feet = [12.5, 64.0, 0.5];
+    let covered_at = |at: [f64; 3]| {
+        let mut c = end_at(feet);
+        for b in [
+            (12, 66, 0),
+            (13, 64, 0),
+            (11, 64, 0),
+            (12, 64, 1),
+            (12, 64, -1),
+        ] {
+            c.step(&Event::Packet(S2c::BlockUpdate {
+                pos: b,
+                state: state(BlockKind::EndStone),
+            }));
+        }
+        add(&mut c, 70, EntityKind::Enderman, at);
+        data(&mut c, 70, vec![(17, MetaValue::Bool(true))]);
+        c
+    };
+    let noted = |p: &Plan, what: &str| p.events_since(0).iter().any(|e| e.what == what);
+    // Covered, within 8 but out of reach: held there.
+    let w = covered_at([17.5, 64.0, 0.5]);
+    let mut p = Plan::new(Aim::Race);
+    let c = p.end_enderman_step(&w, 0).expect("held");
+    assert!(c.sneak && !c.forward);
+    assert!(noted(
+        &p,
+        "end: no pocket for enderman 70 (covered within 8: held)"
+    ));
+    // Held to the cap, then the choice again: out of reach, on with the task.
+    assert!(
+        p.end_enderman_step(&w, dragon::ENDER_HOLD_CAP - 1)
+            .is_some()
+    );
+    assert_eq!(p.end_enderman_step(&w, dragon::ENDER_HOLD_CAP), None);
+    assert!(
+        noted(&p, "end: the hold from enderman 70 capped"),
+        "{:?}",
+        p.events_since(0)
+    );
+    assert!(noted(
+        &p,
+        "end: no pocket for enderman 70 (the hold capped: on with the task)"
+    ));
+    assert_eq!(p.end_enderman_step(&w, dragon::ENDER_HOLD_CAP + 400), None);
+    // Covered, beyond 8: on with the task.
+    let far = covered_at([24.5, 64.0, 0.5]);
+    let mut q = Plan::new(Aim::Race);
+    assert_eq!(q.end_enderman_step(&far, 0), None);
+    assert!(noted(
+        &q,
+        "end: no pocket for enderman 70 (beyond 8: on with the task)"
+    ));
+    // On open ground beyond 8: no notch, no walk; on with the task.
+    let mut open = end_at(feet);
+    add(&mut open, 70, EntityKind::Enderman, [24.5, 64.0, 0.5]);
+    data(&mut open, 70, vec![(17, MetaValue::Bool(true))]);
+    let mut r = Plan::new(Aim::Race);
+    r.bunker = Some([20, FLOOR, 0]);
+    assert_eq!(r.end_enderman_step(&open, 0), None);
+    assert!(r.take_acts().is_empty());
+    // Within 8 on open ground, a walk to the bunker that fails is never tried again for it.
+    let mut near = end_at(feet);
+    add(&mut near, 70, EntityKind::Enderman, [17.5, 64.0, 0.5]);
+    data(&mut near, 70, vec![(17, MetaValue::Bool(true))]);
+    let mut t = Plan::new(Aim::Race);
+    t.bunker = Some([20, FLOOR, 0]);
+    t.dragon.ender_walk_failed = Some(70);
+    assert!(t.end_enderman_step(&near, 0).is_some());
+    assert!(
+        noted(
+            &t,
+            "end: no pocket for enderman 70 (a notch down, no bunker near)"
+        ),
+        "{:?}",
+        t.events_since(0)
     );
 }
