@@ -415,6 +415,10 @@ pub fn dragon_down_or_charging(w: &World) -> bool {
     dragon(w).is_some_and(|(_, phase)| phase.is_some_and(|p| matches!(p, 2 | 3 | 5 | 6 | 7 | 8)))
 }
 
+/// A full air supply (the player's metadata index 1), and how recent a drown hit counts.
+pub const FULL_AIR: i32 = 300;
+pub const DROWN_RECENT: u64 = 40;
+
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
 /// Walks for surface end stone a hand-back at most, and the length of one.
@@ -714,6 +718,13 @@ pub struct EndState {
     /// they are below it.
     #[serde(default)]
     pub surface_y: Option<i32>,
+    /// The drowning guard: in force, its dig over the head, guards begun.
+    #[serde(default)]
+    pub drowning: bool,
+    #[serde(default)]
+    pub drown_dig: Option<Dig>,
+    #[serde(default)]
+    pub drown_guards: u32,
     /// The hold for the dragon noted.
     #[serde(default)]
     pub dragon_held_noted: bool,
@@ -2680,6 +2691,93 @@ impl Plan {
         (f.0 == b.0 && f.2 == b.2 && (b.1..=b.1 + 3).contains(&f.1))
             || door_cells.contains(&f)
             || door_cells.contains(&(f.0, f.1 - 1, f.2))
+    }
+
+    /// The drowning guard (race 46045482138 lane 5: a breath notch, E4's clutch water left in it,
+    /// 8 drown hits in 140 ticks sitting idle in water at (42, 51, 74), dead at 34,900; nothing
+    /// reacted to the air running out). In the End, with the eye in water and the air under full,
+    /// or a drown hit within `DROWN_RECENT` ticks: the head out at once. Up when the cell over the
+    /// eye is open (a swim up, pressing into the side whose top is free for the bank's lift); with
+    /// it shut, that cell dug. Every task but a live fireball dodge (E5's) waits on it.
+    pub(crate) fn drown_guard(&mut self, w: &World, tick: u64) -> Option<Controls> {
+        if !in_end(w) || self.dragon.dodge_walk.is_some() {
+            return None;
+        }
+        let body = w.body?;
+        #[allow(clippy::cast_possible_truncation)]
+        let eye = (
+            body.pos[0].floor() as i32,
+            (body.pos[1] + physics::EYE_HEIGHT).floor() as i32,
+            body.pos[2].floor() as i32,
+        );
+        let wet = kind(w, eye) == Some(BlockKind::Water);
+        let now = w.session.server_ticks;
+        let hit = w.hits.iter().any(|h| {
+            h.damage_type.contains("drown") && now.saturating_sub(h.at_tick) <= DROWN_RECENT
+        });
+        let short = w.player.air.is_some_and(|a| a < FULL_AIR);
+        if !((wet && short) || hit) {
+            self.end.drown_dig = None;
+            self.end.drowning = false;
+            return None;
+        }
+        if !self.end.drowning {
+            self.end.drowning = true;
+            self.end.drown_guards += 1;
+            self.note(
+                tick,
+                format!("end: head out of the water at {eye:?}"),
+                format!(
+                    "air {:?} of {FULL_AIR}, drown hit {hit}; guard {}",
+                    w.player.air, self.end.drown_guards
+                ),
+            );
+        }
+        // A dig in hand over the head: on with it.
+        if let Some(mut d) = self.end.drown_dig.take() {
+            let (c, act, status) = d.step(w, tick);
+            self.acts.extend(act);
+            if matches!(status, DigStatus::Running) {
+                self.end.drown_dig = Some(d);
+            }
+            return Some(Controls { jump: true, ..c });
+        }
+        let over = (eye.0, eye.1 + 1, eye.2);
+        let roofed = solid(w, over);
+        if roofed {
+            self.note(
+                tick,
+                format!("end: dig up out of the water at {over:?}"),
+                "the cell over the head shut".to_owned(),
+            );
+            let mut d = Dig::new(w, over, tick);
+            let (c, act, _) = d.step(w, tick);
+            self.acts.extend(act);
+            self.end.drown_dig = Some(d);
+            return Some(Controls { jump: true, ..c });
+        }
+        // Up, pressing into a side whose cell over the eye is open (the bank's lift out).
+        let bank = SIDES
+            .iter()
+            .find(|(dx, dz)| {
+                solid(w, (eye.0 + dx, eye.1, eye.2 + dz))
+                    && !solid(w, (eye.0 + dx, eye.1 + 1, eye.2 + dz))
+            })
+            .or_else(|| {
+                SIDES
+                    .iter()
+                    .find(|(dx, dz)| !solid(w, (eye.0 + dx, eye.1 + 1, eye.2 + dz)))
+            });
+        let yaw = bank.map_or(f64::from(w.player.yaw), |(dx, dz)| {
+            f64::from(-*dx).atan2(f64::from(*dz)).to_degrees()
+        });
+        Some(Controls {
+            forward: bank.is_some(),
+            jump: true,
+            sneak: false,
+            yaw,
+            pitch: Some(crate::endermen::EYES_DOWN),
+        })
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes

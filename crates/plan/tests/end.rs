@@ -1543,3 +1543,59 @@ fn surface_mining_keeps_off_the_perch_and_holds_for_a_landing_dragon() {
     );
     assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
 }
+
+#[test]
+fn in_a_two_deep_water_pit_with_air_running_out_the_head_comes_out() {
+    // Race 46045482138 lane 5: 8 drown hits sitting idle in water in a pit, dead at 34,900.
+    // A pit two deep at (50, 62 to 63, 0) full of water, the bot at its bottom, the eye in water.
+    let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+    for y in 62..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Water);
+    }
+    w.player.air = Some(200);
+    let mut p = racer();
+    p.end.bridged = true;
+    let c = p.step(&w);
+    assert!(c.jump, "{c:?}");
+    assert!(c.forward, "pressing into a side whose top is free: {c:?}");
+    assert!(
+        noted(&p, "end: head out of the water at (50, 63, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    // Roofed over the head: dug up.
+    let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+    for y in 62..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Water);
+    }
+    set(&mut w, (50, 64, 0), BlockKind::EndStone);
+    w.player.air = Some(200);
+    w.held = 2;
+    let mut p = racer();
+    p.end.bridged = true;
+    let mut acts = Vec::new();
+    for _ in 0..3 {
+        p.step(&w);
+        acts.extend(p.take_acts());
+    }
+    assert!(
+        noted(&p, "end: dig up out of the water at (50, 64, 0)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        acts.iter()
+            .any(|a| matches!(a, Act::Dig { pos, .. } if *pos == world::BlockPos::new(50, 64, 0))),
+        "{acts:?}"
+    );
+    // Full air, no hit: nothing.
+    let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+    for y in 62..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Water);
+    }
+    w.player.air = Some(300);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.step(&w);
+    assert!(!noted(&p, "end: head out of the water"), "{:?}", notes(&p));
+}
