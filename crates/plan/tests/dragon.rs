@@ -2030,3 +2030,39 @@ fn with_no_way_out_on_foot_a_fireball_is_answered_by_rising_out() {
     );
     assert!(c.jump, "a jump from the pit's floor: {c:?}");
 }
+
+#[test]
+fn in_sight_in_a_strafe_the_task_in_hand_goes_on_and_only_idle_is_paced() {
+    // Frontier race 45974410172 lane 3: the pace took the planner from the work every strafe,
+    // each strafe firing within 100 to 400 ticks of the bot in sight.
+    let feet = [12.5, 64.0, 0.5];
+    let mut w = end_at(feet);
+    // Strafing, in sight, facing across the bot (its fire not due).
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 1, 0.0);
+    let mut busy = Plan::new(Aim::Race);
+    busy.bunker = Some([60, FLOOR - 4, 60]);
+    busy.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    assert_eq!(busy.charge_step(&w, 0), None, "the task goes on");
+    assert!(busy.dragon.pace_walk.is_none());
+    // Nothing in hand: paced.
+    let mut idle = Plan::new(Aim::Race);
+    idle.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(idle.charge_step(&w, 0).is_some());
+    assert!(
+        idle.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("strafe: paced in sight"))
+    );
+    // Its fire due (facing the bot): dodged, task or not.
+    let mut due = end_at(feet);
+    with_dragon(&mut due, [-30.5, 80.0, 0.5], 1, 90.0);
+    let mut d = Plan::new(Aim::Race);
+    d.bunker = Some([60, FLOOR - 4, 60]);
+    d.task = plan::Task::Dragon(Box::new(dragon::Fight::new(0)));
+    assert!(d.charge_step(&due, 0).is_some());
+    assert!(
+        d.events_since(0)
+            .iter()
+            .any(|e| e.what.starts_with("fireball: dodge to"))
+    );
+}

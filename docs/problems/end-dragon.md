@@ -338,3 +338,8 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - A strike's stand needs ground under the `KNOCK_BEHIND` (16) columns behind it, away from the body (`ground_behind`).
   - The walk out of a breath prefers cells off the fountain while the dragon lands, sits or takes off.
 - **Frontier race 45969992660 (daab599), read mid-run:** "fireball: no dodge cell from [13, 59, 0]" (lanes 2 and 5). `replan` (probe 45971570813): the bot was in the bunker's works at (13, 57, 0) and (13, 59, 0), the stair's step (12, 60, 0) shut with end stone, the shaft open to the sky. There was no way out on foot. **Fix:** with no dodge cell under the open sky, the bot rises a block at a jump, at most `DODGE_RISES` (6) ("… no dodge cell …; risen a block at a jump"). A stair shut while its shaft is open is E3's.
+
+### Frontier race 45974410172 (2decdc6), lane 3 read at tick 9,660
+- **The strafe was not held.** Each strafe ended by firing within 100 to 400 ticks of the bot in sight: at 1,580, 1,700, 2,340 to 2,540, 4,600 to 4,940, 5,340 to 5,640 and 6,040 to 6,300, each with its fireball sound, the bot paced about 40 from the fountain.
+- The idle was the crystals' "spikes: no climb: too few blocks (1 end stone held, 27 wanted)" (E4) and "end: stock paused for a strafe" (E3).
+- **Wall 37: the pace took the bot from the work.** In sight with a task in hand, the task now goes on through a strafe. The dodge begins when the fire is due (`fire_imminent`), and only a bot with nothing in hand is paced.

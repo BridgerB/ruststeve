@@ -3177,6 +3177,15 @@ impl Plan {
             }
             return Some(Some(self.rise_step(w, tick, body)));
         }
+        // In sight with a task in hand (E3's, E4's work): it goes on; the dodge begins when the
+        // fire is due (`fire_imminent`). Paced only with nothing in hand (frontier race 45974410172
+        // lane 3: the pace took the planner from the work every strafe, each one firing within 100
+        // to 400 ticks).
+        if seen && !matches!(self.task, Task::Idle) {
+            self.dragon.pace_walk = None;
+            self.dragon.pace_to = None;
+            return None;
+        }
         // In sight and on the move: a leg of `DODGE_MIN` to `DODGE_MAX` sideways to the dragon's
         // bearing, then back (a fireball aims where the bot is when it fires, with no lead; 20
         // ticks on, a walking bot is 4 off: frontier race 45947478869, three bots stood or turned
