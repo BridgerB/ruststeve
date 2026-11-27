@@ -1046,15 +1046,36 @@ fn in_the_end_an_angry_enderman_never_gets_a_pocket() {
     let mut w = end_at(feet);
     angry(&mut w);
     let mut p = Plan::new(Aim::Race);
+    // No bunker near, over the danger line, in reach: struck with the sword, never a notch (wall
+    // 42: dev race 46048455555 lane 0 was killed in one).
     assert!(p.end_enderman_step(&w, 0).is_some());
+    let acts = p.take_acts();
     assert!(
-        p.take_acts().iter().any(|a| matches!(a, Act::Dig { .. })),
-        "no bunker near: a notch down, never a fight in the open (race 45913296602 lane 1)"
+        acts.iter().any(|a| matches!(a, Act::Attack { entity: 70 })),
+        "{acts:?}"
+    );
+    assert!(acts.iter().all(|a| !matches!(a, Act::Dig { .. })));
+    assert!(
+        p.events_since(0).iter().any(|e| e.what
+            == "end: no pocket for enderman 70 (struck with the sword over the danger line)")
+    );
+    // Under the danger line: walked away to open ground, never a fight, never a notch.
+    let mut low = end_at(feet);
+    angry(&mut low);
+    low.player.health = Some(6.0);
+    let mut u = Plan::new(Aim::Race);
+    assert!(u.end_enderman_step(&low, 0).is_some());
+    assert!(u.dragon.ender_walk.is_some(), "a walk away begun");
+    assert!(
+        u.take_acts()
+            .iter()
+            .all(|a| !matches!(a, Act::Attack { .. } | Act::Dig { .. }))
     );
     assert!(
-        p.events_since(0)
-            .iter()
-            .any(|e| e.what == "end: no pocket for enderman 70 (a notch down, no bunker near)")
+        u.events_since(0).iter().any(|e| e.what
+            == "end: no pocket for enderman 70 (under the danger line, walked away to open ground)"),
+        "{:?}",
+        u.events_since(0)
     );
     // The bunker within reach: into it.
     let mut q = Plan::new(Aim::Race);
@@ -1669,7 +1690,7 @@ fn an_angry_endermans_hold_is_near_only_and_capped() {
     assert!(
         noted(
             &t,
-            "end: no pocket for enderman 70 (a notch down, no bunker near)"
+            "end: no pocket for enderman 70 (over the danger line, met in the open)"
         ),
         "{:?}",
         t.events_since(0)

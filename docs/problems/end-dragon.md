@@ -393,3 +393,7 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - Out of pits from the landing approach (wall 40).
 - **Dev race 46048455555 (c09bf25, dev-end-two-crystals):** lane 1 struck #64 at (42.5, 83, 0.5), the crystal that cannot heal the perch, and left #98 at (12, 39), which can. So four perches went unfought, as the rule says, each one sitting-scanning to charging within about 100 ticks. It died in E4's clutch drop (`fell.assist`). Lane 0 was stared into an enderman's anger at tick 60 and killed in the enderman's notch by tick 240.
   - The order the crystals go in decides when the fight can begin: the ones in the perch's heal box (all but (42, 0) and (-42, -1)) are the ones to take first.
+- **Wall 42: the enderman's notch was no shelter** (dev race 46048455555 lane 0: stared at tick 60, then killed in its notch by 240; the brain's server model has the real server hitting under a roof 3 times in 5).
+  - **Fix:** within 8 on open ground with no bunker, the bot fights it with the sword over the danger line ("struck with the sword over the danger line", or "met in the open" out of reach, the look on its body at 25 degrees down, `keep_look` keeping it off the eyes).
+  - Under the line, it walks away to open ground ("walked away to open ground").
+  - No enderman notch is begun.

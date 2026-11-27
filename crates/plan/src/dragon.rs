@@ -995,6 +995,9 @@ pub const ENDER_NEAR: f64 = 8.0;
 pub const STRAFE_UNSEEN_TICKS: u64 = 100;
 pub const STRAFE_RISES: i32 = 10;
 pub const ENDER_HOLD_CAP: u64 = 600;
+/// Degrees down the look is held at an enderman met in the open: its body and legs, never its eyes
+/// (E7's `keep_look` bends any look that would meet them).
+pub const ENDER_LOOK_PITCH: f32 = 25.0;
 
 /// Rows named in the backstop's note at most.
 pub const ROWS_KEPT: usize = 8;
@@ -4254,20 +4257,73 @@ impl Plan {
             }
             return Some(c);
         }
-        // No bunker near: down a notch two deep where the feet are, roofed, which it can neither
-        // enter nor see into (race 45913296602 lane 1: fought in the open, 7 a blow, dead at tick
-        // 260 with the enderman at 13.6). A fight in the open is lost: 40 health against 6 a
-        // strike, 7 a blow every second.
-        if body.on_ground || self.dragon.ender_notch {
-            if !self.dragon.ender_notch {
-                self.dragon.ender_notch = true;
-                self.dragon.notch_from = None;
-            }
-            self.ender_note(tick, id, "a notch down, no bunker near");
+        // A notch begun before wall 42 is finished; none is begun now.
+        if self.dragon.ender_notch {
             return Some(self.notch_dig_step(w, tick, crouch, "enderman"));
         }
-        self.ender_note(tick, id, "in the air, no bunker near: on with the task");
-        None
+        // No bunker near (wall 42: the notch is no shelter, dev race 46048455555 lane 0 was killed
+        // in one, and the real server hits under a roof 3 times in 5): over the danger line it is
+        // fought with the sword, the look on its body (`keep_look` keeps it off the eyes); under
+        // the line, a walk away to open ground.
+        if above {
+            if in_reach {
+                self.dragon.ender_walk = None;
+                return Some(self.ender_strike(w, tick, id));
+            }
+            self.dragon.ender_walk = None;
+            self.ender_note(tick, id, "over the danger line, met in the open");
+            let to = [e.pos[0] - body.pos[0], e.pos[2] - body.pos[2]];
+            return Some(Controls {
+                yaw: (-to[0]).atan2(to[1]).to_degrees(),
+                pitch: Some(ENDER_LOOK_PITCH),
+                ..Controls::default()
+            });
+        }
+        if self.dragon.ender_walk.is_none() {
+            let r = [body.pos[0] - e.pos[0], body.pos[2] - e.pos[2]];
+            let d = r[0].hypot(r[1]).max(1e-6);
+            let banned = self.bunker_columns();
+            // The dodge's search, its "flight" square to the way off, so its sideways is away.
+            let Some(c) = dodge_cell_within(
+                w,
+                cell_of(body.pos),
+                [r[1] / d, -r[0] / d],
+                None,
+                &banned,
+                Some(1.0),
+                (DODGE_MIN, DODGE_MAX),
+            ) else {
+                self.ender_note(
+                    tick,
+                    id,
+                    "under the danger line, no way off: on with the task",
+                );
+                return None;
+            };
+            self.ender_note(
+                tick,
+                id,
+                "under the danger line, walked away to open ground",
+            );
+            let cell: Cell = (c[0], c[1], c[2]);
+            self.dragon.ender_walk = Some(Walk::new(
+                cell,
+                Goal::Block { pos: cell },
+                Arrive::Goal,
+                tick,
+            ));
+        }
+        let wk = self.dragon.ender_walk.as_mut()?;
+        let (c, status) = wk.step(w, tick);
+        let (acts, said) = wk.take_out();
+        self.acts.extend(acts);
+        for (what, why) in said {
+            self.note(tick, what, why);
+        }
+        if !matches!(status, TaskStatus::Running) {
+            self.dragon.ender_walk = None;
+        }
+        Some(c)
     }
 
     /// One tick of a strike at enderman `id`: the weapon in hand, a swing when it is ready.
@@ -4291,7 +4347,7 @@ impl Plan {
             self.dragon.ender_swing_at = Some(tick);
             self.acts.push(Act::Attack { entity: id });
             self.acts.push(Act::Swing);
-            self.ender_note(tick, id, "struck from cover over the danger line");
+            self.ender_note(tick, id, "struck with the sword over the danger line");
         }
         looking_down(w)
     }
