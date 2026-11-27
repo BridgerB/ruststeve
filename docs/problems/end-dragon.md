@@ -181,5 +181,23 @@ Lane 2 had 4 perches and 1 strike; the dragon was at 199. Each flame cycle runs 
 - **Wall 17: an enderman fought in the open** (lane 1, ticks 140 to 260). Angry from a stare at the arrival ("near miss"), with no bunker yet, it was struck 6 times for 26. It hit back for 7, 6.6 and 6.9 (20 → 2.3), and the bot died with the enderman at 13.6.
   - **Fix:** with no bunker near, a notch two deep where the feet are, roofed ("end: no pocket for enderman N (a notch down, no bunker near)"). An enderman can neither enter nor see into it. Out by the roof and the step once it is calm.
 
+### Race 45918669138 (d7f7a01, dev, 3 lanes, cap 24,000), read mid-run (lane 1's evidence)
+**Wall 18: no way out of a notch under the bunker.**
+- Wall 16's answer worked: "breath: into the bunker", then "a notch down" at tick 880, and "out of the notch" at 1,500.
+- But the notch was 2 under the bunker's floor, walled all round. No step out was found, and E3's retreat said "no walk to the bunker" every tick from 1,700 on.
+- **Fix:** with no step to dig, the notch is risen out of, a block put under the feet at each jump (`rise_step`), to the height it was begun from. Notes: "notch: risen out at …".
+
+### Race 45918669138 in full (d7f7a01): went backwards
+- **Wall 19: the way into the bunker flapped.**
+  - Lane 2 stood at the bunker's stair top (13, 58..59, -1) under a flame's cloud. The body's height put it in and out of the cloud from tick to tick: "into the bunker" and "out of the breath" 40 times each. Between them the fight's own walk climbed the stair back into the cloud, 3.0 a time, 20 to dead.
+  - Lane 0 died the same way after 7 strikes (dragon at 168).
+  - **Fix:**
+    - The way into the bunker is kept to its end while a breath lies within its reach plus 2 on the plane.
+    - In the bunker the bot stays, crouched, while one does.
+    - A bunker not clear of every breath (on the plane and in height) is not gone to; the notch where the bot stands is dug instead.
+- **Wall 20: held in cover while the dragon sat.**
+  - Lane 1 was in its notch under the bunker (wall 18), and "end: covered" from an angry enderman ran the whole race: 0 strikes.
+  - **Fix:** a fight walk that fails NoPath in cover while the dragon is grounded climbs out by a shaft straight up: the block over the head dug, a block put under the feet at each jump, until the sky is over the head. Never while a breath lies over the shaft on the plane: it stays in cover until the cloud clears. Notes: "out by a shaft up", "dragon: out of cover". Unit-tested.
+
 **Not yet answered.**
 - The flame cloud costs about 3.0 each flaming phase.

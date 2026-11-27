@@ -523,6 +523,10 @@ pub const CHARGE_CONE: f64 = 0.8;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
+/// Blocks beyond a breath's reach on the plane that the way into the bunker is kept, and the bot
+/// held in it.
+pub const BUNKER_HOLD: f64 = 2.0;
+
 /// Blocks on the plane from the bunker a breath on the body sends the bot into it.
 pub const BUNKER_NEAR: f64 = 6.0;
 
@@ -531,6 +535,10 @@ pub const ENDER_BUNKER_REACH: f64 = 24.0;
 
 /// Ticks a fight whose walk failed in cover waits before it plans again.
 pub const COVERED_RETRY_TICKS: u64 = 200;
+
+/// Blocks the feet rise over the cell a jump left before its block goes in (clojurecraft
+/// `dragon/clear-rise`).
+pub const RISE_CLEAR: f64 = 1.05;
 
 /// Ticks between the notch roof's clicks, and the clicks it may take in all.
 pub const ROOF_CLICK_TICKS: u64 = 6;
@@ -1461,6 +1469,14 @@ pub struct DragonState {
     /// The notch's dig failed: crouched where the feet are, no dig tried again.
     #[serde(default)]
     pub notch_failed: bool,
+    /// The height a notch is risen out to, a block at a jump, and the cell the last jump left.
+    #[serde(default)]
+    pub notch_rise_to: Option<i32>,
+    /// Out of cover by a shaft up, the dragon on its perch.
+    #[serde(default)]
+    pub climb_out: bool,
+    #[serde(default)]
+    pub rise_from: Option<[i32; 3]>,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -1733,6 +1749,39 @@ impl Plan {
                 .phase_at
                 .map_or(0, |at| w.session.server_ticks.saturating_sub(at)),
         };
+        // Out of cover by a shaft up, the dragon on its perch: the block over the head dug, else
+        // a block put under the feet at a jump, until the sky is over the head.
+        if self.dragon.climb_out {
+            if world::stage::open_sky(w) || !view(w).is_some_and(|(_, v)| grounded(&v)) {
+                self.dragon.climb_out = false;
+                self.dragon.rise_from = None;
+                self.note(
+                    tick,
+                    "dragon: out of cover".to_owned(),
+                    format!("at {:?}", w.body.map(|b| cell_of(b.pos))),
+                );
+            } else if let Some(body) = w.body
+                && breathed(&breaths(w), body.pos, 0.0)
+            {
+                // A breath over the shaft's top: stay in cover until it clears.
+                return Controls {
+                    sneak: true,
+                    ..looking_down(w)
+                };
+            } else if let Some(body) = w.body {
+                let fc = cell_of(body.pos);
+                let head = [fc[0], fc[1] + 2, fc[2]];
+                let solid = w
+                    .block_at(world::BlockPos::new(head[0], head[1], head[2]))
+                    .is_some_and(|k| k != BlockKind::Air);
+                if solid && body.on_ground {
+                    return self
+                        .charge_dig_step(w, tick, head)
+                        .unwrap_or_else(|| looking_down(w));
+                }
+                return self.rise_step(w, tick, body);
+            }
+        }
         let want = decide(w, &ask);
         let Task::Dragon(f) = &mut self.task else {
             return Controls::default();
@@ -1989,6 +2038,18 @@ impl Plan {
             // Sealed in cover, a walk out has no way: the next choice waits a while, the End's
             // own rows (the pocket's, the bunker's) open it.
             let covered = crate::end::covered(w);
+            // In cover with the dragon on its perch: out by a shaft straight up, the roof dug and a
+            // block put under the feet at each jump (race 45918669138 lane 1: held covered from an
+            // angry enderman the whole race, 0 strikes in 24,000 ticks).
+            if covered && view(w).is_some_and(|(_, v)| grounded(&v)) {
+                self.dragon.climb_out = true;
+                self.note(
+                    tick,
+                    format!("dragon walk to {cell:?} failed: {e:?}"),
+                    "in cover with the dragon on its perch: out by a shaft up".to_owned(),
+                );
+                return Controls::default();
+            }
             self.note(
                 tick,
                 format!("dragon walk to {cell:?} failed: {e:?}"),
@@ -2071,6 +2132,31 @@ impl Plan {
             if let Some(c) = self.notch_exit_step(w, tick) {
                 return Some(c);
             }
+            // The way into the bunker kept to the end while a breath lies near on the plane, and
+            // in it the bot stays while one lies over it: the body's height at the stair's top is
+            // in and out of the cloud from tick to tick (race 45918669138 lane 2: "into the
+            // bunker" and "out of the breath" 40 times each, the stair climbed back into the cloud
+            // between, 20 to dead).
+            if let Some(b) = self.bunker
+                && breathed(&clouds, feet, BUNKER_HOLD)
+            {
+                // With nothing in hand the End's own rows keep the bunker shut (E3's "stays
+                // shut for a … near its stair"); a task in hand is held.
+                if cell_of(feet) == b {
+                    if matches!(self.task, Task::Idle) {
+                        return None;
+                    }
+                    return Some(crouch);
+                }
+                if self
+                    .dragon
+                    .breath_walk
+                    .as_ref()
+                    .is_some_and(|wk| wk.target == (b[0], b[1], b[2]))
+                {
+                    return self.breath_walk_step(w, tick, b);
+                }
+            }
             self.dragon.breath_refused.clear();
             self.dragon.breath_noted = None;
             self.dragon.breath_wall = None;
@@ -2095,8 +2181,10 @@ impl Plan {
         // Shelter near (the bunker within `BUNKER_NEAR`): into it, down, never out sideways
         // (E4's race 45912100302 lane 0: nine walks out of a fireball's cloud by the bunker failed
         // NoPath, then dead). In it with the breath still on: a notch from there.
+        // Only a bunker clear of every breath (on the plane and in height); else a notch here.
         if let Some(b) = self.bunker
             && flat(feet, mid(b)) <= BUNKER_NEAR
+            && (cell_of(feet) == b || clear_of_breath(&clouds, mid(b)))
         {
             if cell_of(feet) == b {
                 self.dragon.breath_notch = true;
@@ -2392,12 +2480,16 @@ impl Plan {
             return;
         };
         let side = self.dragon.notch_side.take();
-        self.dragon.notch_step = self
-            .dragon
-            .notch_from
-            .take()
+        let from = self.dragon.notch_from.take();
+        self.dragon.notch_step = from
             .filter(|f| cell_of(body.pos)[1] <= f[1] - 2)
             .and_then(|f| notch_step_except(w, f, side));
+        // With no step to dig (the bunker's floor, walls all round: race 45918669138 lane 1 stood
+        // 2 under the bunker 3,000 ticks, "no walk to the bunker" every tick), it rises out by a
+        // block put under the feet at each jump.
+        self.dragon.notch_rise_to = from
+            .filter(|f| cell_of(body.pos)[1] < f[1] && self.dragon.notch_step.is_none())
+            .map(|f| f[1]);
     }
 
     /// The way out of a notch, a tick at a time: the roof dug back (the jump needs the head
@@ -2410,6 +2502,20 @@ impl Plan {
             return self.charge_dig_step(w, tick, r);
         }
         self.dragon.notch_roof = None;
+        if let Some(top) = self.dragon.notch_rise_to {
+            let body = w.body?;
+            let fc = cell_of(body.pos);
+            if fc[1] >= top {
+                self.dragon.notch_rise_to = None;
+                self.note(
+                    tick,
+                    format!("notch: risen out at {fc:?}"),
+                    "on with the task".to_owned(),
+                );
+                return None;
+            }
+            return Some(self.rise_step(w, tick, body));
+        }
         if let Some(s) = self.dragon.notch_step {
             if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
                 self.dragon.notch_step = None;
@@ -2424,6 +2530,48 @@ impl Plan {
             return self.charge_dig_step(w, tick, s);
         }
         None
+    }
+
+    /// One tick of a rise by a block under the feet: the block held, a jump from the ground, and
+    /// once the feet are `RISE_CLEAR` over the cell they left, the block clicked onto the top of
+    /// the one under it.
+    fn rise_step(&mut self, w: &World, tick: u64, body: physics::Body) -> Controls {
+        let down = Controls {
+            yaw: f64::from(w.player.yaw),
+            pitch: Some(90.0),
+            ..Controls::default()
+        };
+        let Some(item) = crate::spikes::pillar_item(w) else {
+            return down;
+        };
+        match hold::toward(w, item) {
+            Hold::Held => {}
+            Hold::Act(a) => {
+                if self.acts.is_empty() {
+                    self.acts.push(a);
+                }
+                return down;
+            }
+            Hold::Wait | Hold::Missing => return down,
+        }
+        let left = self.dragon.rise_from.unwrap_or_else(|| cell_of(body.pos));
+        if body.on_ground {
+            self.dragon.rise_from = Some(cell_of(body.pos));
+            return Controls { jump: true, ..down };
+        }
+        if body.pos[1] >= f64::from(left[1]) + RISE_CLEAR
+            && w.block_at(world::BlockPos::new(left[0], left[1], left[2])) == Some(BlockKind::Air)
+            && self.acts.is_empty()
+            && w.click.is_none()
+            && tick >= self.dragon.roof_click_at + ROOF_CLICK_TICKS
+        {
+            self.dragon.roof_click_at = tick;
+            self.acts.push(Act::UseOn {
+                pos: world::BlockPos::new(left[0], left[1] - 1, left[2]),
+                face: 1,
+            });
+        }
+        down
     }
 
     /// The notch's roof over the head at `roof`: a block on a side of it first when nothing holds
