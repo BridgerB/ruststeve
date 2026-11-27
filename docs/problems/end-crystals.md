@@ -387,3 +387,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - It ran into the foot's cell: senses at 2,540, 2,740 and 2,940 read "cell 39,59,0 in water". In water the jump does nothing, so no block went in.
   - The climb was held from a charge at 2,900 with the feet still at 59. The second climb (3,240) stalled 1,200 ticks at 59.06, "on the ground false". The third (4,640) was held at the foot by the charge at 4,780. That was three climbs and about 1,900 ticks with no rise. The death cell (45, 57, 0), a notch at another foot, was in landing water too.
 - **The fix:** the landing water is poured from the first block up, never from the foot. The climb hands back on its first rise ("climb paused for the landing water at"), the pour follows, then the climb goes on. The water sits beside the pillar's base block, below the feet. Unit test `the_landing_water_is_poured_from_the_first_block_up_and_dropped_into_from_the_top`.
+
+### Wall 26: a bot that never starts a pillar (race 45949063425 lane 1; fixed)
+- **What happened:**
+  - The bot was sealed in its bunker at (14, 58, -1). It walked at the four approaches of the nearest spike, (42, 0), in turn: "no way to", each refused, 40 ticks each. Only then did the dig-out begin, and the dig-out cleared the refusals, so the same spike came round again.
+  - None of the nine other spikes was tried. No pillar began before the death at 2,900.
+  - "no pool: no site" (x9) was no bar: it falls through to the crystals with the buckets in hand on the same tick (the ledger has "no way to" right after it). A unit test now holds that.
+- **The fix:**
+  - `next` takes the crystals nearest first and works the first with an approach not refused (`crystals_by_distance`).
+  - A bot shut in a pocket (`shut_in`: fewer than `POCKET_CELLS` 48 standable cells reachable by steps) digs out at once. The note "dig the way out" says "shut in a pocket" or "every approach refused".
+  - Unit tests: `with_every_approach_of_one_spike_refused_the_next_spike_is_tried`, `shut_in_a_pocket_the_bot_digs_out_at_once`, and `no_pool_site_says_why` (extended).

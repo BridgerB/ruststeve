@@ -42,6 +42,9 @@ Issue 20f (agent E4, `docs/problems/end-crystals.md`), the port of clojurecraft'
 ## The water clutch
 In the End, a fall with more than `CLUTCH_FROM` (4) under the feet and a water bucket held is caught (`Plan::spikes_clutch`, run from `spikes_step` ahead of any task): the bucket to hand, looking straight down, used every tick from `CLUTCH_AT` (3, plus a tick's fall) over the ground until it pours; landed, the water is taken back with the empty bucket. Parity e06 (E6): a 21-block fall onto water poured while falling cost 0, with none 18. Notes: clutch begun, poured, missed, over (the water taken back or left).
 
+## Which crystal
+The crystals nearest first: the first with an approach not refused is worked (`crystals_by_distance`), so a spike whose four approaches are refused gives way to the next. Shut in a pocket (`shut_in`, fewer than `POCKET_CELLS` standable cells reachable), the bot digs out at once rather than walk at each approach in turn.
+
 ## The landing water
 With two water buckets (one stays the clutch's) and end stone to spare, the way down is a drop into water poured beside the pillar's foot (`landing_cell`: a floor at the foot's height, clear air to over the top). It is poured from the first block up, never from the foot: the climb hands back on its first rise ("climb paused for the landing water") and the pour follows ("landing water poured at"). Poured from the foot, it ran into the foot's cell and the bot, in water, could not jump-place (race 45949063425 lane 0). A fireball or a strafe within 64 up high: into the landing water if poured, else off a side onto the clutch, else the dig.
 

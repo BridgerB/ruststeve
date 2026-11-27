@@ -532,12 +532,63 @@ pub fn wall_gap(w: &World, plan: &StandPlan, bars_shield: bool) -> Option<Cell> 
 
 /// The nearest live end crystal: its id and position.
 pub fn nearest_crystal(w: &World, pos: [f64; 3]) -> Option<(i32, [f64; 3])> {
+    crystals_by_distance(w, pos).into_iter().next()
+}
+
+/// The live crystals, nearest first (ties by id, so the order is the same every tick).
+pub fn crystals_by_distance(w: &World, pos: [f64; 3]) -> Vec<(i32, [f64; 3])> {
     let d = |p: [f64; 3]| (0..3).map(|i| (p[i] - pos[i]).powi(2)).sum::<f64>();
-    w.entities
+    let mut all: Vec<(i32, [f64; 3])> = w
+        .entities
         .iter()
         .filter(|(_, e)| e.kind == EntityKind::EndCrystal && !e.dead)
-        .min_by(|a, b| d(a.1.pos).total_cmp(&d(b.1.pos)))
         .map(|(id, e)| (*id, e.pos))
+        .collect();
+    all.sort_by(|a, b| d(a.1).total_cmp(&d(b.1)).then(a.0.cmp(&b.0)));
+    all
+}
+
+/// Cells a walk from the feet may reach before the feet are judged free; fewer, and the bot
+/// is shut in a pocket (a sealed bunker, a notch) and digs out at once.
+pub const POCKET_CELLS: usize = 48;
+
+/// Is the bot shut in: fewer than `POCKET_CELLS` standable cells reachable from the feet by
+/// steps of one along an axis, up one (room over the head) or down up to three (race
+/// 45949063425 lane 1: sealed in its bunker, every approach of a spike was walked at and
+/// refused, 40 ticks each, before the dig-out began).
+pub fn shut_in(w: &World, feet: Cell) -> bool {
+    let stands = |c: Cell| {
+        full(kind(w, (c.0, c.1 - 1, c.2)))
+            && passable(kind(w, c))
+            && passable(kind(w, (c.0, c.1 + 1, c.2)))
+    };
+    let mut seen: std::collections::BTreeSet<Cell> = std::collections::BTreeSet::new();
+    let mut todo = vec![feet];
+    seen.insert(feet);
+    while let Some(c) = todo.pop() {
+        if seen.len() >= POCKET_CELLS {
+            return false;
+        }
+        for a in Axis::ALL {
+            let (dx, dz) = a.step();
+            let up = passable(kind(w, (c.0, c.1 + 2, c.2)));
+            for dy in [1, 0, -1, -2, -3] {
+                let n = (c.0 + dx, c.1 + dy, c.2 + dz);
+                let way = match dy {
+                    1 => up,
+                    0 => true,
+                    _ => (dy + 1..=0).all(|y| {
+                        passable(kind(w, (n.0, c.1 + y, n.2)))
+                            && passable(kind(w, (n.0, c.1 + y + 1, n.2)))
+                    }),
+                };
+                if way && stands(n) && seen.insert(n) {
+                    todo.push(n);
+                }
+            }
+        }
+    }
+    seen.len() < POCKET_CELLS
 }
 
 /// Blocks from `eye` to a crystal's box at `pos`.
@@ -890,8 +941,11 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
         return Next::Wait("falling".to_owned());
     }
     let feet = path::stand_cell(w, body.pos);
-    let crystal = nearest_crystal(w, body.pos);
-    let approach = crystal.and_then(|(_, pos)| {
+    // The crystals nearest first; the first with an approach not refused is the one worked
+    // (race 45949063425 lane 1: four approaches of one spike refused in turn, and back to it,
+    // none of the nine others tried).
+    let order = crystals_by_distance(w, body.pos);
+    let approach_to = |pos: [f64; 3]| {
         let spike = spike_for(w, &st.geography, pos)?;
         // A column whose landing water is poured goes first (race 45927433568 lane 0: poured at
         // one pillar's foot, the next choice was another axis, and the bucket was lost to it).
@@ -910,7 +964,12 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
         landed
             .or_else(|| best_approach(w, &spike, body.pos, &st.refused, tick))
             .map(|a| (spike, a))
-    });
+    };
+    let chosen = order
+        .iter()
+        .find_map(|c| approach_to(c.1).map(|sa| (*c, sa)));
+    let crystal = chosen.map(|(c, _)| c).or_else(|| order.first().copied());
+    let approach = chosen.map(|(_, sa)| sa);
     if let (Some((id, _)), Some((spike, a))) = (crystal, approach) {
         let p = a.plan;
         if feet == p.stand {
@@ -1028,12 +1087,13 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
     if on_pillar(w, feet, &st.pillars) {
         return Next::DigDown((feet.0, feet.1 - 1, feet.2));
     }
+    let shut = crystal.is_some() && shut_in(w, feet);
     match (crystal, approach) {
-        (Some(_), Some((spike, a))) => Next::Walk {
+        (Some(_), Some((spike, a))) if !shut => Next::Walk {
             to: a.foot,
             approach: Some((spike.centre[0], spike.centre[1], a.plan.axis)),
         },
-        (Some((_, pos)), None) => {
+        (Some((_, pos)), approach) => {
             // Every approach refused for want of a way: the cells shutting the bot in dug toward
             // the nearest approach (the frontier race 45898928805 lane 1: an enderman's pocket put
             // blocks on the bunker's stair, (12, 60, 0) and (13, 61, 0), and every walk from
@@ -1053,6 +1113,14 @@ pub fn next(w: &World, st: &SpikeState, tick: u64) -> Next {
                     to: top,
                     approach: None,
                 },
+                // Shut in with the stair already open: the walk is tried after all.
+                Some(_) | None if approach.is_some() => approach.map_or_else(
+                    || Next::Wait("no approach".to_owned()),
+                    |(spike, a)| Next::Walk {
+                        to: a.foot,
+                        approach: Some((spike.centre[0], spike.centre[1], a.plan.axis)),
+                    },
+                ),
                 Some(_) | None => Next::Wait(format!(
                     "no approach to the crystal at ({:.1}, {:.1}, {:.1})",
                     pos[0], pos[1], pos[2]
@@ -2059,7 +2127,14 @@ impl Plan {
                 self.spikes_note(
                     tick,
                     format!("spikes: dig the way out at {cell:?}"),
-                    format!("from {feet:?} toward the approach's foot {toward:?}"),
+                    format!(
+                        "from {feet:?} toward the approach's foot {toward:?}; {}",
+                        if shut_in(w, feet) {
+                            "shut in a pocket"
+                        } else {
+                            "every approach refused"
+                        }
+                    ),
                 );
                 Some(Task::Dig(dig_down(w, cell, tick)))
             }

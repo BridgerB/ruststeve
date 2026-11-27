@@ -1391,6 +1391,70 @@ fn no_pool_site_says_why() {
         .map(|e| e.why.clone())
         .unwrap_or_default();
     assert!(why.contains("Obsidian"), "{why}");
+    // No site is no bar: on to the crystals with the buckets in hand (race 45949063425 lane 1).
+    assert!(n.iter().any(|n| n.starts_with("spikes: walk to")), "{n:?}");
+}
+
+#[test]
+fn with_every_approach_of_one_spike_refused_the_next_spike_is_tried() {
+    // Race 45949063425 lane 1: the four approaches of one spike refused in turn, then back to
+    // it; none of the nine others tried.
+    let mut w = world(2, [14.5, 64.0, 8.5]);
+    for dx in -2..=2_i32 {
+        for dz in -2..=2_i32 {
+            if dx * dx + dz * dz <= 5 {
+                for y in 64..70 {
+                    set(&mut w, (24 + dx, y, 8 + dz), BlockKind::Obsidian);
+                }
+            }
+        }
+    }
+    set(&mut w, (24, 70, 8), BlockKind::Bedrock);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 8,
+        uuid: [5; 16],
+        kind: EntityKind::EndCrystal.id(),
+        x: 24.5,
+        y: 71.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    // The nearer spike first.
+    match spikes::next(&w, &SpikeState::default(), 0) {
+        Next::Walk {
+            approach: Some((8, 8, _)),
+            ..
+        } => {}
+        n => panic!("{n:?}"),
+    }
+    let st = SpikeState {
+        refused: Axis::ALL.map(|a| (8, 8, a, u64::MAX)).to_vec(),
+        ..SpikeState::default()
+    };
+    match spikes::next(&w, &st, 0) {
+        Next::Walk {
+            approach: Some((24, 8, _)),
+            ..
+        } => {}
+        n => panic!("{n:?}"),
+    }
+}
+
+#[test]
+fn shut_in_a_pocket_the_bot_digs_out_at_once() {
+    // Race 45949063425 lane 1: sealed in its bunker, each approach was walked at and refused,
+    // 40 ticks each, before the dig-out began.
+    let mut w = world(2, [13.5, 61.0, 0.5]);
+    set(&mut w, (13, 61, 0), BlockKind::Air);
+    set(&mut w, (13, 62, 0), BlockKind::Air);
+    assert!(spikes::shut_in(&w, (13, 61, 0)));
+    match spikes::next(&w, &SpikeState::default(), 0) {
+        Next::DigOut { .. } => {}
+        n => panic!("{n:?}"),
+    }
+    // On the open floor: not shut in, the walk.
+    let w = world(2, [13.5, 64.0, 0.5]);
+    assert!(!spikes::shut_in(&w, (13, 64, 0)));
 }
 
 #[test]
