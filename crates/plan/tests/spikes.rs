@@ -512,7 +512,8 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
             .iter()
             .any(|n| n == "spikes: stand walled at (8, 70, 5)")
     );
-    // The crystal gone, the dragon strafing 30 off: held in the box, not down.
+    // The crystal gone, the dragon strafing 30 off: down, box or not (a fireball's cloud takes
+    // whoever is within 4 of its impact, walls or not); boxed, no side is open, so the dig.
     gone(&mut w);
     dragon(&mut w, [8.5, 70.0, 35.5], 1);
     let mut p = Plan::new(Aim::Race);
@@ -521,8 +522,15 @@ fn the_dragon_holds_the_climb_at_the_foot_and_the_way_down_in_the_box() {
         z: 5,
         base: 64,
     });
-    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
-    assert!(notes(&p).iter().any(|n| n == "spikes: hold in the box"));
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 69, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: down from a fireball at"))
+    );
     // The dragon gone far: down.
     w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![DRAGON] }));
     let mut p = Plan::new(Aim::Race);

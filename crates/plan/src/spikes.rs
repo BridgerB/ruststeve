@@ -42,9 +42,10 @@
 //! (`portal_way.rs`'s one-cell dig). No jump.
 //!
 //! **Rules.** Climb only while the dragon is more than `CLIMB_FAR` off or perched (phases 5 to 7),
-//! with health over danger plus `CLIMB_MARGIN`. While the dragon strafes or charges within
-//! `THREAT_NEAR`, a bot up a pillar holds still crouched inside a complete guard ring, or digs
-//! down. Never a strike under danger health. A pillar that rises no block in `PILLAR_STALL` ticks
+//! with health over danger plus `CLIMB_MARGIN`. A fireball near or a strafe within
+//! `THREAT_NEAR` takes a bot up a pillar down at once, box or not: into the landing water, else
+//! off the side onto the clutch, else the dig. A charge within `THREAT_NEAR` holds it crouched
+//! in its guard ring or shaft. Never a strike under danger health. A pillar that rises no block in `PILLAR_STALL` ticks
 //! fails, says why, and its approach is refused for a while.
 //!
 //! Every decision is read from the world each time (which crystal is nearest, which approach,
