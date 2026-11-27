@@ -604,6 +604,11 @@ pub struct EndState {
     pub strafe_paused: bool,
     #[serde(default)]
     pub strafe_pauses: u32,
+    /// The crystals' task handed back (returned none with a crystal alive), and stocks begun again.
+    #[serde(default)]
+    pub handed_back: bool,
+    #[serde(default)]
+    pub restocks: u32,
     /// The first stock run's wait for a lull, noted.
     #[serde(default)]
     pub lull_wait_noted: bool,
@@ -815,7 +820,11 @@ impl Plan {
         let up = crate::spikes::on_pillar(w, feet, &self.spikes.pillars)
             || crate::spikes::on_spike(w, feet)
             || !self.spikes.pillars.is_empty();
-        if up && let Some(t) = self.end_spikes(w, tick) {
+        let up_task = if up { self.end_spikes(w, tick) } else { None };
+        if up && up_task.is_none() && crystals_alive(w) > 0 {
+            self.end.handed_back = true;
+        }
+        if let Some(t) = up_task {
             if !self.end.down_noted {
                 self.end.down_noted = true;
                 self.note(
@@ -880,6 +889,29 @@ impl Plan {
         }
         // 4. The stock, under the end stone.
         let stone = craft::count(w, ItemKind::EndStone);
+        // The crystals handed back for want of blocks (E4's "no climb: too few blocks"; frontier
+        // race 45959448248 lane 3 paused its stock for a strafe at 3,840 and held about 0 end stone
+        // to the cap): the stock again, over or paused, in the next lull.
+        if self.end.handed_back
+            && crystals_alive(w) > 0
+            && stone < STOCK_ENOUGH
+            && (self.end.stock_over || self.end.strafe_paused)
+            && lull(w)
+        {
+            self.end.handed_back = false;
+            self.end.stock_over = false;
+            self.end.strafe_paused = false;
+            self.end.stock_runs = 0;
+            self.end.restocks += 1;
+            self.note(
+                tick,
+                "end: stock again: the crystals handed back for blocks".to_owned(),
+                format!(
+                    "{stone} end stone held, under {STOCK_ENOUGH}; in a lull; restock {}",
+                    self.end.restocks
+                ),
+            );
+        }
         if !self.end.stock_over && (stone >= STOCK_WANTED || self.end.stock_runs >= STOCK_RUNS) {
             self.end.stock_over = true;
             self.note(
@@ -990,7 +1022,11 @@ impl Plan {
         // 5. The hand-offs: the crystals while one is alive, then the dragon. A strafe near with
         // the bot under the ground and nothing handed over: out all the same, to be seen.
         let next = if crystals_alive(w) > 0 {
-            self.end_spikes(w, tick)
+            let t = self.end_spikes(w, tick);
+            if t.is_none() {
+                self.end.handed_back = true;
+            }
+            t
         } else {
             self.end_dragon(w, tick)
         };
