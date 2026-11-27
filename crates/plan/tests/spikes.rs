@@ -1919,3 +1919,29 @@ fn a_clutch_over_an_edge_pours_on_the_column_the_body_lands_on() {
     );
     assert!(ctl.pitch.is_some_and(|p| p > 60.0), "{ctl:?}");
 }
+
+#[test]
+fn no_walk_to_a_pillars_foot_without_its_blocks() {
+    // Frontier race 45969992660 lane 1: with 6 end stone, each pause of E3's restock walked the
+    // bot back out to the foot, 25 from its bunker, to refuse the climb there.
+    let mut w = world(2, [14.5, 64.0, 5.5]);
+    water(&mut w);
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 3));
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), None, "handed back for the stock");
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: no walk to the foot: too few blocks"),
+        "{:?}",
+        notes(&p)
+    );
+    // With the blocks: the walk.
+    w.inventory.slots.insert(36, (ItemKind::EndStone, 64));
+    let mut p = Plan::new(Aim::Race);
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Explore(_))),
+        "{:?}",
+        notes(&p)
+    );
+}

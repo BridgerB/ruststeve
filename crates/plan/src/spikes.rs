@@ -1896,6 +1896,31 @@ impl Plan {
                 Some(self.spikes_hold(tick))
             }
             Next::Walk { to, approach } => {
+                // No walk to a pillar's foot without the blocks for its pillar (frontier race
+                // 45969992660 lane 1: each time E3's restock paused, the walk took the bot back
+                // out to the foot, 25 from its bunker, to refuse the climb there).
+                if let Some((x, z, axis)) = approach
+                    && let Some(spike) = crystals_by_distance(w, body.pos)
+                        .into_iter()
+                        .filter_map(|(_, pos)| spike_for(w, &self.spikes.geography, pos))
+                        .find(|sp| sp.centre == [x, z])
+                {
+                    let top = stand(&spike, axis).stand.1;
+                    let need = top - to.1 + PILLAR_SPARE;
+                    let held = craft::count(w, PILLAR_ITEM);
+                    // Only a walk to a foot on the ground: the walk on the pillar's top to the
+                    // stand is never refused.
+                    if to.1 < top && held < need {
+                        self.spikes_note(
+                            tick,
+                            "spikes: no walk to the foot: too few blocks".to_owned(),
+                            format!(
+                                "{held} end stone held, {need} wanted for the pillar at {to:?}"
+                            ),
+                        );
+                        return None;
+                    }
+                }
                 let mut walk = Walk::new(to, Goal::Block { pos: to }, Arrive::Goal, tick);
                 if !walk.route_now(w, tick) || walk.route != Some(path::Status::Found) {
                     self.expanded += walk.expanded;

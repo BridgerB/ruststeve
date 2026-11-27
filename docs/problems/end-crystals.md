@@ -473,3 +473,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The pour looks at that column's top (`landing_aim`), so a body coming down on an edge, or flung onto ground beside it, pours where it lands.
   - The "clutch pour sent" note names the column and says when it's beside the feet's.
   - Unit test `a_clutch_over_an_edge_pours_on_the_column_the_body_lands_on`.
+
+## Frontier race 45969992660 (daab599, 6 lanes), read while it runs
+
+### Wall 32: the walk to a pillar's foot without its blocks (lane 1; fixed)
+- **What happened:**
+  - From 1,820 the gate of wall 30 held ("no climb: too few blocks (6 held, 27 wanted)").
+  - Each time E3's restock paused for a strafe (6,000 and 6,720), the crystals' task walked the bot back out to the foot (39, 58, 0) ("walk to", 6,180 and 7,380), 25 from its bunker, only to refuse the climb there.
+  - From the foot, E3's 24 walks to the bunker all failed ("no more walks to the bunker"). The bot sat with no progress for 6,920 ticks by 16,840.
+- **The fix:** no walk to a pillar's foot on the ground without the end stone for its pillar plus `PILLAR_SPARE`. It notes "no walk to the foot: too few blocks" and hands back. The walk on a pillar's top to the stand is never refused. Unit test `no_walk_to_a_pillars_foot_without_its_blocks`.
+- **E3's side:** the restock waits for a lull (4,600 was about 2,800 ticks after the first hand-back), and from the foot it found no walk to the bunker.
