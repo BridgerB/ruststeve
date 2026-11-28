@@ -34,6 +34,11 @@ pub const METRES_PER_POINT: f64 = 40.0;
 /// Blocks ahead along the facing read before a sprint (`[policy] look_ahead`: a tick's sprint
 /// move, the coast after release and half the body's width make 0.92 blocks).
 pub const LOOK_AHEAD: i32 = 2;
+/// Ticks a refusal holds before the sprint is asked again (`[policy] hold_ticks`): a sprint
+/// stopped and started each tick sends a `player_command` pair a tick (CI 46120536785), and the
+/// sprint's speed takes about five ticks to build (0.546⁵ of the walk's left), so a second is
+/// four builds.
+pub const HOLD_TICKS: u64 = 20;
 
 /// The kind of move this tick, as the task in hand makes it: a closed set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +89,9 @@ pub enum Refusal {
     Footing,
     /// A cell ahead not loaded.
     Unseen,
+    /// Walking into a wall (a collision that is not minor), which stops a sprint
+    /// (`LocalPlayer.shouldStopRunSprinting`): not asked again until the hold is out.
+    Wall,
     /// A step-by-step move.
     Path(Step),
 }
@@ -101,6 +109,7 @@ impl Refusal {
             Refusal::Swim => "swim",
             Refusal::Footing => "footing",
             Refusal::Unseen => "unseen",
+            Refusal::Wall => "wall",
             Refusal::Path(Step::Bridge) => "bridge",
             Refusal::Path(Step::Sneak) => "sneak",
             Refusal::Path(Step::Stairs) => "stairs",
@@ -265,6 +274,9 @@ pub struct PaceState {
     pub last: bool,
     pub sprint_ticks: u64,
     pub refused_ticks: u64,
+    /// No sprint is asked before this tick: the last refusal's hold (`HOLD_TICKS`).
+    #[serde(default)]
+    pub held_until: u64,
 }
 
 impl Plan {
@@ -331,8 +343,25 @@ impl Plan {
         let verdict = match judge(w, hungry_below, pace, &c) {
             // The ground ahead is read from the ground; in a jump the last answer holds.
             Verdict::Refused(Refusal::Drop) if airborne && self.pace.last => Verdict::Sprint,
+            // Into a wall: the body stops the sprint; asking again would start it each tick.
+            Verdict::Sprint
+                if w.body
+                    .is_some_and(|b| b.horizontal_collision && !b.minor_horizontal_collision) =>
+            {
+                Verdict::Refused(Refusal::Wall)
+            }
             v => v,
         };
+        if let Verdict::Refused(_) = verdict {
+            self.pace.held_until = tick + HOLD_TICKS;
+        }
+        // A refusal holds: no sprint asked until it is out, and nothing more noted.
+        if verdict == Verdict::Sprint && tick < self.pace.held_until {
+            c.sprint = false;
+            self.pace.last = false;
+            self.pace.refused_ticks += 1;
+            return c;
+        }
         c.sprint = verdict == Verdict::Sprint;
         self.pace.last = c.sprint;
         let points = points_to_spend(w.player.food, w.player.saturation, hungry_below);
@@ -609,7 +638,7 @@ mod tests {
     /// walk on plain ground sprints and notes it once.
     #[test]
     fn the_gate_notes_a_begun_sprint_and_a_refusal_once() {
-        let w = flat();
+        let mut w = flat();
         let mut plan = Plan::new(crate::Aim::Table);
         let mut walk = crate::walk::Walk::new(
             (0, 64, 40),
@@ -625,14 +654,66 @@ mod tests {
         }
         walk.more.step = None;
         plan.task = Task::ToLog(walk);
-        for _ in 0..3 {
-            let c = plan.pace_gate(&w, ahead());
-            assert!(c.sprint);
+        // The bridge's refusal holds `HOLD_TICKS`: plain ground walks until it is out.
+        for t in 1..HOLD_TICKS {
+            w.ticks = t;
+            assert!(!plan.pace_gate(&w, ahead()).sprint, "held at {t}");
+        }
+        for t in HOLD_TICKS..HOLD_TICKS + 3 {
+            w.ticks = t;
+            assert!(plan.pace_gate(&w, ahead()).sprint, "out at {t}");
         }
         let whats: Vec<&str> = plan.events.iter().map(|e| e.what.as_str()).collect();
         assert_eq!(whats, vec!["sprint refused, bridge", "sprint begun, walk"]);
         assert_eq!(plan.pace.sprint_ticks, 3);
-        assert_eq!(plan.pace.refused_ticks, 3);
+        assert_eq!(plan.pace.refused_ticks, 3 + HOLD_TICKS - 1);
+    }
+
+    /// A straight walk of 40 blocks on flat ground, the walk, the gate and the body's physics run
+    /// together: one start and at most one stop (CI 46120536785: a walk paused at each waypoint,
+    /// and the body stopped and started its sprint every few ticks).
+    #[test]
+    fn a_straight_walk_starts_its_sprint_once() {
+        let mut w = flat();
+        let target = (0, 64, 40);
+        let mut plan = Plan::new(crate::Aim::Table);
+        let mut walk = crate::walk::Walk::new(
+            target,
+            path::Goal::Block { pos: target },
+            crate::walk::Arrive::Goal,
+            0,
+        );
+        assert!(walk.route_now(&w, 0));
+        let (mut starts, mut stops, mut sprinted) = (0u32, 0u32, 0u64);
+        let mut done = false;
+        for t in 1..400u64 {
+            w.ticks = t;
+            let (c, status) = walk.step(&w, t);
+            if status != crate::walk::TaskStatus::Running {
+                done = status == crate::walk::TaskStatus::Done;
+                break;
+            }
+            plan.task = Task::ToLog(walk.clone());
+            let c = plan.pace_gate(&w, c);
+            let Some(body) = w.body else { break };
+            let next = {
+                let solid = |x, y, z| w.solid(x, y, z);
+                let fluid = |x, y, z| w.fluid(x, y, z);
+                let surface = |x, y, z| w.surface(x, y, z);
+                physics::step_fed(&solid, &fluid, &surface, &body, &c, w.player.food)
+            };
+            match (body.sprinting, next.sprinting) {
+                (false, true) => starts += 1,
+                (true, false) => stops += 1,
+                (true, true) | (false, false) => {}
+            }
+            sprinted += u64::from(next.sprinting);
+            w.body = Some(next);
+        }
+        assert!(done, "the walk arrives");
+        assert_eq!(starts, 1, "{stops} stops, {sprinted} ticks sprinted");
+        assert!(stops <= 1, "{stops} stops");
+        assert!(sprinted > 60, "{sprinted} ticks sprinted");
     }
 
     /// The constants are config/sprint.toml's `[policy]` (and its `[exhaustion]`, which they
@@ -648,6 +729,7 @@ mod tests {
         };
         assert_eq!(get("policy", "metres_per_point"), Some(METRES_PER_POINT));
         assert_eq!(get("policy", "look_ahead"), Some(f64::from(LOOK_AHEAD)));
+        assert_eq!(get("policy", "hold_ticks"), Some(HOLD_TICKS as f64));
         assert_eq!(
             get("policy", "lava_drop"),
             Some(f64::from(crate::walk::LAVA_DROP))

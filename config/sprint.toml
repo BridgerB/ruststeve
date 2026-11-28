@@ -162,3 +162,8 @@ look_ahead = 2
 # A side open this far down to lava is a lava edge: the walk's own `walk::LAVA_DROP`, which its
 # sneak reads, so a sprint is refused wherever the walk would sneak.
 lava_drop = 8
+# Ticks a refusal (or a wall walked into) holds before the sprint is asked again: a sprint
+# stopped and started each tick sends a player_command pair a tick (CI 46120536785), and the
+# sprint's speed builds over about five ticks (the ground inertia 0.546: 0.546^5 = 5% of the gap
+# left), so 20 ticks, a second, is four builds.
+hold_ticks = 20

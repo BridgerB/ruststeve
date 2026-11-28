@@ -561,18 +561,25 @@ impl Walk {
             self.route(w, pos, tick);
             return (Controls::default(), TaskStatus::Running);
         }
-        let Some(next) = self
-            .waypoints
-            .as_ref()
-            .and_then(|w| w.get(self.at))
-            .copied()
-        else {
-            // The route is walked out and the target still out of reach: straight at it.
-            return (toward(body, centre(self.target)), TaskStatus::Running);
-        };
-        let (wx, wy, wz) = next;
-        let wc = [f64::from(wx) + 0.5, f64::from(wy), f64::from(wz) + 0.5];
-        if horizontal(pos, wc) <= WAYPOINT_REACH && (pos[1] - f64::from(wy)).abs() <= 0.5 {
+        // A waypoint reached is a tick with no key held, except while the body sprints: a release
+        // ends a sprint (no forward impulse, `LocalPlayer.shouldStopRunSprinting`), and a walk
+        // paused at each waypoint sent a stop and a start every few ticks (issue 56, CI
+        // 46120536785). A sprinting body steers on to the next waypoint in the same tick.
+        let next = loop {
+            let Some(next) = self
+                .waypoints
+                .as_ref()
+                .and_then(|w| w.get(self.at))
+                .copied()
+            else {
+                // The route is walked out and the target still out of reach: straight at it.
+                return (toward(body, centre(self.target)), TaskStatus::Running);
+            };
+            let (wx, wy, wz) = next;
+            let wc = [f64::from(wx) + 0.5, f64::from(wy), f64::from(wz) + 0.5];
+            if horizontal(pos, wc) > WAYPOINT_REACH || (pos[1] - f64::from(wy)).abs() > 0.5 {
+                break next;
+            }
             self.at += 1;
             self.best_tick = tick;
             // On a far walk's found route a waypoint reached is progress, though the route leads
@@ -581,8 +588,10 @@ impl Walk {
             if self.more.far && self.route == Some(Status::Found) {
                 self.best_distance_at = tick;
             }
-            return (Controls::default(), TaskStatus::Running);
-        }
+            if !body.sprinting {
+                return (Controls::default(), TaskStatus::Running);
+            }
+        };
         if self.more.kinds.get(self.at) == Some(&MoveKind::Bridge)
             && let Some((mut c, status)) = self.bridge(w, body, next, tick)
         {
