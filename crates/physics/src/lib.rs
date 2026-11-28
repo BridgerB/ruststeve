@@ -88,38 +88,50 @@ pub fn ground_acceleration() -> f64 {
     0.1 * (0.16277136 / GROUND_INERTIA.powi(3))
 }
 
+// The sprint's numbers are config/sprint.toml's (S1's javap of the 26.1.2 jars, probe
+// 46115253148), mirrored as constants because the core reads no files; the test
+// `the_constants_are_config_sprint_toml` holds them equal.
+
 /// The `movement_speed` attribute is multiplied by `1 + this` while sprinting: the sprint
-/// modifier, an `add_multiplied_total` of 0.3 (`LivingEntity.SPEED_MODIFIER_SPRINTING`), so
-/// the ground acceleration is ×1.3 and a steady sprint is 5.612 blocks a second against 4.317.
+/// modifier, an `add_multiplied_total` of 0.3 (`LivingEntity.SPEED_MODIFIER_SPRINTING`,
+/// 0.30000001192092896, the float 0.3), so the ground acceleration is ×1.3 and a steady sprint
+/// is 5.612 blocks a second against 4.317. The walk's 0.1 is the round value, not the float, as
+/// clojurecraft's is; the sprint's 0.3 likewise.
 pub const SPRINT_SPEED_BOOST: f64 = 0.3;
-/// Horizontal input acceleration in the air while sprinting (`Player.getFlyingSpeed`,
-/// 0.025999999F widened): 0.02 × 1.3.
+/// Horizontal input acceleration in the air while sprinting (`Player.getFlyingSpeed`:
+/// `isSprinting ? 0.025999999f : 0.02f`, the float widened).
 pub const SPRINT_AIR_ACCELERATION: f64 = 0.025_999_999_046_325_684;
 /// The horizontal push a jump gets along the yaw while sprinting
-/// (`LivingEntity.jumpFromGround`: `(-sin yaw × 0.2, 0, cos yaw × 0.2)`).
+/// (`LivingEntity.jumpFromGround`: `addDeltaMovement(-sin yaw × 0.2, 0, cos yaw × 0.2)`).
 pub const SPRINT_JUMP_BOOST: f64 = 0.2;
-/// Food at or under this stops a sprint and keeps one from starting
-/// (`LocalPlayer.hasEnoughFoodToSprint`: food > 6).
+/// Food at or under this stops a sprint and refuses one (`FoodData.hasEnoughFood`: food > 6,
+/// `FoodConstants.SPRINT_LEVEL`).
 pub const SPRINT_FOOD_FLOOR: i32 = 6;
 /// A collision whose move still points within this of the facing, in radians, is minor and
 /// does not stop a sprint (`LocalPlayer.isHorizontalCollisionMinor`, 0.13962634F: 8°).
 pub const MINOR_COLLISION_ANGLE: f64 = 0.139_626_339_077_949_52;
+/// Under this squared length, the facing or the move is no direction and a collision is not
+/// minor (`isHorizontalCollisionMinor`'s 1.0E-5F widened).
+pub const MINOR_COLLISION_MIN_SQ: f64 = 9.999_999_747_378_752e-6;
 
-/// Can the body sprint this tick, given its food (`None`: unknown, as in the sim's predictions,
-/// counts as enough)? The client's own rules (`LocalPlayer.aiStep`): the sprint key and forward
-/// held, not sneaking (`isMovingSlowly`, which also keeps the input under the 0.8 a start
-/// needs), food over 6, no horizontal collision last tick unless a minor one, and not in water
-/// unless the eyes are under it. Swimming (the swim pose, which only an underwater sprint
-/// enters) is not modelled, so in water the body never sprints: the rule is the conservative
-/// half of vanilla's. Using an item and blindness are not read: the bot does neither while it
-/// moves.
+/// Does the body sprint this tick, given its food (`None`: unknown, as in a prediction, counts
+/// as enough)? The client's rules (`LocalPlayer.aiStep`, decided before the move), with one
+/// change: the bot's wish (`Controls.sprint`) is a held key whose release stops the sprint,
+/// where a vanilla client's flag holds until a stop rule; the server takes either (it checks no
+/// sprint, config/sprint.toml `[server]`).
+/// - **A start** (not sprinting last tick) also needs no sneak (`isMovingSlowly`).
+/// - **Either**, a start or going on: forward held, sprinting possible, and no horizontal
+///   collision last tick unless a minor one (the stop rules run the same tick, after a start).
+///   A sneak does not stop a sprint: one held into a crouch keeps the flag (at the sneak's
+///   input).
+/// - **Possible**: food over 6, and not in water. Vanilla refuses only shallow water (the eyes
+///   out of it); under it the body swims, a pose not modelled, so here water refuses it all.
+///   Blindness and using an item (which refuse a start) are not read: the bot moves with
+///   neither.
 pub fn sprint_allowed(body: &Body, food: Option<i32>, controls: &Controls) -> bool {
-    controls.sprint
-        && controls.forward
-        && !controls.sneak
-        && food.is_none_or(|f| f > SPRINT_FOOD_FLOOR)
-        && (!body.horizontal_collision || body.minor_horizontal_collision)
-        && !body.in_water
+    let possible = food.is_none_or(|f| f > SPRINT_FOOD_FLOOR) && !body.in_water;
+    let free = !body.horizontal_collision || body.minor_horizontal_collision;
+    controls.sprint && controls.forward && possible && free && (body.sprinting || !controls.sneak)
 }
 
 /// Was a collision minor: does the move the body made still point within 8° of where it faced
@@ -130,9 +142,7 @@ pub fn minor_collision(yaw: f64, input: f64, (dx, dz): (f64, f64)) -> bool {
     let (g, h) = (-input * rad.sin(), input * rad.cos());
     let i = g * g + h * h;
     let j = dx * dx + dz * dz;
-    // vanilla's 1.0E-5F, a float widened.
-    let tiny = f64::from(1.0e-5_f32);
-    if i < tiny || j < tiny {
+    if i < MINOR_COLLISION_MIN_SQ || j < MINOR_COLLISION_MIN_SQ {
         return false;
     }
     ((g * dx + h * dz) / (i * j).sqrt()).acos() < MINOR_COLLISION_ANGLE
@@ -924,7 +934,7 @@ mod tests {
         assert!((run - 5.612).abs() < 0.01, "sprint {run}");
         assert!((run / walk - (1.0 + SPRINT_SPEED_BOOST)).abs() < 1e-9);
         assert!(rb.sprinting && !wb.sprinting);
-        // Sneaking stops it: the pace is the sneak's.
+        // Sneaking refuses a start: the pace is the sneak's.
         let (sneak, sb) = steady(
             &Controls {
                 sneak: true,
@@ -936,6 +946,34 @@ mod tests {
             !sb.sprinting && (sneak - 1.295).abs() < 0.01,
             "sneak {sneak}"
         );
+    }
+
+    #[test]
+    fn a_sprint_held_into_a_crouch_keeps_the_flag_at_the_sneaks_input() {
+        let (_, mut b) = steady(&sprint(), None);
+        let crouch = Controls {
+            sneak: true,
+            ..sprint()
+        };
+        for _ in 0..200 {
+            b = step(&ground, &no_fluid, &b, &crouch);
+        }
+        let before = b.pos[2];
+        b = step(&ground, &no_fluid, &b, &crouch);
+        let pace = (b.pos[2] - before) * 20.0;
+        // 1.295 × 1.3: the sneak's input on the sprint's speed.
+        assert!(b.sprinting && (pace - 1.295 * 1.3).abs() < 0.01, "{pace}");
+        // Letting the wish go stops it (the bot's held key; vanilla's flag would hold).
+        let walked = step(
+            &ground,
+            &no_fluid,
+            &b,
+            &Controls {
+                sprint: false,
+                ..crouch
+            },
+        );
+        assert!(!walked.sprinting);
     }
 
     #[test]
