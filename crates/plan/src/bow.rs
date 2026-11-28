@@ -44,11 +44,12 @@ pub const CRYSTAL_HEIGHT: f64 = 2.0;
 /// No shot from nearer than this to the crystal: its blast (power 6) hurts within 12
 /// (`ServerExplosion`: impact `1 - distance / 12`), and the crystal's blocks fly.
 pub const SAFE_RANGE: f64 = 16.0;
-/// No shot from farther than this: the spread's deviation is 0.0070 of the range an axis (0.50
-/// at 72), against the box's half width 1.3 with the margin; and the entity is sent within 112.
-/// Far enough for a low arc over a tall spike's edge (the orchestrator: from 45 to 70 off a
-/// crystal 25 to 40 up rises shallow enough).
-pub const MAX_RANGE: f64 = 72.0;
+/// No shot from farther than this: the spread's deviation is 0.0070 of the range an axis (0.45
+/// at 64), against the box's half width 1.3 with the margin. Far enough for a low arc over a
+/// tall spike's edge, near enough that the crystal's blast is heard: race 46101740935 had 3
+/// crystals removed at 67 to 72 off with no blast sent, uncounted, and the 60 to 64 band hit 6
+/// of 7 (the orchestrator: an honest count over a few metres).
+pub const MAX_RANGE: f64 = 64.0;
 /// The flight followed at most this many ticks (a low shot of 48 takes about 20; a high arc onto
 /// a tall spike up to about 70).
 pub const FLIGHT_TICKS: usize = 120;
@@ -353,9 +354,7 @@ pub fn stand_columns(centre: [i32; 2], toward: [f64; 2]) -> Vec<[i32; 2]> {
         // 0, +15, -15, +30, -30, ... up to 90.
         let step = f64::from((k + 1) / 2) * 15.0;
         let off = if k % 2 == 1 { step } else { -step };
-        for r in [
-            18.0, 22.0, 26.0, 30.0, 34.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0,
-        ] {
+        for r in [18.0, 22.0, 26.0, 30.0, 34.0, 40.0, 45.0, 50.0, 55.0, 60.0] {
             let a = base + f64::to_radians(off);
             #[allow(clippy::cast_possible_truncation)]
             let c = [
