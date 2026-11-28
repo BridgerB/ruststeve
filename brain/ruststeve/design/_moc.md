@@ -30,6 +30,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[entities-and-inventory]] - how the world folds entities and window 0; what is counted rather than invented.
 - [[memory-sightings]] - watched blocks remembered as sightings with time, only when seen with an exposed face.
 - [[physics]] - the body moves: a bit-exact port of clojurecraft's physics step, the movement packets, zero server corrections live.
+- [[sprint]] - sprinting from the 26.1.2 jars: the speed modifier, the jump boost, the start and stop rules, the command packet, its exhaustion.
 - [[race-and-results]] - the race on runners, starts as data, the stage ladder, case and batch files, coverage, k/n.
 - [[seeds]] - the fixed list of worlds the bot is measured on (config/seeds.toml), `xtask seeds`/`seed`/`server --seed`, and what is fitted to `typecraft` (issue 69).
 - [[relay]] - race.yml across seeds: the seed input, lanes per seed, the per-seed frontier, and the relay's legs from each seed's furthest snapshot (issue 69).
