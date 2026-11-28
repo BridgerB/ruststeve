@@ -2213,7 +2213,10 @@ fn a_climb_begins_only_with_the_dragon_holding_over_64_off() {
         (0, 45.5, true),
         (0, 40.5, false),
         (6, 105.5, false),
-        (1, 105.5, false),
+        // A strafe 64 or more off is calm (race 46099479836: five stops a strafe 73 to 104 off);
+        // nearer, not.
+        (1, 105.5, true),
+        (1, 55.5, false),
     ] {
         let mut w = world(2, [8.5, 64.0, 5.5]);
         water(&mut w);
@@ -2527,9 +2530,9 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
         n.iter().any(|n| n == "spikes: clutch down from (8, 67, 5)"),
         "{n:?}"
     );
-    // Not holding (strafing 70 off, past the strafe's reach): stopped and down, near the stand
-    // or not.
-    dragon(&mut w, [8.5, 67.0, 75.5], 1);
+    // Strafing within its reach (50 off; 64 or more is calm since race 46099479836): stopped and
+    // down, near the stand or not.
+    dragon(&mut w, [8.5, 67.0, 55.5], 1);
     let mut p = Plan::new(Aim::Race);
     tall(&mut p);
     p.spikes.pillars.push(PillarRec {
