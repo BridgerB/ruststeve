@@ -6,7 +6,7 @@ tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
 lastUpdated: 2026-11-28
-verifiedAgainst: ruststeve@32d56fc clojurecraft@be85a92
+verifiedAgainst: ruststeve@6acfbf8 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
@@ -18,6 +18,7 @@ sourceRefs:
   - "ruststeve:crates/bot/tests/cast.rs#fn the_kit_casts_and_lights_a_portal_beside_lava() {"
   - "ruststeve:crates/plan/src/cast.rs#    pub fn fresh(site: Site, tick: u64) -> Self {"
   - "ruststeve:crates/plan/tests/lava_first.rs#fn a_fresh_cast_with_no_lava_bucket_fills_one_first() {"
+  - "ruststeve:crates/plan/tests/one_water.rs#fn one_water_bucket_pours_scoops_back_and_lights() {"
   - "clojurecraft:src/clojurecraft/build.clj#(defn cell-ops"
   - "clojurecraft:src/clojurecraft/build.clj#(defn choose-site"
 related:
@@ -55,6 +56,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
   A source whose scoop failed is never chosen again by that cast, nor by the planner's lava fetch for a while (cast.md wall 1: one source chosen fourteen times, each "routed" then `NoSight`); a scoop routes to stands the exact line sees from first, the sampled ones after. The fetch never walks toward a source already within reach (the walk ended at once and the site went in the same tick).
   A water refill takes first the water sources seen within 7 of the frame's origin, the cast's own poured water (wall 28: a pour that made no obsidian left its water in the room, and memory keeps only surface water).
 - **A place** (walls 30, 31): steps out first when the player's box overlaps the cell (`overlaps`, the box from `physics::aabb`, not the feet's cell), and lays the op's block when held, else the first of `FILLERS` held (clojurecraft's `filler/fillers`: cobblestone, cobbled deepslate, the stones that drop themselves, dirt, the Nether's rock; never gravel or sand). Below y 0 a bot carries cobbled deepslate, and once the kit's 16 cobblestone were laid every place op had failed.
+- **A pour is judged after its answer** (issue 83, `docs/problems/lava-portal.md` wall 6): the server's slot update comes before its block updates, so a pour's bucket shows empty a few ticks before its cell shows the lava or the obsidian. A pour sent less than `ANSWER_TICKS` (60) ago whose bucket is gone waits, the look held, instead of refilling; past it, the refill (own water first) runs and the trail says "<step> pour into <cell> not answered in N ticks, its bucket empty". Race 46152526931 lane 1 (`why`): water poured at 29,338, the bucket empty at 29,344, the obsidian and the water over it at 29,346; in between the refill found no water and the cast ended "out of water after 69 ops", one water bucket held and its water in the room, and the planner's water search walked 18,600 ticks to the cap. With one water bucket every cell is pour, scoop back, pour. Note: "pour answer awaited: <step> pour into <cell>, its bucket empty N ticks after the use", the cast's first one; every ending note's counters end "pour answers awaited N". Unit tests: `crates/plan/tests/one_water.rs` (one water bucket, the cell answered 2 ticks after the slot, ten cells cast and lit). Not raced.
 - **The bucket's aim** at the use takes a face the exact line reaches first (`aim_at_use`); stands and routes keep the sampled line. The pair lit 62 of 210 (00c2c3a) against 58 of 224, and wasted uses fell from 168 to 84 a race.
 - **Defend beside lava** (wall 29): a fight's close-in and a retreat with no route step only where `safe_ahead` finds no lava seen ahead or under it down to 4 and a floor within 4; 15 of 19 lava deaths in one pair came within 300 ticks of a defend.
 - **The sight line** (wall 27): `clear_ray` samples forty points along the eye's line and decides; `exact_ray` (`ray_cells`, every cell the line enters, Amanatides and Woo) is computed beside it at every use and only measured. The exact line is right in the one case read (a sampled line stepped past a grazed corner and the bucket filled nothing), but the pair that let it decide lit 32 of 224 against 56. A cast counts its bucket uses four ways (filled or empty, exact clear or blocked) and names them in its notes, so a race says where the exact line and the server differ.
