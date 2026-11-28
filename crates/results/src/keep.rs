@@ -116,6 +116,13 @@ pub struct ChestCounts {
     pub early_tasks: u64,
     #[serde(default)]
     pub early_ticks: u64,
+    /// The stocking's extra logs for the chest ("stock: +N logs for the home chest (held L,
+    /// want W)"): the N summed, and the ticks from that note to the next "home chest crafted
+    /// early" (the gather the logs added; none when the chest was never crafted).
+    #[serde(default)]
+    pub early_logs: u64,
+    #[serde(default)]
+    pub early_log_ticks: u64,
 }
 
 /// The reason `Plan::early_chest` gives each step of the `carry-chest` row (stash.rs).
@@ -195,6 +202,8 @@ impl ChestCounts {
         self.early_skipped += o.early_skipped;
         self.early_tasks += o.early_tasks;
         self.early_ticks += o.early_ticks;
+        self.early_logs += o.early_logs;
+        self.early_log_ticks += o.early_log_ticks;
     }
 
     /// The early craft's tasks and their ticks, from the task records: each started with the
@@ -231,6 +240,25 @@ impl ChestCounts {
                 plan::TaskRecord::Ended { .. } | plan::TaskRecord::Note { .. } => None,
             })
             .collect();
+        // The extra logs: each note's N, and its ticks to the next crafted-early note.
+        let mut since: Option<u64> = None;
+        for t in tasks {
+            let plan::TaskRecord::Note { at, what, .. } = t else {
+                continue;
+            };
+            if let Some(n) = what
+                .strip_prefix("stock: +")
+                .and_then(|r| r.split_once(" logs for the home chest"))
+                .and_then(|(n, _)| n.parse::<u64>().ok())
+            {
+                self.early_logs += n;
+                since = Some(*at);
+            } else if what.starts_with("home chest crafted early")
+                && let Some(from) = since.take()
+            {
+                self.early_log_ticks += at.saturating_sub(from);
+            }
+        }
         self.early_tasks += ids.len() as u64;
         self.early_ticks += tasks
             .iter()
@@ -244,10 +272,11 @@ impl ChestCounts {
     }
 
     /// The counts as one cell: `stash 1/0 fetch 0/0 gate s1 n0 d0 h0 k0 u0 home 1 respawn b0 s0
-    /// x0 w0 early c1 k0 t3/420` (early: crafted, skipped, its tasks / their ticks).
+    /// x0 w0 early c1 k0 t3/420 +logs 2/300` (early: crafted, skipped, its tasks / their ticks, the
+    /// stocking's extra logs / the ticks they added).
     fn text(&self) -> String {
         format!(
-            "stash {}/{} fetch {}/{} gate s{} n{} d{} h{} k{} u{} home {} respawn b{} s{} x{} w{} early c{} k{} t{}/{}",
+            "stash {}/{} fetch {}/{} gate s{} n{} d{} h{} k{} u{} home {} respawn b{} s{} x{} w{} early c{} k{} t{}/{} +logs {}/{}",
             self.stash_done,
             self.stash_failed,
             self.fetch_done,
@@ -266,7 +295,9 @@ impl ChestCounts {
             self.early_crafted,
             self.early_skipped,
             self.early_tasks,
-            self.early_ticks
+            self.early_ticks,
+            self.early_logs,
+            self.early_log_ticks
         )
     }
 }
@@ -577,7 +608,8 @@ fn row_line(seed: &str, bot: &str, c: &KeepCounts) -> String {
 /// total. Chest cells: stash done/failed, fetch done/failed, the stash gate (s stashed, n nothing
 /// to put away, d danger, h no home chest, k no keep table, u home chest not in memory), home
 /// chests placed, the fetch after a respawn (b begun, s skipped, x not needed, w waits), the
-/// early craft (c crafted, k skipped, t its tasks / their ticks).
+/// early craft (c crafted, k skipped, t its tasks / their ticks, +logs the stocking's extra logs /
+/// the ticks they added).
 pub fn render(runs: &[RunKeep]) -> String {
     let mut out = String::new();
     out.push_str("## keep: drops, wants and dropped-then-wanted (issue 77; the bar is 0)\n\n");
@@ -957,6 +989,7 @@ mod tests {
                 "home chest early craft skipped",
                 "craft:chest would be a trip",
             ),
+            note(60, "stock: +2 logs for the home chest (held 4, want 6)"),
             started(
                 1,
                 10,
@@ -1000,7 +1033,13 @@ mod tests {
             ),
             (1, 1, 3, 48)
         );
-        assert!(c.text().ends_with("early c1 k1 t3/48"), "{}", c.text());
+        // The extra logs: 2, from the note at 60 to the chest crafted at 126.
+        assert_eq!((c.early_logs, c.early_log_ticks), (2, 66));
+        assert!(
+            c.text().ends_with("early c1 k1 t3/48 +logs 2/66"),
+            "{}",
+            c.text()
+        );
         let mut total = ChestCounts::default();
         total.sum(&c);
         total.sum(&c);

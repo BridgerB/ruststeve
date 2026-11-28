@@ -810,6 +810,9 @@ pub struct StashState {
     pub early_tries: u32,
     #[serde(default)]
     pub early_retry_at: u64,
+    /// The stocking's "+N logs for the home chest" note was made.
+    #[serde(default)]
+    pub logs_noted: bool,
     /// The development aim `chest-trip`'s next step.
     #[serde(default)]
     pub trip: TripStep,
@@ -1052,13 +1055,8 @@ impl Plan {
             }
             return None;
         }
-        let before_ready = w.stage_reached.is_none_or(|s| s < Stage::Ready);
         let begun = self.stash.early_spare.is_some();
-        if !overworld
-            || held > 0
-            || (!begun && !before_ready)
-            || self.stash.legs.contains(&"nether".to_owned())
-        {
+        if !overworld || held > 0 || self.stash.legs.contains(&"nether".to_owned()) {
             return None;
         }
         if !begun {
@@ -1099,6 +1097,57 @@ impl Plan {
                 None
             }
         }
+    }
+
+    /// The logs the home chest still wants on top of a stocking's (wall 5, race 46153646063:
+    /// bots from `gear` gathered exactly `READY_LOGS` and never had wood to spare): the chest's
+    /// 8 planks, 12 with no table held or at hand, less the planks held, in logs of 4 planks. 0
+    /// with a home chest placed or carried, the early craft over, outside the overworld, or the
+    /// Nether leg's trigger run. The stocking gathers them on its own trip (`clean_flow` adds
+    /// them to its want); noted once, the first time the logs held reach `READY_LOGS`.
+    pub fn chest_logs(&mut self, w: &World) -> i32 {
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == crate::stronghold::OVERWORLD);
+        let counts = crate::held(w);
+        let carried = counts.get(&ItemKind::Chest).is_some_and(|n| *n > 0);
+        if !overworld
+            || carried
+            || self.stash.home.is_some()
+            || self.stash.early_over
+            || self.stash.legs.contains(&"nether".to_owned())
+        {
+            return 0;
+        }
+        let table = self
+            .at_hand(w, data::BlockKind::CraftingTable, w.ticks)
+            .is_some()
+            || counts.get(&ItemKind::CraftingTable).is_some_and(|n| *n > 0);
+        let want = CHEST_PLANKS + if table { 0 } else { TABLE_PLANKS };
+        let planks = data::generated::tags::item_tag("planks").map_or(0, |items| {
+            items
+                .iter()
+                .map(|k| counts.get(k).copied().unwrap_or(0))
+                .sum::<i32>()
+        });
+        let n = ((want - planks).max(0) + PLANKS_PER_LOG - 1) / PLANKS_PER_LOG;
+        let ready = i32::try_from(world::stage::READY_LOGS).unwrap_or(i32::MAX);
+        let held = crate::logs_held(w);
+        if n > 0 && held >= ready && !self.stash.logs_noted {
+            self.stash.logs_noted = true;
+            self.note(
+                w.ticks,
+                format!(
+                    "stock: +{n} logs for the home chest (held {held}, want {})",
+                    ready + n
+                ),
+                format!(
+                    "the chest's {want} planks past the leg's {ready} logs, {planks} planks held: gathered on this stocking's trip"
+                ),
+            );
+        }
+        n
     }
 
     /// The next step toward a home chest where the bot stands (the `home-chest` row), or why
@@ -1416,6 +1465,10 @@ mod tests {
             let mut m = flat_world(3, 63).unwrap();
             let portal = data::BlockKind::NetherPortal.info().unwrap().default_state;
             m.set_block(PORTAL.0, PORTAL.1, PORTAL.2, portal).unwrap();
+            Self::on(m, give)
+        }
+
+        fn on(m: sim::ModelWorld, give: &[(ItemKind, i32)]) -> Self {
             let mut sim = Sim::new(CONFIG, m).seeded(11);
             for g in give {
                 assert_eq!(sim.survival.give(*g), 0);
@@ -1587,6 +1640,100 @@ mod tests {
             "{what:?}"
         );
         assert!(plan.stash.home.is_none());
+    }
+
+    fn ledger(plan: &Plan) -> String {
+        plan.events
+            .iter()
+            .map(|e| format!("{}: {} ({})", e.tick, e.what, e.why))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Wall 5 (race 46153646063): the ready stocking's log want grows by the chest's logs while
+    /// no home chest is held, carried or placed, noted once in the director's words, and drops
+    /// back to the stocking's own once the chest is held.
+    #[test]
+    fn the_stockings_log_want_grows_by_the_chests_logs_until_one_is_held() {
+        let mut p = Pair::new(&[(ItemKind::OakLog, 4), (ItemKind::CraftingTable, 1)]);
+        let mut plan = planner();
+        assert_eq!(plan.chest_logs(&p.w), 2, "8 planks with a table held");
+        assert_eq!(plan.chest_logs(&p.w), 2, "the same on every ask");
+        let log = ledger(&plan);
+        assert_eq!(
+            log.matches("stock: +2 logs for the home chest (held 4, want 6)")
+                .count(),
+            1,
+            "{log}"
+        );
+        // No table: the table's 4 planks too.
+        let q = Pair::new(&[(ItemKind::OakLog, 4)]);
+        assert_eq!(planner().chest_logs(&q.w), 3);
+        // Planks held count toward it.
+        let r = Pair::new(&[(ItemKind::OakPlanks, 4), (ItemKind::CraftingTable, 1)]);
+        assert_eq!(planner().chest_logs(&r.w), 1);
+        // A chest held: none.
+        assert_eq!(p.sim.survival.give((ItemKind::Chest, 1)), 0);
+        for _ in 0..5 {
+            p.step(Vec::new());
+        }
+        assert_eq!(plan.chest_logs(&p.w), 0, "carried");
+        // A home chest placed, or the Nether leg's trigger run: none.
+        let mut placed = planner();
+        placed.stash.home = Some(("minecraft:overworld".to_owned(), (0, 64, 0)));
+        assert_eq!(placed.chest_logs(&q.w), 0);
+        let mut gone = planner();
+        gone.stash.legs.push("nether".to_owned());
+        assert_eq!(gone.chest_logs(&q.w), 0);
+    }
+
+    /// Wall 5: a geared bot with the kit and the leg's 4 logs, a three-log tree beside it: the
+    /// ready stocking gathers the chest's 2 logs on its own gather, the chest is crafted early
+    /// and carried, and the logs left still make `ready`.
+    #[test]
+    fn a_bot_gathering_its_ready_logs_ends_with_the_chest_carried() {
+        let mut m = flat_world(3, 63).unwrap();
+        let log = data::BlockKind::OakLog.info().unwrap().default_state;
+        for y in 64..67 {
+            m.set_block(4, y, 3, log).unwrap();
+        }
+        let mut p = Pair::on(
+            m,
+            &[
+                (ItemKind::IronHelmet, 1),
+                (ItemKind::IronChestplate, 1),
+                (ItemKind::IronLeggings, 1),
+                (ItemKind::IronSword, 1),
+                (ItemKind::WaterBucket, 1),
+                (ItemKind::Bucket, 1),
+                (ItemKind::FlintAndSteel, 1),
+                (ItemKind::StonePickaxe, 1),
+                (ItemKind::OakLog, 4),
+                (ItemKind::CraftingTable, 1),
+                (ItemKind::CookedBeef, 30),
+            ],
+        );
+        let mut plan = planner();
+        let mut done = false;
+        for _ in 0..6000 {
+            plan.step(&p.w);
+            let acts = plan.take_acts();
+            p.step(acts);
+            if crate::craft::count(&p.w, ItemKind::Chest) > 0 && plan.stash.early_over {
+                done = true;
+                break;
+            }
+        }
+        let text = ledger(&plan);
+        assert!(done, "{text}");
+        assert!(
+            text.contains("stock: +2 logs for the home chest (held 4, want 6)"),
+            "{text}"
+        );
+        assert!(text.contains("home chest crafted early"), "{text}");
+        assert_eq!(crate::craft::count(&p.w, ItemKind::Chest), 1);
+        assert!(crate::logs_held(&p.w) >= 4, "{text}");
+        assert_eq!(plan.chest_logs(&p.w), 0);
     }
 }
 // <<< stash

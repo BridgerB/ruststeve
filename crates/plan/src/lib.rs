@@ -4243,6 +4243,9 @@ impl Plan {
             // from a `ready` snapshot with less than the reserve hunts on the surface again, on
             // the clock below, before it goes down.
             if world::stage::Stage::Ready.holds(w)
+                // >>> stash (issue 77): not ready while the home chest's logs are wanted.
+                && self.chest_logs(w) == 0
+                // <<< stash
                 && if rules.meat_stock > 0 {
                     self.cook_over || (pieces >= rules.meat_stock && !to_cook)
                 } else {
@@ -4278,7 +4281,10 @@ impl Plan {
             rules.stock_logs
         } else {
             world::stage::READY_LOGS as i32
-        };
+        }
+        // >>> stash (issue 77): the home chest's logs, on the stocking's own gather.
+        + self.chest_logs(w);
+        // <<< stash
         // The second stocking, with a meat stock set (overworld-leg wall 4): animals first, for
         // one `provision_ticks` (it begins with a dozen pieces held, and a bot resumed at noon
         // that looked for three would still be hunting after dark); then all the raw meat cooked;
