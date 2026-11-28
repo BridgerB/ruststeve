@@ -327,7 +327,11 @@ fn short_of_fuel_the_cook_runs_as_without_the_pickaxe() {
                 "{held:?}"
             );
             assert_eq!(step(&held, 0), old_step(&held), "{held:?}");
-            assert_ne!(step(&held, 0), "gather", "{held:?}");
+            // The pack at tick 20 needs no gather; five chickens or more need one with or
+            // without the pickaxe (the old cook's own shortfall).
+            if chickens == 0 {
+                assert_ne!(step(&held, 0), "gather", "{held:?}");
+            }
         }
     }
     // Four planks over the cook's need (8,600 held against 7,500): the pickaxe is made.
