@@ -195,6 +195,10 @@ pub struct More {
     pub sneak_ticks: u64,
     #[serde(default)]
     pub sneak_said: bool,
+    /// This tick's move was step by step (a bridge laid, a sneak at an edge): it keeps walking,
+    /// and the pace gate says why (`sprint::Step`, issue 56). Cleared each tick.
+    #[serde(default)]
+    pub step: Option<crate::sprint::Step>,
 }
 
 /// A side of `feet` drops to lava: the cell beside its floor is lava, or open with lava within
@@ -297,6 +301,33 @@ impl Walk {
         )
     }
 
+    /// The kind of move this tick for the pace gate (`sprint`): a step-by-step move if one was
+    /// made, else `plain` (a walk's or an explore's).
+    pub fn pace(&self, plain: crate::sprint::Pace) -> crate::sprint::Pace {
+        match self.more.step {
+            Some(s) => crate::sprint::Pace::Step(s),
+            None => plain,
+        }
+    }
+
+    /// Blocks still to go along the route from `pos` (straight to the target once it is walked
+    /// out): what the pace gate's food budget is read against.
+    pub fn left(&self, pos: [f64; 3]) -> f64 {
+        let ahead = self
+            .waypoints
+            .as_ref()
+            .and_then(|w| w.get(self.at..))
+            .unwrap_or_default();
+        let mut from = pos;
+        let mut sum = 0.0;
+        for c in ahead.iter().chain(ahead.is_empty().then_some(&self.target)) {
+            let to = centre(*c);
+            sum += horizontal(from, to);
+            from = to;
+        }
+        sum
+    }
+
     /// The bridge cells the route still has ahead.
     pub fn bridges_ahead(&self) -> usize {
         self.more
@@ -327,9 +358,10 @@ impl Walk {
     pub fn to_block(target: Cell, tick: u64) -> Self {
         Self::new(
             target,
-            Goal::Near {
+            Goal::Reach {
                 pos: target,
                 range: GOAL_RANGE,
+                rise: PICKUP_RISE,
             },
             Arrive::Reach,
             tick,
@@ -344,7 +376,7 @@ impl Walk {
                 let d =
                     ((eye[0] - c[0]).powi(2) + (eye[1] - c[1]).powi(2) + (eye[2] - c[2]).powi(2))
                         .sqrt();
-                d <= REACH && self.target.1 - pos[1].floor() as i32 <= PICKUP_RISE
+                d <= REACH && path::reach_rise(pos[1].floor() as i32, self.target.1, PICKUP_RISE)
             }
             Arrive::Goal => self.goal.done(path::stand_cell(w, pos)),
         }
@@ -404,6 +436,18 @@ impl Walk {
         };
         let r = path::plan_over(cells, path::feet_cell(pos), &self.goal, nodes, weight);
         self.expanded += u64::from(r.expanded);
+        // A reach walk's goal is its arrival's rule (`Goal::Reach`): a found route that ends
+        // where the arrival cannot hold is a bug of the goal, said if it ever comes.
+        if self.arrive == Arrive::Reach
+            && r.status == Status::Found
+            && let Some(end) = r.waypoints.last()
+            && !path::reach_rise(end.1, self.target.1, PICKUP_RISE)
+        {
+            self.more.said.push((
+                format!("walk: route end {end:?} under its block"),
+                format!("{:?} more than {PICKUP_RISE} over it", self.target),
+            ));
+        }
         self.waypoints = Some(r.waypoints);
         self.more.kinds = r.kinds;
         self.more.from = r.from;
@@ -486,6 +530,7 @@ impl Walk {
             return (Controls::default(), TaskStatus::Failed(Failure::TargetLost));
         };
         let pos = body.pos;
+        self.more.step = None;
         // The progress invariant, every tick.
         let d = horizontal(pos, centre(self.target));
         if d < self.best_distance - PROGRESS_STEP {
@@ -529,18 +574,25 @@ impl Walk {
             self.route(w, pos, tick);
             return (Controls::default(), TaskStatus::Running);
         }
-        let Some(next) = self
-            .waypoints
-            .as_ref()
-            .and_then(|w| w.get(self.at))
-            .copied()
-        else {
-            // The route is walked out and the target still out of reach: straight at it.
-            return (toward(body, centre(self.target)), TaskStatus::Running);
-        };
-        let (wx, wy, wz) = next;
-        let wc = [f64::from(wx) + 0.5, f64::from(wy), f64::from(wz) + 0.5];
-        if horizontal(pos, wc) <= WAYPOINT_REACH && (pos[1] - f64::from(wy)).abs() <= 0.5 {
+        // A waypoint reached is a tick with no key held, except while the body sprints: a release
+        // ends a sprint (no forward impulse, `LocalPlayer.shouldStopRunSprinting`), and a walk
+        // paused at each waypoint sent a stop and a start every few ticks (issue 56, CI
+        // 46120536785). A sprinting body steers on to the next waypoint in the same tick.
+        let next = loop {
+            let Some(next) = self
+                .waypoints
+                .as_ref()
+                .and_then(|w| w.get(self.at))
+                .copied()
+            else {
+                // The route is walked out and the target still out of reach: straight at it.
+                return (toward(body, centre(self.target)), TaskStatus::Running);
+            };
+            let (wx, wy, wz) = next;
+            let wc = [f64::from(wx) + 0.5, f64::from(wy), f64::from(wz) + 0.5];
+            if horizontal(pos, wc) > WAYPOINT_REACH || (pos[1] - f64::from(wy)).abs() > 0.5 {
+                break next;
+            }
             self.at += 1;
             self.best_tick = tick;
             // On a far walk's found route a waypoint reached is progress, though the route leads
@@ -549,12 +601,17 @@ impl Walk {
             if self.more.far && self.route == Some(Status::Found) {
                 self.best_distance_at = tick;
             }
-            return (Controls::default(), TaskStatus::Running);
-        }
+            if !body.sprinting {
+                return (Controls::default(), TaskStatus::Running);
+            }
+        };
         if self.more.kinds.get(self.at) == Some(&MoveKind::Bridge)
-            && let Some(out) = self.bridge(w, body, next, tick)
+            && let Some((mut c, status)) = self.bridge(w, body, next, tick)
         {
-            return self.edge_sneak(w, body, next, out);
+            // Bridging is step by step: never a sprint (issue 56).
+            c.sprint = false;
+            self.more.step = Some(crate::sprint::Step::Bridge);
+            return self.edge_sneak(w, body, next, (c, status));
         }
         // Feet resting in soul sand's own cell (y + 0.875): read from the block, never from the
         // fraction of y, which a body mid-jump or a hair under a whole block also shows.
@@ -590,6 +647,11 @@ impl Walk {
             return (c, status);
         }
         c.sneak = true;
+        // A sneak at an edge keeps walking (issue 56): the gate notes why.
+        c.sprint = false;
+        if self.more.step.is_none() {
+            self.more.step = Some(crate::sprint::Step::Sneak);
+        }
         self.more.sneak_ticks += 1;
         if !self.more.sneak_said {
             self.more.sneak_said = true;
@@ -709,7 +771,9 @@ impl Walk {
     }
 }
 
-/// Toward a point, jumping when blocked (clojurecraft's `toward`).
+/// Toward a point, jumping when blocked (clojurecraft's `toward`). The sprint key is the wish
+/// of a plain move (issue 56): the pace gate (`sprint`) keeps it only where the policy allows,
+/// and a bridge or a sneak clears it.
 fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
     Controls {
         forward: true,
@@ -717,7 +781,7 @@ fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
         sneak: false,
         yaw: yaw_to(body.pos, point),
         pitch: None,
-        sprint: false,
+        sprint: true,
     }
 }
 

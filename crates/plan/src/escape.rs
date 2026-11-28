@@ -797,6 +797,8 @@ impl Escape {
         let flat = ((centre[0] - body.pos[0]).powi(2) + (centre[2] - body.pos[2]).powi(2)).sqrt();
         // On footing over the target's centre: stand still and let the trap clear.
         let there = flat < 0.2 && body.on_ground;
+        // Out of fire on land the escape asks to sprint (issue 56); the pace gate refuses it in
+        // water (no swim model), in lava and toward either, so a swim or a lava escape walks.
         (
             Controls {
                 forward: !there,
@@ -804,7 +806,7 @@ impl Escape {
                 sneak: false,
                 yaw: self.yaw,
                 pitch: None,
-                sprint: false,
+                sprint: !there,
             },
             None,
         )

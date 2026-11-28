@@ -73,6 +73,9 @@ pub mod smelt;
 // >>> E4 (issue 20f): the crystals by pillar and strike.
 pub mod spikes;
 // <<< E4
+// >>> sprint (issue 56): the pace policy.
+pub mod sprint;
+// <<< sprint
 pub mod stairs;
 pub mod station;
 // >>> stronghold (Q4, issue 19f)
@@ -946,6 +949,10 @@ pub struct Plan {
     #[serde(default)]
     pub bow: bow::BowState,
     // <<< E8
+    // >>> sprint (issue 56): the pace gate's state for the task in hand (`sprint::PaceState`).
+    #[serde(default)]
+    pub pace: sprint::PaceState,
+    // <<< sprint
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1094,6 +1101,9 @@ impl Plan {
             // >>> E8
             bow: bow::BowState::default(),
             // <<< E8
+            // >>> sprint
+            pace: sprint::PaceState::default(),
+            // <<< sprint
             acts: Vec::new(),
         }
     }
@@ -1183,7 +1193,10 @@ impl Plan {
         // Never stare (issue 17e): every look the planner sends leaves here, kept off endermen.
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
-        c
+        // >>> sprint (issue 56): the pace gate, last, on the controls as sent. Its notes come after
+        // `track`, so they are never read as a task's reason.
+        self.pace_gate(w, c)
+        // <<< sprint
     }
 
     /// A stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` is
@@ -4068,6 +4081,20 @@ impl Plan {
                 return t;
             }
             self.refuse(log, tick);
+            // >>> sprint (issue 56): a log the reach walk cannot route to only because it is too
+            // high over every cell in range (`Goal::Reach`'s rise rule) is refused alone: the
+            // logs beside it, lower in the same tree, may be reached. A refused area round it hid
+            // the ground-level log at (191, 72, 25) four blocks off in the planner test (CI
+            // 46128712142; main reached it at tick 1293).
+            if self.too_high_only(w, log, tick) {
+                self.note(
+                    tick,
+                    format!("log too high to reach: {log:?}"),
+                    "a route to within range of it exists, none ends with it at most PICKUP_RISE over the feet; the log alone is refused".to_owned(),
+                );
+                continue;
+            }
+            // <<< sprint
             self.refused_areas.push((log, tick + FAILURE_MEMORY_TICKS));
         }
         // No log in view with a way (none seen, or each down a cave, up a cliff, across water):
@@ -6065,6 +6092,23 @@ impl Plan {
             self.refuse(c, tick);
         }
         None
+    }
+
+    /// Did a reach walk to `log` find no route only for its rise rule: does a walk to within the
+    /// same range, height counted loosely (`Goal::Near`), find one?
+    fn too_high_only(&mut self, w: &World, log: Cell, tick: u64) -> bool {
+        let mut near = Walk::new(
+            log,
+            Goal::Near {
+                pos: log,
+                range: walk::GOAL_RANGE,
+            },
+            Arrive::Goal,
+            tick,
+        );
+        let found = near.route_now(w, tick) && near.route == Some(path::Status::Found);
+        self.expanded += near.expanded;
+        found
     }
 
     fn explore_walk(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {

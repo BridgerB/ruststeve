@@ -98,3 +98,21 @@ Every creeper retreat (`defend Creeper … (Retreat)`) in four 8 × 14 iron-kit 
 | no-sprint, vanilla inertia (8643d925) | 46121815604, 46125605993 | 152 | 21 (13.8%) | 10 |
 
 A creeper reaches fuse range about as often in both arms. What changed is getting away once the fuse is lit: 13 of 14 escaped under the old rule, 11 of 21 under vanilla. The old rule's longer hops outran the 30-tick fuse, but that was an unearned edge the server never checked ([[inertia-before-the-move]]). Sprinting is how vanilla wins the distance back. The sprint arm is judged against this table, by the same probe.
+||||||| 8744ed3b
+
+## The pace policy (S5, `plan::sprint`, `config/sprint.toml` `[policy]`)
+Which moves sprint, as a closed `sprint::Pace` read from the task in hand; the gate (`Plan::pace_gate`) runs last in `Plan::step`.
+
+- **Ask**: walks (every task's walk), explores, retreats and the escape's move hold the sprint key. A retreat from a `never_fight` kind always asks.
+- **Food**: a sprint needs a point to spend over `hungry_below` (saturation first), one point per 40 metres (`metres_per_point`). A `never_fight` retreat skips this; the body's floor of 6 still holds.
+- **Ground**: no sprint in water (no swim model) or lava, nor toward or along a lava edge, a missing floor, the void's edge, water, awkward footing or an unloaded cell, `look_ahead` (2) blocks along the facing.
+- **Path**: bridges, sneaks at an edge and stairs or travel tunnels walk; a fight's close-in walks.
+- **Counted**: "sprint begun, <pace>" once a task, "sprint refused, <reason>" once a task for each reason and "sprint restarted, <n>" on each later start (a stop holds `hold_ticks`, doubled per stop up to `max_doublings`, and until `clear_blocks` from where it stopped), in the race summary's notes by kind; `Plan.pace` keeps the run's sprint and refused ticks.
+
+Unverified until a race: the sprint's effect on waypoint following at corners (0.28 a tick against `WAYPOINT_REACH` 0.35), and the first CI and race counts of each note.
+
+### S5 walls found by the sprint (issue 56)
+- **A reach walk's route ended where it could not arrive** (probe 46126047959): `Goal::Near` counts height in its range, the reach arrival allows the block at most 2 over the feet; the planner test's walk stood under a log 3 up and turned on the spot until NoProgress. Fix: `Goal::Reach`, one rule (`path::reach_rise`) for the route's goal and the arrival.
+- **Open: explores go back and forth** (CI 46126753035; old main behaviour): an explore's `Goal::Afar` ends anywhere far enough from its start, so two targets can alternate. A turn away from ground explored (cfc2d366, `explore_walk`'s check in `choose`) was tried and reverted: with every heading spent it waited, and `bot::wood` ran out of its 6,000 ticks (CI 46130367510). It needs a fallback that explores farther, not a wait.
+- **Open: a log only a pillar reaches.** A tree's log 3 or more over the only ground beside it has no `Goal::Reach` route (the arrival needs it at most 2 over the feet), and `stairs_to_log` cuts stairs only for a log roofed below. Such a log is refused and the planner looks for another; a pillar or stairs-up finish is a feature of its own, not issue 56's.
+- **A log too high to reach hid its tree** (CI 46128712142 against main's 8744ed3b, probe 46129792904): with `Goal::Reach` the log at (189, 75, 24) has no route, and `choose` refused it with a 6-block area, which hid the ground-level log (191, 72, 25) main reached at tick 1293. Fix: a log with a `Goal::Near` route and no `Goal::Reach` one is too high only; it is refused alone, noted "log too high to reach". Perception was not the cause: logs are read from the memory's exposed sightings, not the gaze.

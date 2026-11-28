@@ -143,3 +143,36 @@ sprint_jump = 0.2
 # point every 40 metres, and a sprint-jump one every 20 jumps.
 cap = 40.0
 per_point = 4.0
+
+[policy]
+# The planner's pace policy (S5, crates/plan/src/sprint.rs mirrors these as constants; the test
+# `the_policy_is_config_sprint_toml` holds them equal). Which moves sprint is in the code as a
+# closed enum (`sprint::Pace`); only the numbers are here.
+#
+# Metres of flat sprint a food point pays for: [exhaustion] per_point / sprint_per_metre
+# (4.0 / 0.1, FoodData.tick and ServerPlayer.checkMovementStatistics). The budget's unit: a walk
+# sprints while food less hungry_below (goals.toml [survival]), with saturation counting first,
+# leaves at least one point to spend, so sprint alone never takes food under hungry_below.
+metres_per_point = 40.0
+# Blocks ahead of the feet, along the facing, read for lava, water, a drop and footing before a
+# sprint: one tick's steady sprint move (steady_sprint_per_tick 0.2806) plus the coast once the
+# key is let go (0.2806 × 0.546 / (1 − 0.546) = 0.3375, the ground inertia 0.6 × 0.91) plus the
+# body's half width (0.3) is 0.92 blocks; the cells at 1 and 2 cover it with a cell to spare.
+look_ahead = 2
+# A side open this far down to lava is a lava edge: the walk's own `walk::LAVA_DROP`, which its
+# sneak reads, so a sprint is refused wherever the walk would sneak.
+lava_drop = 8
+# Ticks a refusal (or a wall walked into) holds before the sprint is asked again: a sprint
+# stopped and started each tick sends a player_command pair a tick (CI 46120536785), and the
+# sprint's speed builds over about five ticks (the ground inertia 0.546: 0.546^5 = 5% of the gap
+# left), so 20 ticks, a second, is four builds.
+hold_ticks = 20
+# Blocks the body must go from where a sprint was last stopped or refused before a task asks for
+# it again: past look_ahead (2), so the cells that refused it are behind (probe 46122310768: the
+# cast's walk by the lava pool started its sprint 43 times in one task, each 20-tick hold running
+# out beside the same cells).
+clear_blocks = 3.0
+# Each sprint stopped in a task doubles the next hold, at most this many times (20, 40, 80, 160
+# ticks): a task that keeps meeting what stops it sprints less and less, never by a tuned number
+# of its own.
+max_doublings = 3

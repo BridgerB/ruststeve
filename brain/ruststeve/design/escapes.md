@@ -5,8 +5,8 @@ type: reference
 tags: [plan, escape, survival, water, lava, fire, always-rows]
 aliases: [always-rows, escape-water, escape-lava, escape-fire, Escape, Traps, TrapKind, swim-out, flee, bank, notch, lid, Aim::Hold, plan:hold, dry land]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@11f7722 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {"
   - "ruststeve:crates/plan/src/escape.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>) {"
@@ -65,6 +65,9 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 - **No X-ray at the door** (`lava_door_at`): only lava with an open face counts (`escape::exposed`); lava shut in round a one-wide tunnel is never seen (test `lava_shut_in_over_a_tunnel_is_not_at_the_door`).
 - **A notch before another bank**: once a bank is refused, a notch beside the body is tried before the next bank ("notch before another bank at …"), and a notch never opens a cell with water over or beside it (race 45343519424 lane 2 floated 21,000 ticks in an aquifer; test `water_far_from_any_bank_is_notched_beside_the_body`).
 
+
+## Issue 56: the escape's pace
+- The escape's move asks to sprint; the pace gate ([[sprint]]) refuses it in water and lava and toward either, so a swim or a lava escape walks and a fire escape on land runs.
 
 ## See also
 - [[mc-water]] - the water physics the escape relies on.

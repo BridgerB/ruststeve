@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@9b5da2e clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@cfc2d36 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/dragon.rs#pub fn decide(w: &World, ask: &Ask) -> Want {"
@@ -81,6 +81,9 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 ## Issue 19d: the way home
 - `nether_task` asks `home_race_task` first ([[way-home]]): under the race, from 12 pearls in the Nether to fed on the overworld's surface. `Task::Enter` is done in any dimension other than the one it began in (`Enter::from`; none reads as the overworld).
+
+## Issue 56: the pace gate
+- `Plan::step` ends with `pace_gate` (`plan::sprint`), after `track` so its notes are never read as a task's reason: the sprint key as the policy answers ([[sprint]]), with its state in `Plan.pace`.
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.

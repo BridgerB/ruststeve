@@ -1141,6 +1141,8 @@ impl Defend {
                             self.kind, self.foe
                         ));
                     }
+                    // A creeper keeps pace with a walk (issue 56, iron-kit walls 21, 28, 29): the
+                    // step asks to sprint, and the pace gate keeps it off lava, drops and water.
                     return (
                         Controls {
                             forward: true,
@@ -1148,7 +1150,7 @@ impl Defend {
                             sneak: false,
                             yaw,
                             pitch: None,
-                            sprint: false,
+                            sprint: true,
                         },
                         None,
                         DefendStatus::Running,
@@ -1211,6 +1213,9 @@ impl Defend {
                         DefendStatus::Running,
                     );
                 }
+                // Straight away asks to sprint as the route does (issue 56). A strike on the way
+                // ends the sprint (a knock-back hit, `Player.causeExtraKnockback`); the wish is
+                // held, so the body starts it again the next tick.
                 (
                     Controls {
                         forward: true,
@@ -1218,7 +1223,7 @@ impl Defend {
                         sneak: false,
                         yaw: away,
                         pitch: None,
-                        sprint: false,
+                        sprint: true,
                     },
                     strike,
                     DefendStatus::Running,

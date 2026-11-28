@@ -5,8 +5,8 @@ type: reference
 tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@11f7722 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -51,6 +51,11 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 
 ## Issue 20e: the void is an edge (docs/problems/end-island.md)
 In the End a side whose floor neighbour and every cell under it to the dimension's floor are loaded and clear (`end::void_edge`, `end::void_column`) is an edge as lava is: the walk sneaks there, "walk: sneak at a void edge from …" once a walk. Unloaded cells under it are not a known void. The End's bridge is its own ([[end-island]]), not the far walk's bridge move.
+
+## Issue 56: the walk asks to sprint
+- `toward` (and so `follow`) holds the sprint key; the pace gate ([[sprint]], `plan::sprint`) keeps it where the food and the ground allow. A bridge or a sneak at an edge clears it and sets `More.step`, which `Walk::pace` hands the gate for its "sprint refused" note. `Walk::left` is the route still to go.
+- A waypoint reached is a tick with no key held, except while the body sprints: then the walk steers on to the next waypoint the same tick, since a release ends the sprint (CI 46120536785: a stop and a start every few ticks).
+- A walk to within reach (`Walk::to_block`, `Arrive::Reach`) routes to `Goal::Reach`: `Near`'s range and the arrival's own rise rule (`path::reach_rise`, the block at most `PICKUP_RISE` over the feet), one function both read, so the route never ends where the walk cannot arrive. `Goal::Near` counts height in its range and took such a cell (probe 46126047959: the planner test's walk ended at (189, 72, 24) under the log at (189, 75, 24) and turned on the spot until NoProgress). A found route that still ends under its block is noted ("walk: route end under its block").
 
 ## See also
 - [[pathfinding]] - the routes.
