@@ -2128,7 +2128,9 @@ impl Plan {
             && w.dimension
                 .as_ref()
                 .is_some_and(|d| d.name == "minecraft:the_nether")
-            && let Some(slot) = unworn_armour(&w.inventory.slots)
+            // >>> pumpkin (issue 80): the helmet stays off while the pumpkin is wanted.
+            && let Some(slot) = unworn_armour_kept(&w.inventory.slots, self.helmet_off(w))
+        // <<< pumpkin
         {
             self.equip_at = tick + EQUIP_TICKS;
             self.acts.push(world::Act::Click {
@@ -2958,10 +2960,16 @@ impl Plan {
             );
             return;
         }
+        // >>> pumpkin (issue 80): the head's clicks first; the helmet kept off while it is wanted.
+        if self.pumpkin_head(w, tick) {
+            return;
+        }
+        let helmet_off = self.helmet_off(w);
+        // <<< pumpkin
         let worn = |slot: i16| w.inventory.slots.contains_key(&slot);
         let piece = w.inventory.slots.iter().find_map(|(slot, (k, _))| {
             let to = match k {
-                data::ItemKind::IronHelmet => 5,
+                data::ItemKind::IronHelmet if !helmet_off => 5, // pumpkin (issue 80)
                 data::ItemKind::IronChestplate => 6,
                 data::ItemKind::IronLeggings => 7,
                 data::ItemKind::IronBoots => 8,
@@ -6905,6 +6913,26 @@ pub fn unworn_armour(
         (*slot >= 9 && !slots.contains_key(&to)).then_some(*slot)
     })
 }
+
+// >>> pumpkin (issue 80)
+/// `unworn_armour`, with the iron helmet left off when `helmet_off` (the carved pumpkin wanted
+/// on the head, `Plan::helmet_off`).
+pub fn unworn_armour_kept(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+    helmet_off: bool,
+) -> Option<i16> {
+    slots.iter().find_map(|(slot, (k, _))| {
+        let to = match k {
+            data::ItemKind::IronHelmet if !helmet_off => 5,
+            data::ItemKind::IronChestplate => 6,
+            data::ItemKind::IronLeggings => 7,
+            data::ItemKind::IronBoots => 8,
+            _ => return None,
+        };
+        (*slot >= 9 && !slots.contains_key(&to)).then_some(*slot)
+    })
+}
+// <<< pumpkin
 
 /// The main slot to drop, with its kind, when fewer than `JUNK_FREE_SLOTS` are free: the first
 /// stack of a junk kind whose drop still leaves that kind's `keep` held. None with room to spare.

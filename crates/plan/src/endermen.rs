@@ -238,6 +238,14 @@ pub struct EnderState {
     #[serde(default)]
     pub anger_flags: u64,
     // <<< E7
+    // >>> pumpkin (issue 80)
+    /// With the carved pumpkin worn: per enderman, the looks the guard would have bent with the
+    /// head bare (`look::spared`), and all of them in the run.
+    #[serde(default)]
+    pub spared: Vec<(u32, u64)>,
+    #[serde(default)]
+    pub looks_spared: u64,
+    // <<< pumpkin
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
     pub near_misses: Vec<i32>,
@@ -778,6 +786,32 @@ impl Plan {
             return kept;
         }
         // <<< E7
+        // >>> pumpkin (issue 80): the guard as a backstop, counted, never bending.
+        if why.is_none()
+            && let Some((id, why)) = crate::look::spared(w, &c, self.pearls.provoking)
+        {
+            self.ender.looks_spared += 1;
+            if let Some(n) = crate::look::count_spared(&mut self.ender.spared, id) {
+                let at = w
+                    .entities
+                    .get(&i32::try_from(id).unwrap_or(i32::MAX))
+                    .map(|e| path::feet_cell(e.pos));
+                self.note(
+                    w.ticks,
+                    format!("stare spared by the pumpkin: enderman {id} at {at:?}"),
+                    format!(
+                        "pitch {:.0} would {} it bare-headed; {n} looks at it, {} in the run; sent unbent",
+                        c.pitch.unwrap_or(w.player.pitch),
+                        match why {
+                            crate::look::Kept::Stare => "stare at",
+                            crate::look::Kept::Guard => "come within the guard of",
+                        },
+                        self.ender.looks_spared
+                    ),
+                );
+            }
+        }
+        // <<< pumpkin
         if let Some((id, why)) = why {
             self.ender.looks_kept += 1;
             // >>> E7 (issue 20, docs/problems/end-gaze.md): a look kept only by the guard.
