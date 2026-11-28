@@ -41,3 +41,24 @@ The summary: nether 2/2, median 23,300 (41,220 the other); stairs tasks were 16,
 - **Read** (code at 3fbc7a62): the bot's tick seed is made from the clock (`crates/bot/src/lib.rs`, `Seeds(now_ms() | 1)`) and put on every tick event (`world.seed`), but nothing in `crates/plan` or `crates/world` reads it: the planner is deterministic given the world. race.yml restores the same world into every lane and resets one random sequence per lane (`random reset minecraft:entities/enderman`, the drops); there is no per-lane seed or jitter for the bot. What differs between lanes is the server's own randomness (mob spawns, mob moves, the tick timing) and the network's timing.
 - **What it means**: k lanes from one snapshot are k correlated samples of one world, between one sample (when no mob meets the bot) and k (when one does early). A median from 2 x 8 lanes of one snapshot is not a 16-run median.
 - **What this issue does**: judges each fix on several snapshots and worlds, and says so: typecraft `ready` (race-45128866973 lane 6), far-fortress `gear` (race-46127598383 lane 2), and the `gear` snapshots of the other seeds that reached it in #69's relay (G3 stalls). Per-lane spread is reported beside each median. Not fixed here: a per-lane bot seed that the planner reads would be a change to every issue's races (the core reads no randomness today, by design).
+
+## The far-fortress read (race 46144128199, 32d56fc3 = the stack's plan code), 2 lanes x 1 bot from `gear`, goal `race`, cap 48,000
+
+| lane | portal leg | nether | what the files say |
+|---|---|---|---|
+| 1 | own stairs 11,400; cast at (24, -55, 39) south from 18,720, 5,460 ticks, 124 ops, 10 fills, lit 24,180 | 24,620 | first lava fill at 22,040, 3,320 ticks into the cast; 5 stone pickaxes broken in the run |
+| 0 | the same stairs and the same site from 18,700 | never (`Cap`) | cast out of lava after 68 ops with **0 fills** at 21,220 (wall 1 again); "no lava to fetch"; then "hunt lava at" 308 times to the cap, flipping between (23, -7, 35) and (66, -55, 13) (wall 5) |
+
+The two lanes played the same game to tick 18,700 (wall 3) and split at the first lava fill at the same site.
+
+## 4. A refill at a station in reach fails in 46 ticks (race 46144128199 lane 0, 21,173 to 21,219; race 46139640077 lane 0, 31,798 to 32,780)
+
+- **What happened**: lane 0's refill trail: "station at (24, -54, 43) h 1 with 12 sources, feet (24, -54, 42)" then "tunnel level toward (22, -55, 43)", four times, 4 ticks apart, then "no route to Some((22, -55, 43)), 4 tunnels". The feet were one block from the station's stand with 12 sources below it; lane 1 at the same site filled its first bucket (22,040). On typecraft lane 0's cast #212: "220 sources, no station / tunnel level toward (-3, -55, -279)" four times in 1,000 ticks, then no route.
+- **Cause**: not known. The station step gives up and falls to the tunnel within a tick, and the tunnel step ends at once. Read with `why` at 21,173 on lane 0's recording (the stand, the look, the line to each of the 12 sources) before any change.
+- **Wall 1's fix makes this fail sooner, not succeed**: a lava-first fill at this site would run the same ladder before the room.
+
+## 5. The lava hunt flips between two targets (race 46144128199 lane 0, 21,820 to the cap)
+
+- **What happened**: after the site was given up, "hunt lava at (23, -7, 35)" and "hunt lava at (66, -55, 13)" alternated 308 times over 26,000 ticks, each "no site within 48: sources 3 landings 25 refused/spent 100 … beside 4"; the tasks between were stairs and tunnels "no exposed None in sight, at its depth" toward one target and then the other. No `lava at … given up` line: each target's stall count started again each time it came back.
+- **Cause (hypothesis)**: the hunt takes the nearest lava seen (`cast::far_lava`) from the feet each tick, with no target held; two targets at near distances swap as the feet move. The aim stalls (`lava_aims`, `LAVA_AIM_STALLS`) count per target and never reach the limit on either.
+- **Fix (to build)**: the hunt holds its lava target until it is reached, given up by its stalls, or refused, and a target held counts its stalls across the flips. Notes: "lava target held …" and the existing "lava at … given up".
