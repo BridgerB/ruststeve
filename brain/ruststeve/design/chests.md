@@ -89,11 +89,11 @@ Parity run 46120883534 (6b6cc39f, `only=c00-`), on the race seed's vanilla 26.1.
 
 `k01-task` (`plan:chest-trip`, the planner's development aim) runs the planner's own Place, Stash and Fetch tasks. It gives the same kit on a laid 5x5 stone floor with air over it. The planner puts the chest down, stashes 74 cobblestone and 3 string, and fetches them back; the row is met when the fetch ends. It is the first real-server run of the `Stash` and `Fetch` tasks.
 
-The evidence run is parity run 46128707215 (831dbe72, `only=k0 tolerance=3`), on the race seed's vanilla 26.1.2 server. It passed: 3 of 3 rows match in every field. `k00-half` holds 128 cobblestone after, `k00-round` 138 cobblestone and 3 string, and `k01-task` 138 cobblestone and 3 string with the chest put down; real and model agree on all three. The real bot's ledger for `k01-task`, in order:
+The evidence run is parity run 46128707215 (831dbe72, `only=k0 tolerance=3`), on the race seed's vanilla 26.1.2 server. It passed: 3 of 3 rows match in every field. `k00-half` holds 128 cobblestone after, `k00-round` 138 cobblestone and 3 string, and `k01-task` 138 cobblestone and 3 string with the chest put down; real and model agree on all three. The real bot's ledger for `k01-task`, in order (plan ticks). It was read locally, not on CI: the run's artifact downloaded with `gh run download 46128707215`, `parity-46128707215/real/k01-task.real.rsr` decompressed with `zstd -dc`, and the planner's note strings taken out with `strings | grep`. No repository code ran. A CI read with `replay ledger <rsr> --force` on probe.yml would give the same lines with the replay's decoders:
 - `chest trip: place the chest` (tick 29), then `chest trip: the chest at (21, 80, 20) is down`;
 - the stash: `chest opened ... it shows nothing`, `stash moved 64 cobblestone by slot 55`, `stash moved 10 cobblestone by slot 57` (the other 64 kept), `stash moved 3 string by slot 58`, `chest closed ... 74 of 74 cobblestone, 3 of 3 string; it shows 74 cobblestone, 3 string`;
 - the fetch: `chest opened ... it shows 74 cobblestone, 3 string`, `fetch moved 64 cobblestone by slot 0`, `fetch moved 10 cobblestone by slot 1`, `fetch moved 3 string by slot 2`, `chest closed ... it shows nothing`;
-- `chest trip met (1 stashes and 1 fetches ended)` at tick 44.
+- `chest trip met (1 stashes and 1 fetches ended)` at tick 44. The aim met, the planner row ends (`Ending::Cap` on `p.finished()`): the run ended about 60 server ticks in, not at its 600-tick cap.
 
 ## Limits
 - The chest rows and the task row agree with the real server (parity 46128707215). A double chest, a chest across a dimension change, and the planner's own triggers in a race are not yet run on one.
