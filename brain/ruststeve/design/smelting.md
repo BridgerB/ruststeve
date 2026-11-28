@@ -6,7 +6,7 @@ tags: [smelting, furnace, window, sim, plan, parity]
 aliases: [furnace, Furnace, smelt, Smelt, SmeltStage, container_set_data, furnace window, cook, fuel, burn order, lit, smelt rows, half rows]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+verifiedAgainst: ruststeve@9b5da2e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/furnace.rs#pub fn tick(&mut self) -> bool {"
   - "ruststeve:crates/sim/src/survival.rs#fn furnace_quick_move(&mut self, i: usize, l: Loc, stack: Stack) {"

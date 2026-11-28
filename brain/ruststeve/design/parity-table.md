@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 234 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender, the End's rows), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 235 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender, the End's rows), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
 aliases: [end rows, e03-strike, crystal script, lift, summon_nbt, report rows, eye rows, y01-throw, y02-fetch, stronghold field, eye class, burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4
+verifiedAgainst: ruststeve@9b5da2e
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -31,7 +31,7 @@ A sim number counts only after the model agrees with a real server at the same m
 ## Key files
 - `crates/bot/src/bin/capture.rs`, `src/captured.rs`: captured worlds.
 - `crates/bot/src/bin/moments.rs` (`real`, `sim`, `compare`), `crates/results/src/parity.rs`.
-- `config/landings.toml` (11 landings), `config/moments.toml` (234 moments).
+- `config/landings.toml` (11 landings), `config/moments.toml` (235 moments).
 - `.github/workflows/parity.yml`; `crates/bot/src/bin/simrace.rs` and `simrace.yml` for sim races.
 
 ## How it works
@@ -102,7 +102,7 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 - New row fields: `lift` (the start stands that many over the surface; the real side stands it on the ground first, lays the row, then lifts it), `summon_nbt` (more NBT for the real `summon`s: a dragon's phase and yaw), `report` (writes `<id>.<real|sim>.end.txt`: health at each change, hits, blasts, crystals, dragons and endermen with their health, the dimension, the watched cells' full block states). `set` and `fill` take a block with properties as a command does (`iron_bars[north=true,south=true]`).
 - Scripts `crystal:<every>` (strike the nearest crystal by reach), `dragon:<every>:<part>` (strike the dragon's part id + part: the server judges the part's box) and `clutch:<yaw>:<walk>:<above>` (off a pillar, pour the water bucket falling).
 - Rows `e09-pour-D-K` (E4's clutch window): e06's fall onto end stone from D = 8, 15, 25, 40, 60, with one use only (`pour:<yaw>:<walk>:<before>`), on the tick the body's own fall predicts a landing `before` ticks on, or (0, `-reach`) on the first tick the eye is within the bucket's 4.5 of the ground; `-drop` has no bucket. Their real.end report gives, per use, the position it went from (a tick's acts go out before its move, so it is the last position the server heard), the eye over the ground there, the fall's ticks, the landing, the watched cells turning to water and the health lost.
-- Rows `e07-bow-24` and `e07-bow-40` (E8's bow line, `docs/problems/end-bow.md`): an end crystal on bedrock over an obsidian column 24 or 40 east of a bot on a stone floor with a bow and arrows; script `bow:<at>` aims by `plan::bow::aim` (the jar's flight, the low arc through the box's middle), uses the bow at tick `at` and lets go `DRAW_HOLD` (24) ticks later; the real.end report says whether the crystal was removed and what its blast did at that range.
+- Rows `e07-bow-24` and `e07-bow-40` (E8's bow line, `docs/problems/end-bow.md`): an end crystal on bedrock over an obsidian column 24 or 40 east of a bot on a stone floor with a bow and arrows; script `bow:<at>` aims by `plan::bow::aim` (the jar's flight, the low arc through the box's middle), uses the bow at tick `at` and lets go `DRAW_HOLD` (24) ticks later; the real.end report says whether the crystal was removed and what its blast did at that range. `e07-bow-high` (a crystal on a spike 30 high, 20 east, for the high arc down over its top edge): the high arc missed (parity 46099772712, aimed at -83.4) while the low arcs hit 2 of 2, so the high arc is off (`bow::HIGH_ARC` false).
 - `moments --only <prefixes>` and parity.yml's `only` and `tolerance` inputs run a few rows in minutes instead of the table's hour.
 
 ## See also

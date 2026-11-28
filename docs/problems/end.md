@@ -1,6 +1,6 @@
 # Issue 20: from the portal room to the dead dragon and the credits (one bot first)
 
-**Status (2026-11-27): open.** The index for issue 20 (#25). The frontier is `crystals_5` (race 46063334187 lane 8, `config/frontier.toml`); the bow line's frontier is `island` (race 46072716511 lane 1, `config/frontier-bow.toml`). No real bot has yet reached `crystals_1`, `crystals` or `win`; the dragon has been killed only from a development start (dev race 45947481217, lanes 0 and 1, never evidence).
+**Status (2026-11-27): won.** The index for issue 20 (#25). Race 46108868213 lane 6 (`rs-l06-b00`, issue-20-end 9e1cfa0, resumed from the `crystals` frontier) killed the dragon at server tick 16,780 and received the credits at 16,980, answered by the respawn: stage `win`, snapshot `snapshot-win-46108868213-race-46108868213-lane-6.tar.zst`, `config/frontier.toml` moved to it in 9b5da2e. Lanes 2 (dragon dead 20,520, credits 20,740) and 5 of the same race won too. The bow line, merged into issue-20-end, cleared the crystals for that frontier.
 
 ## Needs
 From the frontier, one real bot kills the dragon and receives the credits. The race snapshots it as stage `win`; the snapshot is published and becomes the frontier (`brain/ruststeve/decisions/one-bot-first.md`). Races run `revive=false`.
@@ -22,8 +22,10 @@ One case file from a race resumed at the frontier shows `stage reached: win`, an
 | `island` | 45888713362 lane 0 | `end` |
 | `crystals_5` | 46055583508 lane 2, then 46063334187 lane 8 (a stand the bot can step off) | `island` |
 | `island` (bow line) | 46072716511 lane 1 | `armed` |
+| `crystals_1`, `crystals` (bow line) | 46101740935 lanes 0 and 1 (lane 1: 7 by arrow, 2 struck, 1 bare) | bow `island` |
+| `win` | 46108868213 lane 6 (lanes 2 and 5 too) | `crystals` |
 
-Best so far past `crystals_5`: race 45994686575 lane 5 took 9 of 10 crystals (E9's recount from the ledgers) before its pickaxes wore out.
+Before the bow line, the pillar line's best was 9 of 10 crystals (race 45994686575 lane 5, E9's recount from the ledgers), when its pickaxes wore out.
 
 ## The parts
 Each part has its own wall file, written by its agent. Each wall is one line here; the file has the evidence.
@@ -78,6 +80,7 @@ The portal room, the End of this seed (platform, gap, lip, ten spikes, the fount
 28. A pit 8 deep, a dig on in a cloud; fixed by `PIT_LOOK` 2 and the cloud cutting a dig.
 29. Few pickaxe uses with wood in the pack; fixed by wooden pickaxes at a placed table (`WOOD_RUNS` 3).
 30. "Holding over 64 off" seldom held; fixed by one calm rule, `Plan::calm` (holding, `CALM_FROM` 40 or more off; the closing test dropped after race 46079924222).
+31. Far strafes stopped climbs, and the deep pit again; fixed: a strafe 64 or more off is calm; out of any pit deeper than one by stairs, no dig.
 - Not built: a walk on the island cut by a charge (E5's dodge answers it); a quarry open to the sky.
 
 ### [`end-crystals.md`](end-crystals.md) (E4: pillar and strike, the water ways down)
@@ -129,6 +132,8 @@ The portal room, the End of this seed (platform, gap, lip, ten spikes, the fount
 46. The climb rule stopped almost every climb; fixed (start at `CLIMB_NEAR` 40 holding, go on while holding); the gates now read E3's `Plan::calm`.
 47. A climb 1 under its stand stopped; fixed by `STAND_NEAR` 5 finishing.
 48. Left water never refilled from; fixed by a dry stand and kept records.
+49. Blocks gone with every water descent; fixed by the dig down when calm (its blocks back), water otherwise.
+50. Held for good up a pillar with no water; fixed by `OPEN_HOLD_MAX` 200, then the dig.
 
 ### [`end-dragon.md`](end-dragon.md) (E5: breath, dodges, the fight, the credits)
 1. A provoked enderman's pocket held the bot in the dragon's reach; fixed by `dragon_first_step`.
@@ -181,7 +186,19 @@ The portal room, the End of this seed (platform, gap, lip, ten spikes, the fount
 48. A single angry enderman beat a full-iron bot; fixed by water for any angry one.
 49. The water against endermen went unaccounted; fixed, lost water goes to E4's refill.
 50. The breath's loops ate the time; fixed by one episode with kept refusals and caps.
-- Open: the flame cloud costs about 3.0 each flaming phase; sprint (its own issue); the fight itself is proven only from a development start.
+51. A rise with no room jumped through a perch; fixed by `rise_room` and `RISE_JUMPS_MAX` 4.
+52. Water against endermen left where it could not be found; fixed by looking a block under and take-backs only within reach.
+53. The takeoff flew into the bot it faced; fixed by a dodge from its first tick in the head's lane (`KNOCK_AHEAD` 24).
+54. Recovery stood in a cloud; fixed by `press_out`.
+55. The flame taken as a growing cloud kept the fight off the head; fixed (the flame keeps its own reach).
+56. No fight without a bunker, waits out on the edges; fixed: the fight begins once perched or the site's walks are spent, the wait within `HOME_RING` 25.
+57. Recovery that never heals; fixed by eating under 18 food.
+58. Held by the body through the last flaming turn; fixed: the fourth flaming turn taken as the takeoff.
+59. A long scan's takeoff and meals in the air; meals held off the ground (the long-scan rule taken back after CI).
+60. A recovery that cannot heal; given up after 600 ticks with no food.
+61. Charges hit on the ground; fixed by `charging_at` within 64 and 90 degrees.
+62. Cover by the perch was a trap; fixed: by the perch no notch begun, no bunker gone into (`perch_near`).
+- Open: the flame cloud costs about 3.0 each flaming phase; sprint (its own issue). The fight won on a real start in race 46108868213.
 
 ### [`end-model.md`](end-model.md) (E6: parity rows e01 to e06, e09; the synthetic End)
 1. The cover at 2 off is spent by each blast; the wall is rebuilt or re-read before every strike.
@@ -193,14 +210,16 @@ The portal room, the End of this seed (platform, gap, lip, ten spikes, the fount
 The 17 stares of races 45994686575 and 45988967677 were all looks down; fixed by `look::GUARD` (4 tolerances), six eyes judged after the move, no line of sight trusted in the End, `safe_pitch`, and an unbent clutch pour. An angry enderman's stared-at flag is told apart from a stare.
 - Open: the done count (`gaze near 0` on every lane) is read only from the frontier race on the merge; race 46046557927's two lanes had one near miss, the clutch pour as ruled.
 
-### [`end-bow.md`](end-bow.md) (E8: the bow line). Frontier `island` (race 46072716511 lane 1); parity e07 hit 2 of 2.
+### [`end-bow.md`](end-bow.md) (E8: the bow line, merged). It reached `island` (race 46072716511 lane 1), then `crystals_1` and `crystals` (race 46101740935); parity e07 hit 2 of 2 with low arcs.
 1. Every flight from under the crystal read wide; fixed in 8838a9d.
 2. Feathers and string dropped as junk; fixed by keeping them and picking them up.
 3. String scarce by day; fixed by the stronghold's cobwebs (`bow_room_task`).
 4. Cobwebs in reach but no walk; fixed by digging toward them.
 5. The first bows, too few arrows, stranded after; fixed by the room's bow row and the way back to the room.
 6. Three crystals shot from the ground (three hits in three); the rest given up from the bridge and no `bow_armed`; fixed by waiting for the island, retrying stands and `bow_keep`.
-- Open: no lane has reached `bow_armed`; the carved pumpkin is not built.
+7. No stand with a shot at the tall spikes; fixed by far stands (rings to 60) with a low arc; the high arc was tried and turned off (parity e07-bow-high missed).
+8. Every crystal cleared on the bow line (race 46101740935 lane 1: 7 by arrow, 2 struck, 1 bare); `MAX_RANGE` 64 so every blast is heard. The `crystals` frontier.
+- Open: the carved pumpkin is not built.
 
 ### [`end-checkpoints.md`](end-checkpoints.md) (E9: `crystals_5`, `crystals_1`)
 1. The resume transient fired `crystals_5` at tick 40; fixed: a crystal is gone only when destroyed (`crystals_destroyed`), or seen absent for 400 ticks.
@@ -208,8 +227,9 @@ The 17 stares of races 45994686575 and 45988967677 were all looks down; fixed by
 - Risk: a blast out of the bot's hearing is not counted (safe, but can hold a stage back).
 
 ## What is open
-- **`crystals_1`, `crystals` and `win` by a real bot.** The calm rule (island wall 30; crystals walls 46 and 47) is the newest change; its frontier race is the next count.
-- **The fight starts only at `crystals`**: the dragon heals in flight from any standing crystal (dragon wall 45). The fight from `crystals` has not run on a real start.
-- **Resources:** pickaxe uses (island walls 23 and 29), blocks (crystals walls 30 and 35), water buckets (crystals walls 40 and 48).
-- **The bow line** is merged (e713f7d) but has not reached `bow_armed`; whether bow shots replace climbs at scale is unmeasured.
+- **Nothing for the done condition**: `win` is reached and snapshotted. What follows is for after the win.
+- **Rates**: 3 of 15 lanes won from one `crystals` snapshot; the pillar line alone has not cleared the crystals.
+- **After the credits** nothing is a goal: lane 6 ran the End kit again in the overworld and placed and dug back a crafting table 29 times.
+- **Resources:** pickaxe uses (island walls 23 and 29), blocks (crystals walls 30, 35 and 49), water buckets (crystals walls 40 and 48).
+- **Not built:** the carved pumpkin; shallow water standable in the walker (dragon wall 33); sprint.
 - **One world:** every race replays this seed's End; nothing is judged on another.

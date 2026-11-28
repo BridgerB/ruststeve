@@ -6,7 +6,7 @@ tags: [plan, end, crystals, bow, arrow, ballistics]
 aliases: [bow, BowState, bow_task, bow_step, solve_pitch, stand_columns, Shot, the bow line]
 status: draft
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4
+verifiedAgainst: ruststeve@9b5da2e
 sourceRefs:
   - "ruststeve:crates/plan/src/bow.rs#pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Result<Aim, Miss> {"
   - "ruststeve:crates/plan/src/bow.rs#pub fn solve_pitch(flat: f64, rise: f64) -> Option<f64> {"
@@ -30,7 +30,7 @@ The bow line (agent E8, `docs/problems/end-bow.md`): every real player shoots th
 - Iron bars are a full plane to an arrow (`CrossCollisionBlock(2, 16, 2, 16, 16)`), so a caged crystal is never shot.
 
 ## The aim (pure)
-`aim(feet, crystal, blocked)`: refused nearer than 16 (the blast reaches 12) or farther than 64 (so its blast is heard); the low arc first, the high arc (`solve_pitch_high`, down onto the crystal over its spike's edge) only where no low arc is clear (`aim_with`); the yaw to the box's middle; `solve_pitch` scans from 60 down to 80 up for the first pitch whose flight reaches the middle's height at its flat distance, then bisects (the low arc); the flight along the pitch as sent (f32) is followed tick by tick, each segment sampled every 0.1 for a cell `blocked` says stops an arrow (anything but clear air or lava, unloaded included), up to where it meets the grown box. `stand_columns(centre, toward)` gives columns on rings 18 to 40 from the spike, within 90 degrees of the way to the island's middle, that way first.
+`aim(feet, crystal, blocked)`: refused nearer than 16 (the blast reaches 12) or farther than 64 (so its blast is heard); the low arc only: the high arc (`solve_pitch_high`, down onto the crystal over its spike's edge) is built but off (`HIGH_ARC` false: parity e07-bow-high, run 46099772712, aimed at -83.4 and missed while the low arcs hit 2 of 2), so a crystal with no clear low arc waits, then goes to the pillar; the yaw to the box's middle; `solve_pitch` scans from 60 down to 80 up for the first pitch whose flight reaches the middle's height at its flat distance, then bisects (the low arc); the flight along the pitch as sent (f32) is followed tick by tick, each segment sampled every 0.1 for a cell `blocked` says stops an arrow (anything but clear air or lava, unloaded included), up to where it meets the grown box. `stand_columns(centre, toward)` gives columns on rings 18 to 60 from the spike (the far rings give a low arc over a tall spike's edge), within 90 degrees of the way to the island's middle, that way first. `MAX_RANGE` 64 holds because race 46101740935 had 3 crystals removed 67 to 72 off with no blast heard, so uncounted.
 
 ## The shot (`Plan::bow_task`, `Plan::bow_step`)
 - `bow_task` sets `SpikeState::bow_keep` (the open crystals it may still take; `spikes::next` leaves them) and waits off the island (over 60 from the fountain); a crystal with no stand is asked again after 400 ticks. It is asked first at E3's two crystal hand-offs (`end_spikes`, and `open_task` before the end stone stock): with a bow and an arrow, on the ground, health over danger, the open crystals nearest first (caged ones noted and left); a shot from here at any, else a walk to the nearest stand with one for the nearest crystal (6 walks, then it is left to the pillar).
