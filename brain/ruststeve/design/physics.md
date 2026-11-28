@@ -5,8 +5,8 @@ type: reference
 tags: [physics, movement, collision, water, packets, core]
 aliases: [physics crate, step, Body, Controls, sprint, sprint_allowed, step_fed, move_player_pos_rot, movement packets, differential test, server corrections]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@e4b98e1 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@97525c3 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {"
   - "ruststeve:crates/physics/src/lib.rs#pub fn sprint_allowed(body: &Body, food: Option<i32>, controls: &Controls) -> bool {"
@@ -23,6 +23,7 @@ related:
   - "[[world-value]]"
   - "[[recordings]]"
   - "[[sprint]]"
+  - "[[inertia-before-the-move]]"
 ---
 
 # Physics
@@ -42,11 +43,12 @@ The server does not move the player: the client simulates its own movement each 
 - **What to press** arrives as `Event::Controls`, recorded like every event ([[recordings]]), so `replay verify` covers physics. Today `bot --walk square` sends a scripted staircase walk; the planner replaces it (issue 09).
 
 ## Evidence
-- **Differential test** (`crates/physics/tests/differential.rs`): 13 scenarios (flat walk, wall, jump onto a block, carpet, ledge fall, still water, swim up, bank impulse, lava, sneak in water, turning, jump cooldown), 752 ticks, compared with clojurecraft's own `step` run once outside this repository. **Every field is bit-equal**, including the yaw's `sin`/`cos`.
+- **Differential test** (`crates/physics/tests/differential.rs`): 13 scenarios (flat walk, wall, jump onto a block, carpet, ledge fall, still water, swim up, bank impulse, lava, sneak in water, turning, jump cooldown), 752 ticks, compared with clojurecraft's own `step` run once outside this repository. **Every field is bit-equal**, including the yaw's `sin`/`cos`, except where the two inertia rules part ([[inertia-before-the-move]]): the chain is bit-equal on the 6 scenarios that never part and up to the first parting on the 7 listed in `DIVERGING`, and each tick stepped once from clojurecraft's own state (`every_step_from_clojurecraft_state_agrees`) is bit-equal but for the horizontal velocity of a parting tick, which is clojurecraft's times the ratio of the inertias.
 - **Live**: a 30 s staircase walk on a local 26.1.2 server: 34.5 blocks from the start, **0 server corrections** (teleports after the first), `replay verify` 0 mismatches over 5,858 events.
 
 ## Gotchas
 - **No ground, still the status**: a body whose column is not loaded runs no physics but still sends `move_player_status_only` once a second; the server re-centres a player's chunks only on a reported move, so a teleport far from the loaded columns otherwise deadlocks (found by the parity table, [[parity-table]]). A look asked for (`Controls.pitch` set) still goes out there as `move_player_pos_rot` when it changed (issue 20e): the server judges an enderman's stare by the look it holds, which after a teleport into the End is the one it set until a look packet comes (race 45913296602 lane 1: angered on tick 60 of the arrival).
+- **Inertia before the move** (issue 56, [[inertia-before-the-move]]): on land a tick keeps the ground's 0.546 of its horizontal velocity when the body stood on the ground before it moved, else the air's 0.91 (`LivingEntity.travelInAir` reads `onGround()` before the move). clojurecraft read it after the move, so a jump's take-off kept 0.91 and its landing 0.546: a sprint-jump ran at 8.756 blocks a second against vanilla's 7.127.
 - **Vanilla's collision tolerance** (`physics::COLLISION_EPSILON`, 1e-7, from `VoxelShape.collideX`): a face within 1e-7 of the box's own counts as ahead, and the other axes must overlap by more than 1e-7. clojurecraft's port had none, so a box whose edge rounded a hair past a face (-2.3 + 0.3 = -1.9999999999999998) walked into the block and the server corrected it; the server model's 1,000 generated worlds found it ([[server-model]]). The differential against clojurecraft stays bit-equal: its scenarios never sit on that edge.
 - A server correction is a `player_position` after the first: the server's verdict that the client moved wrongly. Counting them is the live test.
 - The world uses the controls' yaw for the look it sends; the pitch is the controls' when set (kept as the player's pitch from then on, and sent with `use_item` too), else the server's.
