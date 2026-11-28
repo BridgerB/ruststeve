@@ -9,8 +9,8 @@
 //!
 //! The read's shape, hand-built: stone to y 63, air from y 64; the frame at (0, 63, 0) facing
 //! south, so the h 1 stand in front of it is (0, 64, 4); a wall at x -1, y 64 and 65, along the
-//! whole span the station searches; lava under the wall's foot at (-1, 63, 4); the pool at x -14
-//! to -2, y 63, open to the air above it.
+//! whole span the station searches; lava under the wall's foot at (-1, 63, 4); the pool's
+//! sources at x -3 and -2, z 2 to 6, y 63, in flowing lava from x -14, open to the air above.
 
 use std::sync::Arc;
 
@@ -64,9 +64,14 @@ fn site() -> Site {
     }
 }
 
-/// The pool, wide enough that no stand on its far side is within the station's span: in the
-/// read the pool's far bank was lava floor too.
+/// The pool's sources, a few at the wall (memory keeps `POOL_CELLS` a chunk column).
 fn pool() -> Vec<Cell> {
+    (2..=6).flat_map(|z| [(-3, 63, z), (-2, 63, z)]).collect()
+}
+
+/// Flowing lava round the sources, wide enough that no stand beyond the pool is within the
+/// station's span (no firm floor): in the read the pool's far bank was lava too.
+fn flowing() -> Vec<Cell> {
     (-4..=16)
         .flat_map(|z| (-14..=-2).map(move |x| (x, 63, z)))
         .collect()
@@ -95,6 +100,13 @@ fn world(wall: BlockKind) -> World {
                 column: Arc::clone(&col),
             }));
         }
+    }
+    // Level 1: the state after the source's (the block's states run by level).
+    for c in flowing() {
+        w.step(&Event::Packet(S2c::BlockUpdate {
+            pos: c,
+            state: state(BlockKind::Lava) + 1,
+        }));
     }
     for c in pool() {
         set(&mut w, c, BlockKind::Lava);
@@ -140,9 +152,7 @@ fn eye(c: Cell) -> [f64; 3] {
 fn the_read_s_stand_sees_nothing_until_the_wall_is_dug() {
     let w = world(BlockKind::Stone);
     let srcs = sources(&w);
-    // The pool's near edge is remembered exposed (memory keeps the nearest within its radius).
-    let edge: Vec<Cell> = (2..=6).flat_map(|z| [(-2, 63, z), (-3, 63, z)]).collect();
-    assert!(edge.iter().all(|c| srcs.contains(c)), "{srcs:?}");
+    assert!(pool().iter().all(|c| srcs.contains(c)), "{srcs:?}");
     // The site chooser's station: the stand by reach alone.
     let st =
         plan::station::station_among(&w, &srcs, frame(), &[], Some(1)).expect("a station by reach");
