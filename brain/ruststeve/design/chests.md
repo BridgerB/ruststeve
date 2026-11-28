@@ -21,6 +21,7 @@ sourceRefs:
   - "ruststeve:config/stash.toml#name = \"nether\""
   - "ruststeve:config/goals.toml#id = \"home-chest\""
   - "ruststeve:crates/plan/tests/stash_planner.rs#fn before_the_nether_the_home_chest_is_made_and_the_surplus_for_the_leg_stashed_then_fetched()"
+  - "ruststeve:config/moments.toml#id = \"k00-half\""
 related:
   - "[[keep-rule]]"
   - "[[ruststeve/design/_moc|Design]]"
@@ -81,6 +82,11 @@ Issue 77. A chest lets the bot leave what it does not need yet and come back for
 - **The development aim `chest-trip`** (`Aim::ChestTrip`, `--goal chest-trip`, a moment's `plan:chest-trip`) is for parity only, never a frontier start nor a race's evidence. It puts the held chest down, stashes `TRIP` (74 of 138 cobblestone held as 64, 64 and 10, and 3 string), then fetches it back, each step through the planner's own `Task::Place`, `Task::Stash` and `Task::Fetch`, each noted (`chest trip: ...`). It is met once the fetch has ended.
 - **Tests** (`plan/tests/stash_planner.rs`): the lists on the compiled-in keep table (`stash_list`, `fetch_list`, `wood_to_spare`, the legs parse). Against the server model: planks and a table held, so the table goes down, the chest is crafted and put down, the table comes back, and the feathers and string are stashed while the stone stays; then a respawn fetches them back. With only the leg's 4 logs, no chest is begun and the skip is noted. The `chest-trip` aim runs place, stash, fetch and ends with the pack as it began.
 
+## Parity rows
+`config/moments.toml` `k00-half` and `k00-round` (`Script::Chest`, `chest:<in>:<out>` in `crates/bot/src/script.rs`). Each gives a chest, two stacks of 64 cobblestone, one of 10 and 3 string. The chest is placed east of the feet and opened. Four inventory stacks are shift-clicked in, then two (half) or four (round) chest slots are shift-clicked out. The outcome's counts show the server's order. In half, the two stacks fetched from chest slots 0 and 1 are the two 64s if the server fills the chest from its start, as the model does. These rows click a fixed sequence and do not run the `Stash`/`Fetch` tasks. **The `Stash` and `Fetch` tasks are unverified on a real server**: only the model test (`plan/tests/stash.rs`) has run them. They get their first real run when the planner runs them.
+
+Parity run 46120883534 (6b6cc39f, `only=c00-`), on the race seed's vanilla 26.1.2 server: real and model agree in every field. `k00-half` (then named `c00-half`) ends with 128 cobblestone held on both sides (the two 64s came back, so the server fills the chest from slot 0 and keeps the 10 in a slot of its own). `k00-round` (then `c00-round`) ends with 138 cobblestone and 3 string on both sides. The run reports FAIL only because `only` was given without a `tolerance`, so the full table's 179 applied to 3 rows; it also took in the older `c00-planks`, which is why the rows were renamed to a `k0` prefix. The evidence run is `-f only=k0 -f tolerance=3`, with the task row `k01-task` (on the planner's dev aim `plan:chest-trip`, 77-stash's) once that aim lands.
+
 ## Limits
-- No real-server run yet. The probe planned for issue 77 places a chest, stashes, fetches and reads the counts back.
+- The chest parity rows agree with the real server (run 46120883534); the Stash and Fetch tasks have not yet run there.
 - The home chest is made at the Nether portal, the first leg with something to stash. A respawn far from it relies on the walk's route there. A walk that fails is noted, and the run goes on without the fetch.
