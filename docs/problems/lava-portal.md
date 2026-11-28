@@ -71,3 +71,12 @@ The two lanes played the same game to tick 18,700 (wall 3) and split at the firs
 - **Cause** (confirmed on the numbers): the pack at tick 20 holds 7,400 fuel ticks (4 logs 4,800, 1 plank 300, 23 sticks over the reserve 2,300); the cook without the pickaxe needs 6,600 (12 meat 2,400, 3 iron 600, the shields' planks 3,600), with it 7,500.
 - **Fix** (21a80115 and 6eaeae28, merged at 36e46dc1): `iron_pickaxes_fuelled` lets a pickaxe through only when the fuel held or made where the bot stands (`home::fuel_ticks_held`) covers the old cook's need plus the pickaxe's smelts and sticks; short of it, `cook_goal_with` is the old cook's row exactly, never a gather for it. Note, once a run: "iron pickaxe at the cook site: skipped, fuel" with the fuel held and both needs. Test `short_of_fuel_the_cook_runs_as_without_the_pickaxe` on this pack.
 - **What it means for wall 2**: on typecraft's `ready` pack the pickaxe is skipped, so wall 2 makes no change there; it fires for a bot holding about a log more than its cook needs.
+
+## The typecraft `gear` read (race 46152526931, 201dfcfe), 2 lanes from race-46130982111 lane 0
+
+Lane 0 never reached `ready` in 48,000 ticks (skeleton fights, the iron search: G3). Lane 1 reached `ready` at 19,540, own stairs from 25,340, cast at (174, 60, -94) south from 27,780, and lost it (wall 6); no portal by the cap.
+
+## 6. A cast ends "out of water" on the tick of its first water pour (race 46152526931 lane 1, 29,320)
+
+- **What happened**: the first lava fill at 29,280; at 29,320 "lava_bucket 1 -> 0", "water_bucket 1 -> 0", "bucket 0 -> 2" and in the same tick "cast out of water after 69 ops, at :pour :water … [:block [175 60 -94] :obsidian]; buckets water 0 lava 0 empty 2". The bot held one water bucket (the `ready` row asks one). The op is done only when its cell shows obsidian; the cell did not yet, and with no water bucket the cast ended before the scoop-back that would have refilled it. The planner's water fetch then walked toward pools it never reached ("walk toward water at (209, 62, -113) (a pool within 96, none within 24)", "explore to (164, 25, -97) failed: NoPath") for 18,600 ticks to the cap.
+- **Cause (hypothesis)**: the out-of-water check runs before the pour's answer (the obsidian, or the water placed) has come back from the server; the cast's own water, a block away, is the refill that should come first. Read with `why` at 29,300 to 29,340 on lane 1's recording before any change.
