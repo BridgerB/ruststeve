@@ -1469,7 +1469,22 @@ mod tests {
         }
 
         fn on(m: sim::ModelWorld, give: &[(ItemKind, i32)]) -> Self {
+            Self::wearing(m, give, &[])
+        }
+
+        /// Joined with armour already worn in window 0's slots 5 to 8 (the model has no
+        /// armour equip, so a planner's `equip` would only churn).
+        fn wearing(
+            m: sim::ModelWorld,
+            give: &[(ItemKind, i32)],
+            worn: &[(usize, ItemKind)],
+        ) -> Self {
             let mut sim = Sim::new(CONFIG, m).seeded(11);
+            for (slot, k) in worn {
+                if let Some(s) = sim.survival.slots.get_mut(*slot) {
+                    *s = Some((*k, 1));
+                }
+            }
             for g in give {
                 assert_eq!(sim.survival.give(*g), 0);
             }
@@ -1694,15 +1709,13 @@ mod tests {
     fn a_bot_gathering_its_ready_logs_ends_with_the_chest_carried() {
         let mut m = flat_world(3, 63).unwrap();
         let log = data::BlockKind::OakLog.info().unwrap().default_state;
+        // In reach of the spawn (0.5, 64, 0.5): the gather is a dig, no walk.
         for y in 64..67 {
-            m.set_block(4, y, 3, log).unwrap();
+            m.set_block(2, y, 0, log).unwrap();
         }
-        let mut p = Pair::on(
+        let mut p = Pair::wearing(
             m,
             &[
-                (ItemKind::IronHelmet, 1),
-                (ItemKind::IronChestplate, 1),
-                (ItemKind::IronLeggings, 1),
                 (ItemKind::IronSword, 1),
                 (ItemKind::WaterBucket, 1),
                 (ItemKind::Bucket, 1),
@@ -1711,6 +1724,11 @@ mod tests {
                 (ItemKind::OakLog, 4),
                 (ItemKind::CraftingTable, 1),
                 (ItemKind::CookedBeef, 30),
+            ],
+            &[
+                (5, ItemKind::IronHelmet),
+                (6, ItemKind::IronChestplate),
+                (7, ItemKind::IronLeggings),
             ],
         );
         let mut plan = planner();
