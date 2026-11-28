@@ -120,3 +120,48 @@ None is fixed here. They are the generality backlog for after #69.
 - **`world::stage::ROOM_HALF`, `ROOM_BELOW`, `ROOM_ABOVE`.** These come from the portal room's template (`StrongholdPieces$PortalRoom`), checked on the `typecraft` room. The template is the same on every seed, and the box is symmetric on its short axis, so it holds whichever way a room faces.
 - **`config/race.toml` `seed = "typecraft"`.** This is the race seed, the default every server uses without `--seed`. `config/seeds.toml` starts with it, and a unit test holds the two equal.
 - **Comments and fitted thresholds.** Many plan constants cite a `typecraft` race for their size: `[fortress_way] reach` 250, `[portal_way] reach` 120, `home.portal_chunks` 48 ("past the forest's 475 from the portal"). They are distances, not places. On another seed they may be too short or too long, which shows up as a stall, not a wrong heading. They are listed here so a stall at the way home is read with them in mind.
+
+## General walls: on every seed, not a value fitted to `typecraft`
+These come from the full relay on the seeds baseline: issue-69-seeds at 4a1bda89 (integration CI 46122448225). It plays the bot as it was before #56 (sprint). The branch carries only #56's results reporting (S6) and its measurement docs (S1). The relay runs `race.yml` with `seed=all relay=true`: 1 lane a seed, 14 bots, `start=spawn`, `goal=race`, cap 36,000, legs 8. Its first leg is race 46124595679. None of these walls is fixed in #69.
+
+### G1. The opening hunt: 18,000 ticks looking for animals at food under 48
+- **Where:**
+  - `crates/plan/src/lib.rs:4270`: `let look = rules.provision_ticks * if first { 3 } else { 1 };` and the explore reason at `:4273`;
+  - `config/goals.toml:343` `food_reserve = 48`;
+  - `config/goals.toml:370` `provision_ticks = 6000`.
+- **Read by:** the first stocking, at stage `log` → `table`. With food points under `food_reserve`, it explores for animals for up to `provision_ticks * 3` = 18,000 ticks before it gives up and goes on to the table.
+- **On every seed:** the bot spends 15 game minutes of every opening hunting. On the kept seeds it finds little or nothing. The table then comes at the same tick on every world:
+
+  | seed | median run ticks to `table` (k/n) | first snapshot's `table`, game ticks |
+  |---|---|---|
+  | typecraft | 18,680 (12/14) | 6,343 |
+  | badlands | 18,340 (6/14) | 18,446 |
+  | cold | 18,520 (10/14) | 18,477 |
+  | far-fortress | 18,500 (14/14) | 18,510 |
+  | far-stronghold | 18,580 (8/14) | 18,640 |
+  | jungle | 18,860 (14/14) | 18,249 |
+  | pale-garden | 18,840 (14/14) | 18,465 |
+
+- **Shows as (the ledger of rs-l04-b00, cold, race 46124595679 lane 4):**
+  ```text
+      1860 start #31 explore: explore toward (54, 69, 41) (provisions 0 of 48: look for animals)
+     18000 start #105 explore: explore toward (-62, 64, -109) (provisions 0 of 48: look for animals)
+     18220 note stocked (12 logs and 0 food points held after 18184 ticks)
+     18520 stage table
+  ```
+- **Needs:** a hunt that ends on its own progress (animals seen, food gained per tick spent) instead of a fixed clock. Or the table and the stone tools first, with food gathered while the bot goes on. This is backlog for #78 (food).
+
+### G2. shore: no log reached from a stony shore, drowned
+- **Seed:** `shore` (value 11, stony shore 64 from a warm ocean).
+- **Where it stalled:** stage `in_world`, never `log`. All 14 counted runs ended there.
+- **What the bots did:**
+  - Every run's last task was `walk-to-log: walk to log (157, 104, -26) (the nearest log in view at least 0 blocks from the start, with a route)`. That is a tree high up the shore's hills.
+  - 9 runs ended at the cap still on that walk (`cap | walk to log … | the nearest log in view …, with a route` x9).
+  - 5 were killed by drowned with tridents on the way (`death death.attack.trident drowned | walk to log …` x5).
+- **Needs:**
+  - a walk to the first log that leaves the water's edge;
+  - a route that does not run along the shore at night;
+  - a progress invariant on the walk-to-log, so the bot gives up a target it gets no closer to and picks another log.
+
+  This is backlog for #71 (swim) and the water walk.
+- **The relay:** shore left the relay after leg 1 (`relay-shore.toml`: stage `spawn`, `stalled = true`).
