@@ -23,7 +23,7 @@ use results::Source;
 use results::config::RaceConfig;
 use results::parity::{
     EyeOutcome, FramesOutcome, Health, Landings, MobOutcome, Moment, MomentResult, Moments,
-    Outcome, compare, render,
+    Outcome, compare_within, position_tolerances, render,
 };
 use world::World;
 
@@ -1445,9 +1445,12 @@ fn compare_cmd(a: &Args) -> Result<bool, String> {
     let [real_dir, sim_dir] = a.rest.as_slice() else {
         return Err("compare <real dir> <sim dir>".to_owned());
     };
-    let rows = compare(
+    // The rows with a position tolerance compare where the bodies ended too (issue 56).
+    let within = position_tolerances(&Moments::read(&a.moments)?);
+    let rows = compare_within(
         &read_dir(Path::new(real_dir))?,
         &read_dir(Path::new(sim_dir))?,
+        &within,
     );
     let (text, pass) = render(&rows, a.tolerance);
     print!("{text}");

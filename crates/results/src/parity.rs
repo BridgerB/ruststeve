@@ -97,6 +97,11 @@ pub struct Moment {
     /// health, and the full block states of the `watch` cells at the end.
     #[serde(default)]
     pub report: bool,
+    /// Blocks the real and sim bodies may end apart (issue 56): a row that has one compares the
+    /// final position too, not only the floored cell, so an error of a jump's or a ledge's
+    /// inertia cannot hide inside a block. The rows give their own, each with its source.
+    #[serde(default)]
+    pub position_tolerance: Option<f64>,
 }
 
 fn yes() -> bool {
@@ -251,14 +256,42 @@ pub struct Row {
     pub sim: Option<Outcome>,
     /// Field names that differ; empty when the classes match.
     pub differ: Vec<&'static str>,
+    /// For a row with a position tolerance, how far apart the real and sim bodies ended, in
+    /// blocks (`None` without one, or with a side's position missing).
+    pub gap: Option<f64>,
 }
 
+/// The table's rows, comparing the outcome classes field by field.
 pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
+    compare_within(real, sim, &BTreeMap::new())
+}
+
+/// The rows' position tolerances, by moment id (`Moment::position_tolerance`).
+pub fn position_tolerances(m: &Moments) -> BTreeMap<String, f64> {
+    m.moment
+        .iter()
+        .filter_map(|m| m.position_tolerance.map(|t| (m.id.clone(), t)))
+        .collect()
+}
+
+/// `compare`, and a row with a tolerance in `within` also differs in `position` when its real
+/// and sim bodies ended further apart than that, or a side has no position.
+pub fn compare_within(
+    real: &[MomentResult],
+    sim: &[MomentResult],
+    within: &BTreeMap<String, f64>,
+) -> Vec<Row> {
     let by = |rs: &[MomentResult]| -> BTreeMap<String, Option<Outcome>> {
         rs.iter()
             .map(|r| (r.moment.clone(), r.outcome.clone()))
             .collect()
     };
+    let pos = |rs: &[MomentResult]| -> BTreeMap<String, [f64; 3]> {
+        rs.iter()
+            .filter_map(|r| r.final_pos.map(|p| (r.moment.clone(), p)))
+            .collect()
+    };
+    let (rp, sp) = (pos(real), pos(sim));
     let (r, s) = (by(real), by(sim));
     let ids: std::collections::BTreeSet<&String> = r.keys().chain(s.keys()).collect();
     ids.into_iter()
@@ -285,11 +318,28 @@ pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {
                 .collect(),
                 _ => vec!["missing"],
             };
+            let gap = match (rp.get(id), sp.get(id)) {
+                (Some(a), Some(b)) if within.contains_key(id) => Some(
+                    a.iter()
+                        .zip(b)
+                        .map(|(x, y)| (x - y) * (x - y))
+                        .sum::<f64>()
+                        .sqrt(),
+                ),
+                _ => None,
+            };
+            let far = within.get(id).is_some_and(|t| gap.is_none_or(|g| g > *t));
+            let differ = if far {
+                differ.into_iter().chain(["position"]).collect()
+            } else {
+                differ
+            };
             Row {
                 moment: id.clone(),
                 real,
                 sim,
                 differ,
+                gap,
             }
         })
         .collect()
@@ -373,7 +423,7 @@ pub fn render(rows: &[Row], tolerance: usize) -> (String, bool) {
                 "-".to_owned()
             } else {
                 r.differ.join(", ")
-            }
+            } + &r.gap.map_or_else(String::new, |g| format!(" (gap {g:.3})"))
         ));
     }
     let mut per_field: BTreeMap<&str, usize> = BTreeMap::new();

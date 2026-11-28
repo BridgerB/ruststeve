@@ -717,6 +717,7 @@ fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
         sneak: false,
         yaw: yaw_to(body.pos, point),
         pitch: None,
+        sprint: false,
     }
 }
 

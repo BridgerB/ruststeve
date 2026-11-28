@@ -6,7 +6,7 @@ tags: [decision, observability, coverage, ledger, senses]
 aliases: [observe first, full observability, the coverage gate, no blind spots]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4
+verifiedAgainst: ruststeve@36b9952
 sourceRefs:
   - "ruststeve:crates/results/src/observe.rs#fn every_clientbound_packet_is_classified() {"
   - "ruststeve:crates/observe/src/lib.rs#pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {"
@@ -36,4 +36,5 @@ Before 16e: about 37 of 141 play packets decoded (2.5 million thrown away in one
 - Issue 18b adds the hunt's facts before the hunt is built: anger, blows, deaths, pearls dropped and picked ([[race-and-results]]).
 - Issue 19b adds the eyes' and the stronghold's before they are built: `EyeThrown` (an eye of ender appearing within 4 of the bot, with its spawn velocity's heading from `add_entity`), `EyeFlight` (first and last position and the heading between, told when the eye is removed), `EyeEnded` (dropped when an `ender_eye` item appears within 2 of where it ended within 10 ticks, else shattered), `EyePicked`, `FrameSeen` (an end portal frame on record within 128), `SilverfishWoken` (one appearing within 16), and `Dimension` names where the bot came from. The senses row gains the eyes held, frames seen and the dimension outside the Nether.
 - Issue 20b adds the End's: `EyePlaced` (a frame on record turned to hold an eye), `PortalEntered`, `CrystalSeen`, `CrystalGone {how}` (`struck` by the bot's attack within 20 ticks, `blast`, `far`, `gone`), `PillarUp`/`PillarDown` (the feet 3 or more over the lowest ground two columns out, held 40 ticks; back under 2), `Strike {target, reach}` (every attack sent, a dragon part named from its id), `DragonPhase`, `DragonHit {part, health}`, `DragonBlow` (a hit on the bot by the dragon), `Breath` (a cloud within 16 of its edge), `GazeNearMiss` (the look sent within 4 stare tolerances of an enderman's eyes, `stare` inside one), `DragonDead`, `Credits`. The senses row, in the End only: the dragon's health and phase, crystals alive, the distance to the fountain, the feet over the ground (or the void) and endermen within 16; from part 2 also the crystals left as the stages count them (`crystals_left`: the ten spikes less those memory has seen destroyed, so a resume from `crystals_5` carries it).
+- Issue 56 adds the sprint's: `Sprint {on, why}` for each `player_command` sprint report (`why`: `asked`, or the first stop rule that holds: `released`, `no forward`, `sneak`, `food N`, `wall`, `water`, else `rule`), and `SprintServer {on}` when the server's sprint flag for the bot (data index 0, bit 0x08) changes.
 - [[one-bot-first]] - done is one real bot past the stage; observing is how to see why one did not.

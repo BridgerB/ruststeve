@@ -219,7 +219,9 @@ fn key_of(f: &Fact) -> Key {
         | Fact::Breath { .. }
         | Fact::GazeNearMiss { .. }
         | Fact::DragonDead
-        | Fact::Credits { .. } => Key::Other(f.line()),
+        | Fact::Credits { .. }
+        | Fact::SprintServer { .. }
+        | Fact::Sprint { .. } => Key::Other(f.line()),
     }
 }
 
