@@ -184,7 +184,13 @@ fn the_read_s_stand_sees_nothing_until_the_wall_is_dug() {
 #[test]
 fn behind_an_obsidian_wall_no_stand_serves() {
     // Obsidian is never dug: the stands behind it are counted blind and there is no station.
-    let w = world(BlockKind::Obsidian);
+    // Taller than a stand on its top reaches down from (h 3 on a two-high wall saw the pool).
+    let mut w = world(BlockKind::Obsidian);
+    for z in -12..=20 {
+        for y in 66..=70 {
+            set(&mut w, (-1, y, z), BlockKind::Obsidian);
+        }
+    }
     let kept = plan::station::kept(frame());
     let (st, blind) =
         plan::station::serving_station(&w, &sources(&w), frame(), &[], Some(1), &kept);
