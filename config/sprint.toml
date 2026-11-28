@@ -167,3 +167,12 @@ lava_drop = 8
 # sprint's speed builds over about five ticks (the ground inertia 0.546: 0.546^5 = 5% of the gap
 # left), so 20 ticks, a second, is four builds.
 hold_ticks = 20
+# Blocks the body must go from where a sprint was last stopped or refused before a task asks for
+# it again: past look_ahead (2), so the cells that refused it are behind (probe 46122310768: the
+# cast's walk by the lava pool started its sprint 43 times in one task, each 20-tick hold running
+# out beside the same cells).
+clear_blocks = 3.0
+# Each sprint stopped in a task doubles the next hold, at most this many times (20, 40, 80, 160
+# ticks): a task that keeps meeting what stops it sprints less and less, never by a tuned number
+# of its own.
+max_doublings = 3

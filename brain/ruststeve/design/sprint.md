@@ -55,10 +55,10 @@ Every number is in `config/sprint.toml`, each with the class and method it came 
 - **Food**: a move sprints while one point is left to spend over `hungry_below`, saturation counted first (`points_to_spend`), one point per `metres_per_point` (40) of flat sprint. So a sprint alone never takes the food under the line: at `hungry_below` + 1 it sprints 40 metres and walks on.
 - **`never_fight`**: a retreat from one always asks and skips the budget; the body's floor (food 6, `physics::sprint_allowed`) still holds.
 - **Ground**: refused in lava or water (no swim model), and toward or along a lava edge (`walk::lava_edge`, the walk's own sneak rule), a missing floor, the End's void edge, water, footing the physics cannot simulate or an unloaded cell, read `look_ahead` (2) blocks along the facing. In the air the last answer holds.
-- **Hold**: a wall walked into (a collision that is not minor) refuses too, and any refusal holds `hold_ticks` (20) before the sprint is asked again, so a straight walk sends one start and at most one stop.
+- **Hold**: a wall walked into (a collision that is not minor) refuses too, and a stop (a refusal, or the task no longer asking while it sprinted) holds `hold_ticks` (20), doubled for each sprint stopped in the task up to `max_doublings` (3), and until the body is `clear_blocks` (3) from where it stopped. A straight walk sends one start and at most one stop; every later start in a task is noted "sprint restarted, n" (probe 46122310768: the cast's walk by the lava restarted 40 times in one task).
 - **Path**: a bridge, a sneak at an edge and `Task::Stairs` (stairs and travel tunnels) keep walking; a fight's close-in never asks (a sprinting blow is never a critical).
 - **A swing ends a sprint**; the wish is held, so the body starts it again the next tick.
-- **Ledger**: "sprint begun, <pace>" once a task, "sprint refused, <reason>" once a task for each reason, counted in the race summary's notes by kind.
+- **Ledger**: "sprint begun, <pace>" once a task, "sprint refused, <reason>" once a task for each reason, and "sprint restarted, <n>" on each later start in a task, counted in the race summary's notes by kind.
 
 ## Gotchas
 - The plan's "0.1 food per 40 metres" is out by ten: it is one point (half a shank) per 40 metres.

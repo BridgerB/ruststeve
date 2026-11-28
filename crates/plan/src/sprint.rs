@@ -39,6 +39,14 @@ pub const LOOK_AHEAD: i32 = 2;
 /// sprint's speed takes about five ticks to build (0.546⁵ of the walk's left), so a second is
 /// four builds.
 pub const HOLD_TICKS: u64 = 20;
+/// Blocks the body must go from where a sprint was last stopped or refused before it is asked
+/// again in the same task (`[policy] clear_blocks`): past `LOOK_AHEAD`, so the cells that refused
+/// it are behind (probe 46122310768: the cast's walk by the lava restarted its sprint 40 times in
+/// one task, each hold running out beside the same cells).
+pub const CLEAR_BLOCKS: f64 = 3.0;
+/// Each stop in a task doubles the next hold, this many times at most (`[policy] max_doublings`:
+/// 20, 40, 80, 160 ticks).
+pub const MAX_DOUBLINGS: u32 = 3;
 
 /// The kind of move this tick, as the task in hand makes it: a closed set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -277,6 +285,36 @@ pub struct PaceState {
     /// No sprint is asked before this tick: the last refusal's hold (`HOLD_TICKS`).
     #[serde(default)]
     pub held_until: u64,
+    /// Where the body was when the sprint was last stopped or refused in this task: no sprint
+    /// is asked again within `CLEAR_BLOCKS` of it.
+    #[serde(default)]
+    pub stopped_at: Option<[f64; 3]>,
+    /// Sprints stopped in this task (each doubles the hold), and sprints started again after one.
+    #[serde(default)]
+    pub stops: u32,
+    #[serde(default)]
+    pub restarts: u32,
+}
+
+impl PaceState {
+    /// A stop or a refusal at `pos`: the hold, doubled for each sprint already stopped in the
+    /// task when this one ends a sprint.
+    fn stop(&mut self, tick: u64, pos: Option<[f64; 3]>) {
+        if self.last {
+            self.stops += 1;
+        }
+        let doublings = self.stops.saturating_sub(1).min(MAX_DOUBLINGS);
+        self.held_until = tick + (HOLD_TICKS << doublings);
+        self.stopped_at = pos.or(self.stopped_at);
+    }
+
+    /// Is a sprint held back at `pos` on `tick`?
+    fn held(&self, tick: u64, pos: Option<[f64; 3]>) -> bool {
+        let near = self.stopped_at.zip(pos).is_some_and(|(a, b)| {
+            ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt() < CLEAR_BLOCKS
+        });
+        tick < self.held_until || near
+    }
 }
 
 impl Plan {
@@ -352,18 +390,40 @@ impl Plan {
             }
             v => v,
         };
-        if let Verdict::Refused(_) = verdict {
-            self.pace.held_until = tick + HOLD_TICKS;
+        let pos = w.body.map(|b| b.pos);
+        // A refusal, or a sprint ended because the task stopped asking (no forward, a fight), is
+        // a stop: held for a while and until the body is clear of where it was.
+        match verdict {
+            Verdict::Refused(_) => self.pace.stop(tick, pos),
+            Verdict::NotAsked if self.pace.last => self.pace.stop(tick, pos),
+            Verdict::NotAsked | Verdict::Sprint => {}
         }
-        // A refusal holds: no sprint asked until it is out, and nothing more noted.
-        if verdict == Verdict::Sprint && tick < self.pace.held_until {
+        // A stop holds: no sprint asked until it is out, and nothing more noted.
+        if verdict == Verdict::Sprint && self.pace.held(tick, pos) {
             c.sprint = false;
             self.pace.last = false;
             self.pace.refused_ticks += 1;
             return c;
         }
+        let restart = verdict == Verdict::Sprint && !self.pace.last && self.pace.begun;
         c.sprint = verdict == Verdict::Sprint;
         self.pace.last = c.sprint;
+        if restart {
+            self.pace.restarts += 1;
+            self.pace.stopped_at = None;
+            self.note(
+                tick,
+                format!("sprint restarted, {}", self.pace.restarts),
+                format!(
+                    "{} ({}): {} stops in the task, the next hold {} ticks; at {:?}",
+                    self.task.name(),
+                    pace.words(),
+                    self.pace.stops,
+                    HOLD_TICKS << self.pace.stops.min(MAX_DOUBLINGS),
+                    pos.map(path::feet_cell)
+                ),
+            );
+        }
         let points = points_to_spend(w.player.food, w.player.saturation, hungry_below);
         let budget = f64::from(points) * METRES_PER_POINT;
         let left = left.map_or_else(|| "unknown".to_owned(), |l| format!("{l:.0} m"));
@@ -654,11 +714,17 @@ mod tests {
         }
         walk.more.step = None;
         plan.task = Task::ToLog(walk);
-        // The bridge's refusal holds `HOLD_TICKS`: plain ground walks until it is out.
+        // The bridge's refusal holds `HOLD_TICKS`, and the body stands where it was refused: plain
+        // ground walks until both are past.
         for t in 1..HOLD_TICKS {
             w.ticks = t;
             assert!(!plan.pace_gate(&w, ahead()).sprint, "held at {t}");
         }
+        // Out, and clear of where it was refused.
+        w.body = w.body.map(|b| physics::Body {
+            pos: [0.5, 64.0, 0.5 + CLEAR_BLOCKS],
+            ..b
+        });
         for t in HOLD_TICKS..HOLD_TICKS + 3 {
             w.ticks = t;
             assert!(plan.pace_gate(&w, ahead()).sprint, "out at {t}");
@@ -716,6 +782,60 @@ mod tests {
         assert!(sprinted > 60, "{sprinted} ticks sprinted");
     }
 
+    /// Probe 46122310768: a walk stopped by the same cells again and again. A stop (a refusal,
+    /// or the walk not asking while it sprinted) holds until the hold is out and the body is
+    /// `CLEAR_BLOCKS` from where it stopped; each stop doubles the next hold; every restart is
+    /// noted.
+    #[test]
+    fn a_stopped_sprint_waits_to_be_clear_and_each_restart_is_noted() {
+        let mut w = flat();
+        let mut plan = Plan::new(crate::Aim::Table);
+        let walk = crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        );
+        plan.task = Task::ToLog(walk);
+        let at = |w: &mut World, z: f64| {
+            w.body = w.body.map(|b| physics::Body {
+                pos: [0.5, 64.0, z],
+                ..b
+            });
+        };
+        let mut gate = |w: &mut World, t: u64, c: Controls| {
+            w.ticks = t;
+            plan.pace_gate(w, c).sprint
+        };
+        assert!(gate(&mut w, 1, ahead()));
+        // The walk lets go of the key for a tick: a stop, though nothing refused.
+        let off = Controls {
+            forward: false,
+            ..ahead()
+        };
+        assert!(!gate(&mut w, 2, off));
+        // Long after the hold, but standing where it stopped: still held.
+        assert!(!gate(&mut w, 200, ahead()));
+        // Clear of it: started again, and noted.
+        at(&mut w, 0.5 + CLEAR_BLOCKS);
+        assert!(gate(&mut w, 201, ahead()));
+        // The second stop holds twice as long, wherever the body is.
+        assert!(!gate(&mut w, 202, off));
+        at(&mut w, 20.5);
+        assert!(!gate(&mut w, 202 + HOLD_TICKS, ahead()));
+        assert!(gate(&mut w, 202 + 2 * HOLD_TICKS, ahead()));
+        let whats: Vec<&str> = plan.events.iter().map(|e| e.what.as_str()).collect();
+        assert_eq!(
+            whats,
+            vec![
+                "sprint begun, walk",
+                "sprint restarted, 1",
+                "sprint restarted, 2"
+            ]
+        );
+        assert_eq!(plan.pace.stops, 2);
+    }
+
     /// The constants are config/sprint.toml's `[policy]` (and its `[exhaustion]`, which they
     /// come from).
     #[test]
@@ -730,6 +850,11 @@ mod tests {
         assert_eq!(get("policy", "metres_per_point"), Some(METRES_PER_POINT));
         assert_eq!(get("policy", "look_ahead"), Some(f64::from(LOOK_AHEAD)));
         assert_eq!(get("policy", "hold_ticks"), Some(HOLD_TICKS as f64));
+        assert_eq!(get("policy", "clear_blocks"), Some(CLEAR_BLOCKS));
+        assert_eq!(
+            get("policy", "max_doublings"),
+            Some(f64::from(MAX_DOUBLINGS))
+        );
         assert_eq!(
             get("policy", "lava_drop"),
             Some(f64::from(crate::walk::LAVA_DROP))
