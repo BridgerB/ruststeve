@@ -1,0 +1,8 @@
+# The frontier of seed `far-fortress` (issue 69, brain/ruststeve/design/relay.md): the furthest stage a
+# real bot has reached on this world, as a snapshot that race.yml `seed=far-fortress snapshot=frontier`
+# resumes from. Moved by a commit (by the lead) when a bot first passes a stage on this seed.
+stage = "nether"
+tag = "race-46130812202"
+asset = "snapshot-nether-46130812202-race-46130812202-lane-0.tar.zst"
+commit = "4a1bda89"
+how = "relay leg 3 (race 46130812202, 2026-11-28), from leg 2's gear snapshot: the first bot into the Nether at game tick 83,027. Leg 4 (race 46134115367) stalled there 14 of 14: no fortress in view (the nearest is 697 blocks off)."

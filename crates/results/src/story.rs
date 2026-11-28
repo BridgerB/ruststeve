@@ -240,6 +240,31 @@ pub struct Story {
     /// Issue 20b: the run's End, when it placed an eye, entered the End or saw a crystal.
     #[serde(default)]
     pub end: Option<EndCounts>,
+    /// Issue 56: the server tick each stage was first reached (`stage_ticks`), stage order; empty
+    /// in older stories.
+    #[serde(default)]
+    pub stage_ticks: Vec<(world::Stage, u64)>,
+}
+
+/// The tick each stage was first reached, from the ledger's `Fact::Stage` (issue 56): a stage
+/// counts as reached when the stage told is at or past it, so a stage jumped over (a log to a
+/// stone pickaxe in one tick, or a snapshot start's own stages at its first tick) takes the tick
+/// of the jump. A stage lost and held again keeps its first tick. Ticks are the ledger's, the
+/// session's server ticks (`observe::Stamped::at`). A name this build does not know is skipped.
+pub fn stage_ticks(l: &Ledger) -> Vec<(world::Stage, u64)> {
+    let mut first: BTreeMap<world::Stage, u64> = BTreeMap::new();
+    for f in &l.facts {
+        let Fact::Stage { reached } = &f.fact else {
+            continue;
+        };
+        let Some(top) = world::Stage::from_name(reached) else {
+            continue;
+        };
+        for s in world::Stage::ALL.into_iter().filter(|s| *s <= top) {
+            first.entry(s).or_insert(f.at);
+        }
+    }
+    first.into_iter().collect()
 }
 
 /// A run's eyes from its facts and senses rows; `None` when it never held, threw or picked an
@@ -376,6 +401,7 @@ pub fn story(l: &Ledger, rows: &[Senses]) -> Story {
     let mut s = Story {
         eyes: eye_counts(l, rows),
         end: end_counts(l, rows),
+        stage_ticks: stage_ticks(l),
         ..Story::default()
     };
     let all_rows = rows;
@@ -706,6 +732,41 @@ mod tests {
             dropped: 0,
             facts,
         }
+    }
+
+    /// Issue 56: each stage's first tick; a stage jumped over takes the jump's tick, a stage lost
+    /// and held again keeps its first, and an unknown name is skipped.
+    #[test]
+    fn stage_ticks_are_the_first_tick_at_or_past_each_stage() {
+        use world::Stage;
+        let stage = |at: u64, s: &str| Stamped {
+            at,
+            fact: Fact::Stage {
+                reached: s.to_owned(),
+            },
+        };
+        let l = ledger(
+            Vec::new(),
+            vec![
+                stage(5, "in_world"),
+                stage(300, "log"),
+                stage(900, "stone_pickaxe"),
+                stage(1000, "log"),
+                stage(1200, "stone_pickaxe"),
+                stage(1300, "no_such_stage"),
+            ],
+        );
+        assert_eq!(
+            stage_ticks(&l),
+            vec![
+                (Stage::InWorld, 5),
+                (Stage::Log, 300),
+                (Stage::Table, 900),
+                (Stage::StonePickaxe, 900),
+            ]
+        );
+        assert_eq!(story(&l, &[]).stage_ticks, stage_ticks(&l));
+        assert!(stage_ticks(&ledger(Vec::new(), Vec::new())).is_empty());
     }
 
     /// Wall 5: notes that differ in a place, a count or an item are one kind, so a fix's

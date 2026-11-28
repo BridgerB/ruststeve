@@ -98,6 +98,8 @@ jobs:
               continue
             fi
             tar --zstd -xf "races/$tag"/batches-*.tar.zst -C "races/$tag"
+            # Issue 69: the race's seed rows (results seeds --rows), when it wrote them.
+            gh release download "$tag" -p 'seed-rows-*.toml' -D "races/$tag" 2>/dev/null || true
           done < tags.txt
           echo "$(wc -l < tags.txt) races, $skipped left out"
 
@@ -114,6 +116,8 @@ jobs:
             echo '```'
             $i query store/insight batches
             $i query store/insight kn
+            $i query store/insight seeds
+            $i query store/insight stalls
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
