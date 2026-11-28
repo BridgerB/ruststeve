@@ -1,0 +1,218 @@
+# The keep rule (issue 77, brain/ruststeve/design/keep-rule.md): what a full pack drops first.
+# One row per item and context. `needs` lists the stages that need the item and how many:
+# a need counts while the run has not passed its stage (world::stage::Stage, by its results
+# name, such as "bow_armed" or "win"). The count kept is the largest need still counting. An
+# item no counting stage needs is surplus, and so is anything held over that count. Within the
+# count it is needed, and the nearer stage the more. An item with no row is never dropped.
+#
+# `when` is where a row applies (plan::keep::Context, default ["always"]): the old drop gates,
+# kept exactly (lead-77, 2026-11-27: widening them is a later change, judged on races).
+#   always           the [survival] junk list: everywhere but in the overland hut
+#   stronghold_aim   the [stronghold] junk list: the overworld with the stronghold the aim
+#                    (an eye held or the room known)
+#   fortress_tunnel  the [fortress_way] junk list (Q11): the Nether's home leg, tunnel begun
+#   home_leg         the Q8 list: the Nether's home leg, top-up over, tunnel not begun
+# For an item, the first context in that order with a row is the one that counts: the old
+# lists' find-first order.
+#
+# The counts are the goals.toml junk lists' counts (no regression). plan::keep's tests hold
+# them equal, and goals.toml keeps its lists for junk_place and the stone pressing. Change
+# both together. This file is compiled into the planner (include_str!, commit-pinned): an edit
+# needs a rebuild, unlike goals.toml.
+
+# --- always: the [survival] junk list (goals.toml) ---
+
+# 64 cover stone tools, stairs' floors, seals and the cast's placed blocks (blaze wall 13: the
+# full pack that could not hold the bucket). Kept to the end, as the old list did.
+[[item]]
+name = "cobblestone"
+needs = [["win", 64]]
+
+[[item]]
+name = "cobbled_deepslate"
+needs = [["win", 64]]
+
+# The old list's 16 (blaze wall 13).
+[[item]]
+name = "dirt"
+needs = [["win", 16]]
+
+# 16 for the flint redig (E8: the armed pack's 15).
+[[item]]
+name = "gravel"
+needs = [["win", 16]]
+
+# The bow's (E8, race 46047707279 lane 1 dropped every feather of four chickens): 16 feathers
+# and 8 string, kept to the end as the old list did. bow_armed is the bow line's own stage, so
+# they rank as more needed than cobblestone until the bow is made.
+[[item]]
+name = "feather"
+needs = [["bow_armed", 16], ["win", 16]]
+
+[[item]]
+name = "string"
+needs = [["bow_armed", 8], ["win", 8]]
+
+# Never used by any stage (the old list's 0s): blaze wall 13's stone kinds and drops, and the
+# hunt's by-products (overworld-leg wall 10: eggs, wool and the like filled a cook-site pack).
+[[item]]
+name = "andesite"
+
+[[item]]
+name = "diorite"
+
+[[item]]
+name = "granite"
+
+[[item]]
+name = "tuff"
+
+[[item]]
+name = "calcite"
+
+[[item]]
+name = "smooth_basalt"
+
+[[item]]
+name = "raw_copper"
+
+[[item]]
+name = "lapis_lazuli"
+
+[[item]]
+name = "glow_ink_sac"
+
+[[item]]
+name = "rotten_flesh"
+
+[[item]]
+name = "spider_eye"
+
+[[item]]
+name = "bone"
+
+[[item]]
+name = "leaf_litter"
+
+[[item]]
+name = "egg"
+
+[[item]]
+name = "white_wool"
+
+[[item]]
+name = "light_gray_wool"
+
+[[item]]
+name = "gray_wool"
+
+[[item]]
+name = "black_wool"
+
+[[item]]
+name = "brown_wool"
+
+[[item]]
+name = "magma_block"
+
+[[item]]
+name = "oak_sapling"
+
+[[item]]
+name = "red_mushroom"
+
+[[item]]
+name = "chicken"
+
+# --- the Nether's leftovers: [stronghold] junk, [fortress_way] junk and Q8 ---
+
+# 64 in the overworld for the overland's bridges (bridge_keep 32, bridge_max 40; race
+# 45695074789 lane 0 came up with 67 and took no cobblestone from nine stair legs).
+[[item]]
+name = "netherrack"
+when = ["stronghold_aim"]
+needs = [["win", 64]]
+
+# 128 in the fortress tunnel: the trip's bridging and guards (HOME_FILLER_MAX 128; race
+# 45766983995's tunnel filled the pack with 448).
+[[item]]
+name = "netherrack"
+when = ["fortress_tunnel"]
+needs = [["win", 128]]
+
+# 192 on the home leg before the tunnel (plan::home::NETHERRACK_KEPT, Q8).
+[[item]]
+name = "netherrack"
+when = ["home_leg"]
+needs = [["win", 192]]
+
+# 64 on the home leg before the tunnel, for the guard and the bridges (plan::home::BASALT_KEPT,
+# Q8: the deltas' restock digs it). None elsewhere.
+[[item]]
+name = "basalt"
+when = ["home_leg"]
+needs = [["win", 64]]
+
+[[item]]
+name = "basalt"
+when = ["stronghold_aim", "fortress_tunnel"]
+
+# The [fortress_way] and Q8 lists' gravel 0: the always row's 16 comes first, as in the old
+# find-first order, so this row never counts while that one stands.
+[[item]]
+name = "gravel"
+when = ["fortress_tunnel", "home_leg"]
+
+# Never used by any stage (the three lists' 0s): what the Nether's tunnels and the forest leave
+# in the pack (race 45695074789 lane 0: 50 soul soil, warped blocks and roots).
+[[item]]
+name = "soul_soil"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "soul_sand"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "warped_roots"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "crimson_roots"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "warped_wart_block"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "nether_wart_block"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "warped_nylium"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "crimson_nylium"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "warped_fungus"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "crimson_fungus"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "gold_nugget"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "quartz"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]
+
+[[item]]
+name = "magma_cream"
+when = ["stronghold_aim", "fortress_tunnel", "home_leg"]

@@ -5,10 +5,10 @@ type: reference
 tags: [plan, make, smelting, fuel, needs, spares]
 aliases: [fuel:ticks, smelt rows, burn order, wood covers, log reserve, spares, make_with, gather_now, batch, collect, iron-kit, ingots, furnace row, make-expected-iron]
 status: verified
-lastUpdated: 2026-11-27
+lastUpdated: 2026-11-28
 verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
-  - "ruststeve:crates/plan/src/make.rs#fn resolve_fuel(&self, counts: Counts, n: i32, path: &[Vec<ItemKind>]) -> Resolved<'a> {"
+  - "ruststeve:crates/plan/src/make.rs#fn resolve_fuel("
   - "ruststeve:crates/plan/src/make.rs#pub fn burn_order() -> Vec<ItemKind> {"
   - "ruststeve:crates/plan/src/lib.rs#fn keep_batch(&mut self) {"
   - "ruststeve:config/goals.toml#id = \"iron-kit\""

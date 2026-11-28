@@ -52,6 +52,9 @@ pub mod fortress_way;
 // <<< Q11
 pub mod hold;
 pub mod hunt;
+// >>> keep (issue 77): the keep rule, config/keep.toml.
+pub mod keep;
+// <<< keep
 pub mod ledger;
 pub mod look;
 pub mod make;
@@ -708,6 +711,17 @@ pub struct Plan {
     /// The goal table (issue 10), for a goal aim.
     #[serde(skip)]
     pub table: Option<Arc<make::Table>>,
+    // >>> keep (issue 77)
+    /// The keep table (`plan::keep`): config/keep.toml, compiled in, parsed here.
+    #[serde(skip)]
+    pub keep: keep::Loaded,
+    /// The "keep table unreadable" note was made (once a run).
+    #[serde(default)]
+    pub keep_noted: bool,
+    /// The goal the needs planner's want lines were last written for, and the keys written.
+    #[serde(default)]
+    pub keep_wants: (String, Vec<String>),
+    // <<< keep
     /// A goal aim is met.
     #[serde(default)]
     pub met: bool,
@@ -999,6 +1013,11 @@ impl Plan {
             task_counts: TaskCounts::default(),
             low_digs_noted: false,
             table: None,
+            // >>> keep (issue 77)
+            keep: keep::Loaded::compiled(),
+            keep_noted: false,
+            keep_wants: (String::new(), Vec::new()),
+            // <<< keep
             met: false,
             digs: 0,
             crafts: 0,
@@ -1853,7 +1872,7 @@ impl Plan {
             Task::Craft(cr) => {
                 let (c, act, status) = cr.step(w, tick);
                 self.acts.extend(act);
-                self.after_craft(status, tick);
+                self.after_craft(w, status, tick);
                 return c;
             }
             Task::Place(p) => {
@@ -1869,7 +1888,7 @@ impl Plan {
             Task::Smelt(sm) => {
                 let (c, act, status) = sm.step(w, tick);
                 self.acts.extend(act);
-                return self.after_smelt(c, status, tick);
+                return self.after_smelt(w, c, status, tick);
             }
             Task::Redig(r) => {
                 let (c, act, status) = r.step(w, tick);
@@ -2832,59 +2851,36 @@ impl Plan {
             return;
         }
         // A nearly full inventory drops a stack of junk first, by the same quick-move clock.
-        let mut junk = self
-            .table
-            .as_ref()
-            .map(|t| t.survival.junk.clone())
-            .unwrap_or_default();
-        // >>> overland and stronghold (Q4): the Nether's leftovers go in the overworld while the
-        // stronghold is the aim (race 45695074789 lane 0's full pack took no cobblestone from nine
-        // stair legs, and lane 1's crafts failed on a full pack).
-        if self.aim == Aim::Race
-            && w.dimension
+        // >>> overland and stronghold
+        // >>> keep (issue 77, brain/ruststeve/design/keep-rule.md): what may go is config/keep.toml's
+        // rows for the contexts that hold, the old gates unchanged (`keep::Context`).
+        let ctx = self.keep_contexts(w);
+        let reached = w.stage_reached;
+        let table = match self.keep.table.clone() {
+            Ok(k) => Some(k),
+            Err(e) => {
+                if !self.keep_noted {
+                    self.keep_noted = true;
+                    self.note(
+                        tick,
+                        format!("keep table unreadable: {e}"),
+                        "the drop rule falls back to the goals.toml junk lists".to_owned(),
+                    );
+                }
+                None
+            }
+        };
+        let junk = match &table {
+            Some(k) => k.junk(reached, &ctx),
+            None => self.junk_lists(&ctx),
+        };
+        // The least needed stack goes first; the fallback keeps the old slot order.
+        let rank = |kind: data::ItemKind, held: i32| {
+            table
                 .as_ref()
-                .is_some_and(|d| d.name == stronghold::OVERWORLD)
-            && (craft::count(w, data::ItemKind::EnderEye) > 0 || self.stronghold.room.is_some())
-        {
-            junk.extend(self.stronghold_rules().junk_kinds());
-        }
-        // >>> Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
-        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
-        if self.ender.phase == crate::endermen::EnderPhase::Home
-            && self.ender.home.fortress.begun
-            && w.dimension
-                .as_ref()
-                .is_some_and(|d| d.name == crate::home::NETHER)
-        {
-            junk.extend(self.fortress_rules().junk_kinds());
-        }
-        // <<< Q11
-        // >>> Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
-        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
-        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
-        if self.ender.phase == crate::endermen::EnderPhase::Home
-            && self.ender.home.top_up_over
-            && !self.ender.home.fortress.begun
-            && w.dimension
-                .as_ref()
-                .is_some_and(|d| d.name == crate::home::NETHER)
-        {
-            junk.extend(
-                self.fortress_rules()
-                    .junk_kinds()
-                    .into_iter()
-                    .map(|(k, n)| {
-                        if k == data::ItemKind::Basalt {
-                            (k, crate::home::BASALT_KEPT)
-                        } else if k == data::ItemKind::Netherrack {
-                            (k, crate::home::NETHERRACK_KEPT)
-                        } else {
-                            (k, n)
-                        }
-                    }),
-            );
-        }
-        // <<< Q8
+                .map_or(keep::Rank::Surplus, |k| k.rank(kind, held, reached, &ctx))
+        };
+        // <<< keep
         // A kind that came back after its drop is held back (`junk_watch`, `junk_now`).
         self.junk_watch(w, tick);
         let walking = matches!(self.task, Task::Explore(_));
@@ -2921,7 +2917,8 @@ impl Plan {
         // A stack on the cursor and no slot for it: out it goes if it is junk, else onto a junk
         // stack's slot, which comes back on the cursor for the next look (blaze.md wall 21).
         if w.click.is_none()
-            && let Some(slot) = cursor_step(&w.inventory.slots, w.inventory.carried, &junk)
+            && let Some(slot) =
+                cursor_step_by(&w.inventory.slots, w.inventory.carried, &junk, &rank)
         {
             self.equip_at = tick + EQUIP_TICKS;
             self.acts.push(world::Act::Click {
@@ -2929,16 +2926,22 @@ impl Plan {
                 button: 0,
                 mode: 0,
             });
+            // >>> keep (issue 77): a drop off the cursor names its kind, as a slot's drop does.
+            let what = match w.inventory.carried {
+                Some((kind, _)) if slot == OUTSIDE => format!("drop {kind:?} from the cursor"),
+                Some(_) | None => format!("cursor stack to slot {slot}"),
+            };
+            // <<< keep
             self.note(
                 tick,
-                format!("cursor stack to slot {slot}"),
+                what,
                 "a stack on the cursor and no main slot free".to_owned(),
             );
             return;
         }
         if w.click.is_none()
             && w.inventory.carried.is_none()
-            && let Some((slot, kind)) = junk_slot(&w.inventory.slots, &junk)
+            && let Some((slot, kind, r)) = junk_slot_by(&w.inventory.slots, &junk, &rank)
         {
             self.equip_at = tick + EQUIP_TICKS;
             // Kept to count a pick-up of it again (wall 12).
@@ -2953,11 +2956,18 @@ impl Plan {
                 button: 1,
                 mode: 4,
             });
-            self.note(
-                tick,
-                format!("drop {kind:?} from slot {slot}"),
-                format!("fewer than {JUNK_FREE_SLOTS} main slots free"),
-            );
+            // >>> keep (issue 77): the rank of what the drop leaves, the stage and the contexts.
+            let why = match &table {
+                Some(_) => format!(
+                    "fewer than {JUNK_FREE_SLOTS} main slots free; {}; stage {}; {}",
+                    r.text(),
+                    reached.map_or("none", world::stage::Stage::name),
+                    ctx.iter().map(|c| c.name()).collect::<Vec<_>>().join("+")
+                ),
+                None => format!("fewer than {JUNK_FREE_SLOTS} main slots free; the old junk lists"),
+            };
+            // <<< keep
+            self.note(tick, format!("drop {kind:?} from slot {slot}"), why);
             return;
         }
         let worn = |slot: i16| w.inventory.slots.contains_key(&slot);
@@ -4532,7 +4542,8 @@ impl Plan {
                 ),
             );
         }
-        let choice = make::make_with_wear(&table, &counts, &near, gather_now, &wear, goal);
+        let (choice, short) = make::make_traced(&table, &counts, &near, gather_now, &wear, goal);
+        self.goal_wants(&goal.id, &short, tick); // keep (issue 77): the want lines
         // >>> shield (docs/problems/shield.md): the kit's tools held, the shields the held iron
         // and wood make are made next; an act that would be a trip (a gather, a mine) skips them.
         let (goal, choice) = match shield::kit_row(&counts).and_then(|r| table.until(r)) {
@@ -5051,7 +5062,13 @@ impl Plan {
         }
     }
 
-    fn after_smelt(&mut self, c: Controls, status: smelt::SmeltStatus, tick: u64) -> Controls {
+    fn after_smelt(
+        &mut self,
+        w: &World,
+        c: Controls,
+        status: smelt::SmeltStatus,
+        tick: u64,
+    ) -> Controls {
         match status {
             smelt::SmeltStatus::Running => return c,
             smelt::SmeltStatus::Done => {
@@ -5066,6 +5083,7 @@ impl Plan {
                 );
             }
             smelt::SmeltStatus::Failed(f) => {
+                self.smelt_want(w, f, tick); // keep (issue 77): the want line
                 *self.failures.entry(format!("{f:?}")).or_default() += 1;
                 self.retry_at = tick + RETRY_TICKS;
                 self.failed_in_row += 1;
@@ -6151,7 +6169,7 @@ impl Plan {
         None
     }
 
-    fn after_craft(&mut self, status: CraftStatus, tick: u64) -> Controls {
+    fn after_craft(&mut self, w: &World, status: CraftStatus, tick: u64) -> Controls {
         match status {
             CraftStatus::Running => {}
             CraftStatus::Done => {
@@ -6166,6 +6184,7 @@ impl Plan {
                 }
             }
             CraftStatus::Failed(f) => {
+                self.craft_want(w, f, tick); // keep (issue 77): the want line
                 *self.failures.entry(format!("{f:?}")).or_default() += 1;
                 self.retry_at = tick + RETRY_TICKS;
                 self.failed_in_row += 1;
@@ -6881,6 +6900,16 @@ pub fn cursor_step(
     carried: Option<(data::ItemKind, i32)>,
     junk: &[(data::ItemKind, i32)],
 ) -> Option<i16> {
+    cursor_step_by(slots, carried, junk, &|_, _| keep::Rank::Surplus)
+}
+
+/// `cursor_step` with the swap onto the least needed junk stack by `rank` (issue 77).
+pub fn cursor_step_by(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+    carried: Option<(data::ItemKind, i32)>,
+    junk: &[(data::ItemKind, i32)],
+    rank: &dyn Fn(data::ItemKind, i32) -> keep::Rank,
+) -> Option<i16> {
     let (kind, _) = carried?;
     if (9i16..=44).any(|s| !slots.contains_key(&s)) {
         return None;
@@ -6888,7 +6917,7 @@ pub fn cursor_step(
     if junk.iter().any(|(j, _)| *j == kind) {
         return Some(OUTSIDE);
     }
-    junk_stack(slots, junk).map(|(s, _)| s)
+    keep::least_needed(slots, junk, rank).map(|(s, _, _)| s)
 }
 
 /// The first main or hotbar slot holding an iron armour piece whose own armour slot (5 to 8 of
@@ -6914,31 +6943,21 @@ pub fn junk_slot(
     slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
     junk: &[(data::ItemKind, i32)],
 ) -> Option<(i16, data::ItemKind)> {
+    junk_slot_by(slots, junk, &|_, _| keep::Rank::Surplus).map(|(s, k, _)| (s, k))
+}
+
+/// `junk_slot` choosing the least needed stack by `rank` (issue 77, `keep::least_needed`),
+/// with that rank; one rank for all is the old first-slot order.
+pub fn junk_slot_by(
+    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
+    junk: &[(data::ItemKind, i32)],
+    rank: &dyn Fn(data::ItemKind, i32) -> keep::Rank,
+) -> Option<(i16, data::ItemKind, keep::Rank)> {
     let free = (9i16..=44).filter(|s| !slots.contains_key(s)).count();
     if free >= JUNK_FREE_SLOTS {
         return None;
     }
-    junk_stack(slots, junk)
-}
-
-/// The first main-slot stack of a junk kind whose drop still leaves that kind's `keep` held.
-fn junk_stack(
-    slots: &std::collections::BTreeMap<i16, (data::ItemKind, i32)>,
-    junk: &[(data::ItemKind, i32)],
-) -> Option<(i16, data::ItemKind)> {
-    let main = |s: &i16| (9..=44).contains(s);
-    slots
-        .iter()
-        .filter(|(s, _)| main(s))
-        .find_map(|(s, (k, n))| {
-            let keep = junk.iter().find(|(j, _)| j == k)?.1;
-            let total: i32 = slots
-                .iter()
-                .filter(|(s2, (k2, _))| main(s2) && k2 == k)
-                .map(|(_, (_, n2))| n2)
-                .sum();
-            (total - n >= keep).then_some((*s, *k))
-        })
+    keep::least_needed(slots, junk, rank)
 }
 
 /// The race's gear (issue 16): an iron helmet, chestplate and leggings and an iron sword, worn or

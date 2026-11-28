@@ -972,9 +972,10 @@ impl<'a> Planner<'a> {
         counts: &Counts,
         row: &'a Row,
         path: &[Vec<ItemKind>],
+        short: &mut Vec<Short>,
     ) -> Option<Result<&'a Row, ()>> {
         for (k, n) in &row.holds {
-            if let (_, Some(r)) = self.resolve_need(counts.clone(), k, *n, path) {
+            if let (_, Some(r)) = self.resolve_need(counts.clone(), k, *n, path, short) {
                 return Some(r);
             }
         }
@@ -985,7 +986,8 @@ impl<'a> Planner<'a> {
                 .find(|(h, _)| h.key == k.key)
                 .map_or(0, |(_, m)| *m);
             let unworn = without(counts, &self.worn);
-            if let (_, Some(Ok(r))) = self.resolve_need(unworn, k, n + held, path) {
+            let mark = short.len();
+            if let (_, Some(Ok(r))) = self.resolve_need(unworn, k, n + held, path, short) {
                 let worth = match r.act {
                     Some(Act::Mine { .. } | Act::Scoop) => false,
                     Some(Act::Gather) => self.gather_now || self.low_on_digs,
@@ -997,6 +999,8 @@ impl<'a> Planner<'a> {
                     return Some(Ok(r));
                 }
             }
+            // A spare not planned is no want.
+            short.truncate(mark);
         }
         None
     }
@@ -1007,15 +1011,23 @@ impl<'a> Planner<'a> {
         row: &'a Row,
         times: i32,
         path: &[Vec<ItemKind>],
+        short: &mut Vec<Short>,
     ) -> Resolved<'a> {
-        if let Some(r) = self.keep(&counts, row, path) {
+        let mark = short.len();
+        if let Some(r) = self.keep(&counts, row, path, short) {
+            if r.is_err() {
+                short.truncate(mark);
+            }
             return (counts, Some(r));
         }
         let mut c = counts.clone();
         for (k, n) in &row.needs {
-            let (c2, a) = self.resolve_need(c, k, n * times, path);
+            let (c2, a) = self.resolve_need(c, k, n * times, path, short);
             match a {
-                Some(Err(())) => return (counts, Some(Err(()))),
+                Some(Err(())) => {
+                    short.truncate(mark);
+                    return (counts, Some(Err(())));
+                }
                 Some(Ok(r)) => return (c2, Some(Ok(r))),
                 None => c = c2,
             }
@@ -1036,7 +1048,9 @@ impl<'a> Planner<'a> {
         if !matches!(row.act, Some(Act::Craft(_))) || n <= 1 || std::ptr::eq(action, row) {
             return None;
         }
-        match self.resolve_row(counts.clone(), row, 1, path) {
+        // Its wants are those of the first run, which the caller takes instead of n runs'.
+        let mut once = Vec::new();
+        match self.resolve_row(counts.clone(), row, 1, path, &mut once) {
             (c, Some(Ok(a))) if std::ptr::eq(a, row) => Some((c, a)),
             _ => None,
         }
@@ -1049,15 +1063,21 @@ impl<'a> Planner<'a> {
         rows: &[&'a Row],
         missing: i32,
         path: &[Vec<ItemKind>],
+        short: &mut Vec<Short>,
     ) -> Resolved<'a> {
+        let mark = short.len();
         for row in rows {
             let n = (missing + yield_of(row) - 1) / yield_of(row).max(1);
-            if let (c, Some(Ok(a))) = self.resolve_row(counts.clone(), row, n, path) {
+            if let (c, Some(Ok(a))) = self.resolve_row(counts.clone(), row, n, path, short) {
                 if let Some((c1, a1)) = self.craft_now(&counts, row, n, a, path) {
+                    // One run is made from what is held: nothing under it is short.
+                    short.truncate(mark);
                     return (c1, Some(Ok(a1)));
                 }
                 return (c, Some(Ok(a)));
             }
+            // A producer skipped: its wants are not the plan's.
+            short.truncate(mark);
         }
         (counts, Some(Err(())))
     }
@@ -1065,11 +1085,23 @@ impl<'a> Planner<'a> {
     /// `resolve-fuel-need`: met when the fuel held burns n ticks (taken out as the smelt burns
     /// it); else the rest is planned from coal, then planks, planks first when the logs held
     /// cover them (`wood-covers?`).
-    fn resolve_fuel(&self, counts: Counts, n: i32, path: &[Vec<ItemKind>]) -> Resolved<'a> {
+    fn resolve_fuel(
+        &self,
+        counts: Counts,
+        n: i32,
+        path: &[Vec<ItemKind>],
+        short: &mut Vec<Short>,
+    ) -> Resolved<'a> {
         let (c, left) = burn(&counts, n);
         if left <= 0 {
             return (c, None);
         }
+        let mark = short.len();
+        short.push(Short {
+            key: "fuel:ticks".to_owned(),
+            items: Vec::new(),
+            n: left,
+        });
         let coal = (Need::parse("item:coal"), burn_ticks(ItemKind::Coal));
         let planks = (Need::parse("tag:planks"), burn_ticks(ItemKind::OakPlanks));
         let sources = if wood_covers(&c, left) {
@@ -1080,11 +1112,13 @@ impl<'a> Planner<'a> {
         for (k, b) in sources {
             let Some(k) = k else { continue };
             let b = b.max(1);
-            match self.resolve_need(c.clone(), &k, (left + b - 1) / b, path) {
-                (_, Some(Err(()))) => {}
+            let source = short.len();
+            match self.resolve_need(c.clone(), &k, (left + b - 1) / b, path, short) {
+                (_, Some(Err(()))) => short.truncate(source),
                 done => return done,
             }
         }
+        short.truncate(mark);
         (counts, Some(Err(())))
     }
 
@@ -1096,9 +1130,10 @@ impl<'a> Planner<'a> {
         k: &Need,
         n: i32,
         path: &[Vec<ItemKind>],
+        short: &mut Vec<Short>,
     ) -> Resolved<'a> {
         if k.fuel {
-            return self.resolve_fuel(counts, n, path);
+            return self.resolve_fuel(counts, n, path, short);
         }
         if let Some(b) = k.block {
             // `resolve-block-need`: met when one is remembered near, else the first producer that
@@ -1112,7 +1147,7 @@ impl<'a> Planner<'a> {
                 .iter()
                 .filter(|r| r.provides.iter().any(|(p, _)| p.block == Some(b)))
                 .collect();
-            return self.first_resolved(counts, &rows, 1, path);
+            return self.first_resolved(counts, &rows, 1, path, short);
         }
         let h = k.have(&counts);
         if h >= n {
@@ -1137,7 +1172,17 @@ impl<'a> Planner<'a> {
         rows.sort_by_key(|r| producer_order(&counts, r));
         let mut deeper = path.to_vec();
         deeper.push(k.items.clone());
-        self.first_resolved(counts, &rows, n - h, &deeper)
+        let mark = short.len();
+        short.push(Short {
+            key: k.key.clone(),
+            items: k.items.clone(),
+            n: n - h,
+        });
+        let r = self.first_resolved(counts, &rows, n - h, &deeper, short);
+        if matches!(r.1, Some(Err(()))) {
+            short.truncate(mark);
+        }
+        r
     }
 }
 
@@ -1191,6 +1236,29 @@ pub fn make_with_wear<'a>(
     wear: &Wear,
     goal: &'a Row,
 ) -> Choice<'a> {
+    make_traced(table, counts, near, gather_now, wear, goal).0
+}
+
+/// An item need the plan meets by a producer, not from what is held (issue 77, the ledger's
+/// `want` line): its key, its items (none for fuel), and how many are short.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Short {
+    pub key: String,
+    pub items: Vec<ItemKind>,
+    pub n: i32,
+}
+
+/// `make_with_wear`, with the needs short on the way to the choice: every item need the chosen
+/// path meets from a producer, outermost first. A producer skipped, a spare not planned and a
+/// branch that failed leave none. A stuck choice keeps those of the last need tried.
+pub fn make_traced<'a>(
+    table: &'a Table,
+    counts: &Counts,
+    near: &'a dyn Fn(data::BlockKind) -> bool,
+    gather_now: bool,
+    wear: &Wear,
+    goal: &'a Row,
+) -> (Choice<'a>, Vec<Short>) {
     let p = Planner {
         table,
         near,
@@ -1198,15 +1266,16 @@ pub fn make_with_wear<'a>(
         worn: wear.worn.clone(),
         low_on_digs: wear.low_on_digs,
     };
+    let mut short = Vec::new();
     let mut c = counts.clone();
     for (k, n) in goal.provides.iter().chain(&goal.needs) {
-        match p.resolve_need(c, k, *n, &[]) {
-            (_, Some(Ok(row))) => return Choice::Act(row),
-            (_, Some(Err(()))) => return Choice::Stuck,
+        match p.resolve_need(c, k, *n, &[], &mut short) {
+            (_, Some(Ok(row))) => return (Choice::Act(row), short),
+            (_, Some(Err(()))) => return (Choice::Stuck, short),
             (c2, None) => c = c2,
         }
     }
-    Choice::Done
+    (Choice::Done, short)
 }
 
 #[cfg(test)]
