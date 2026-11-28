@@ -506,6 +506,11 @@ pub enum Task {
     Stairs(Box<Stairs>),
     /// A batch in a furnace, or the results of one left loaded (issue 13b).
     Smelt(Box<smelt::Smelt>),
+    // >>> stash (issue 77)
+    /// Stacks put into a known chest, or taken out of one (`stash`).
+    Stash(Box<stash::Stash>),
+    Fetch(Box<stash::Fetch>),
+    // <<< stash
     /// Place a block and dig it again for its chance drop (flint, issue 13b).
     Redig(Box<redig::Redig>),
     /// A bucket filled at a surface water source (issue 14b).
@@ -545,6 +550,10 @@ impl Task {
             Task::Place(_) => "place",
             Task::Stairs(_) => "stairs",
             Task::Smelt(_) => "smelt",
+            // >>> stash (issue 77)
+            Task::Stash(_) => "stash",
+            Task::Fetch(_) => "fetch",
+            // <<< stash
             Task::Redig(_) => "redig",
             Task::Scoop(_) => "scoop",
             Task::Cast(_) => "cast",
@@ -571,6 +580,10 @@ impl Task {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Smelt(_)
+            // >>> stash (issue 77)
+            | Task::Stash(_)
+            | Task::Fetch(_)
+            // <<< stash
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)
@@ -834,6 +847,10 @@ pub struct Plan {
     pub batch: Option<(Cell, data::ItemKind, i32)>,
     #[serde(default)]
     pub smelts: u64,
+    // >>> stash (issue 77): the home chest, the legs stashed for, a fetch due (`stash`).
+    #[serde(default)]
+    pub stash: stash::StashState,
+    // <<< stash
     /// Relocations made, and whether the next choice is one (issue 13b).
     #[serde(default)]
     pub relocations: u32,
@@ -1041,6 +1058,9 @@ impl Plan {
             always_retry_at: 0,
             batch: None,
             smelts: 0,
+            // >>> stash (issue 77)
+            stash: stash::StashState::default(),
+            // <<< stash
             relocations: 0,
             toward: None,
             travel: tunnel::Travel::default(),
@@ -1113,6 +1133,9 @@ impl Plan {
         self.task = Task::Idle;
         self.retry_at = tick;
         self.failed_in_row = 0;
+        // >>> stash (issue 77): what is wanted is fetched from the home chest.
+        self.stash.fetch_due = true;
+        // <<< stash
         self.note(
             tick,
             format!("died ({killer}) and respawned"),
@@ -1427,6 +1450,10 @@ impl Plan {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Smelt(_)
+            // >>> stash (issue 77)
+            | Task::Stash(_)
+            | Task::Fetch(_)
+            // <<< stash
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)
@@ -1816,6 +1843,9 @@ impl Plan {
                 Aim::Base => self.base_aim(w, tick),
                 Aim::Hold => Task::Idle,
             };
+            // >>> stash (issue 77): a fetch after a respawn, a stash before a leg's portal.
+            let chosen = self.stash_gate(w, chosen, tick);
+            // <<< stash
             self.begin(chosen);
         }
         // Read before the task is borrowed: a cast with no pickaxe and the makings of one pauses.
@@ -1871,6 +1901,9 @@ impl Plan {
                 self.acts.extend(act);
                 return self.after_smelt(c, status, tick);
             }
+            // >>> stash (issue 77): the one call site of `stash::Plan::chest_step`.
+            Task::Stash(_) | Task::Fetch(_) => return self.chest_step(w, tick),
+            // <<< stash
             Task::Redig(r) => {
                 let (c, act, status) = r.step(w, tick);
                 self.acts.extend(act);
@@ -2013,6 +2046,10 @@ impl Plan {
                     | Task::Place(_)
                     | Task::Stairs(_)
                     | Task::Smelt(_)
+                    // >>> stash (issue 77)
+                    | Task::Stash(_)
+                    | Task::Fetch(_)
+                    // <<< stash
                     | Task::Redig(_)
                     | Task::Scoop(_)
                     | Task::Cast(_)
@@ -2084,6 +2121,10 @@ impl Plan {
                     | Task::Place(_)
                     | Task::Stairs(_)
                     | Task::Smelt(_)
+                    // >>> stash (issue 77)
+                    | Task::Stash(_)
+                    | Task::Fetch(_)
+                    // <<< stash
                     | Task::Redig(_)
                     | Task::Scoop(_)
                     | Task::Cast(_)
@@ -2392,6 +2433,10 @@ impl Plan {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Smelt(_)
+            // >>> stash (issue 77)
+            | Task::Stash(_)
+            | Task::Fetch(_)
+            // <<< stash
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)
@@ -2456,6 +2501,10 @@ impl Plan {
                     | Task::Place(_)
                     | Task::Stairs(_)
                     | Task::Smelt(_)
+                    // >>> stash (issue 77)
+                    | Task::Stash(_)
+                    | Task::Fetch(_)
+                    // <<< stash
                     | Task::Redig(_)
                     | Task::Scoop(_)
                     | Task::Cast(_)
@@ -2676,6 +2725,10 @@ impl Plan {
             | Task::Place(_)
             | Task::Stairs(_)
             | Task::Smelt(_)
+            // >>> stash (issue 77)
+            | Task::Stash(_)
+            | Task::Fetch(_)
+            // <<< stash
             | Task::Redig(_)
             | Task::Scoop(_)
             | Task::Cast(_)

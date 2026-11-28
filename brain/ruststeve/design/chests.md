@@ -5,8 +5,8 @@ type: reference
 tags: [chests, window, memory, sim, plan, inventory]
 aliases: [chest, Chest, ChestSeen, Memory::chests, chest_contents, fold_chest, Window::block, used_on, ChestMenu, quick_move_target, Stash, Fetch, Transfer, generic_9x3, generic_9x6, isChestBlockedAt]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@bd9b55c
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@4936cc2
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#pub struct ChestSeen {"
   - "ruststeve:crates/world/src/lib.rs#fn fold_chest(&mut self) {"
@@ -14,6 +14,13 @@ sourceRefs:
   - "ruststeve:crates/sim/src/survival.rs#fn chest_quick_move(&mut self, i: usize, l: Loc, stack: Stack) {"
   - "ruststeve:crates/plan/src/stash.rs#pub struct Transfer {"
   - "ruststeve:crates/plan/tests/stash.rs#fn a_stash_then_a_fetch_round_trips_the_counts() {"
+  - "ruststeve:crates/plan/src/stash.rs#pub fn stash_gate(&mut self, w: &World, chosen: Task, tick: u64) -> Task {"
+  - "ruststeve:crates/plan/src/stash.rs#pub fn stash_list("
+  - "ruststeve:crates/plan/src/stash.rs#pub fn fetch_list("
+  - "ruststeve:crates/plan/src/stash.rs#fn home_chest_task(&mut self, w: &World, tick: u64) -> Result<Task, String> {"
+  - "ruststeve:config/stash.toml#name = \"nether\""
+  - "ruststeve:config/goals.toml#id = \"home-chest\""
+  - "ruststeve:crates/plan/tests/stash_planner.rs#fn before_the_nether_the_home_chest_is_made_and_the_surplus_for_the_leg_stashed_then_fetched()"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[entities-and-inventory]]"
@@ -62,6 +69,17 @@ Issue 77. A chest lets the bot leave what it does not need yet and come back for
 - `sim` `quick_move_goes_chest_to_inventory_end_and_inventory_to_chest_start`: the jar's rule.
 - `plan/tests/stash.rs`: a chest placed by `use_item_on`, then 74 cobblestone (64 + 10, never the other 64) and 3 string stashed and fetched back. The counts are checked in the model's chest, in the bot's pack and in memory. A second test fills the chest: 27 stacks go in and the task says the chest is full.
 
+## The planner
+`Plan::stash_gate` is the one call site. It runs as the planner chooses an idle task (`step_inner`) and takes the task chosen, so every leg's own planner stays as it is.
+- **The legs** are data, in `config/stash.toml` (compiled in): each leg's name, the dimension it is entered from, its portal block, and the stages it spans. The Nether runs `nether` to `pearls_12`, and the End runs `end` to `win`. Item counts are never written there: `config/keep.toml` alone says how many of an item a stage needs, through `Keep::need_in(kind, stages)` (the largest count any row names in the span, including the `during` rows that only need_in reads; 77-keep's keep-rule note). The `Needs` trait is that call. `NeedRows` is a written-out table, used in tests and until the keep table is wired in.
+- **The trigger**: the task chosen is an `Enter` from the leg's dimension into its portal block, and the trigger has not yet run for that leg (`StashState::legs`). It runs once per leg, and every outcome writes a note: the stash begun, nothing to put away, skipped for danger (under `danger_health`, or a foe in range: the stash is a trip, never made under danger), skipped with no home chest, or skipped with no need table. Then the `Enter` goes ahead.
+- **What is stashed** (`stash_list`): each kind in the pack (slots 9 to 44, what a chest window shows) that a stage after the leg needs. The count is the smaller of that need and what is held less what the leg itself needs. A kind needed by no stage after the leg is never stashed: it is either the leg's own or junk. With keep.toml as it stands, the bow's feathers and string go into the chest before the Nether, and the leg's 64 cobblestone stay held. The End has no stage after it, so its trigger puts nothing away and says so.
+- **The home chest**: when there is something to stash and no home chest within `TABLE_SEARCH`, the chest is made where the bot stands, by the goal rows `home-chest` (provides `block:chest`) and `place-chest` (config/goals.toml), through the needs planner. Only a planks craft, the chest at a table at hand, or putting down a table or the chest is taken. A gather, a mine or a smelt would be a trip: the stash is skipped and noted. The chest is begun only with wood to spare: planks plus 4 a log, less 4 a log of `world::stage::READY_LOGS` (the wood the leg carries), at least `CHEST_PLANKS` 8, and 4 more for a table when none is held or at hand. At most `CHEST_TASKS` 8 tasks. The chest put down becomes the home chest: the nearest chest memory holds that it did not hold before the place (`StashState::home`, its dimension and cell). A table put down for it is dug and taken along again before the stash.
+- **After a death and a respawn**, `Plan::revived` sets `fetch_due`. At the next choice, `fetch_list` gives what a stage still ahead (`World::stage_reached` on) wants of what the home chest last showed, less what is held. That is fetched. The fetch is skipped and noted with no home chest in the dimension, a chest never shown open, or nothing wanted. Under danger it waits, noted at most every `FAILURE_MEMORY_TICKS`.
+- **The task loop**: `Task::Stash` and `Task::Fetch` sit beside `Smelt` in every match. `Plan::chest_step` steps the transfer, sends its acts, drains its notes into the ledger each tick (as a shield step's are), and on its end notes "stash done" or "fetch done" (with the items moved) or the failure. A chest found gone or covered is no home any more.
+- **Tests** (`plan/tests/stash_planner.rs`): the lists on hand-built need tables (`stash_list`, `fetch_list`, `wood_to_spare`, the legs parse). Against the server model: planks and a table held, so the table goes down, the chest is crafted and put down, the table comes back, and the feathers and string are stashed while the stone stays; then a respawn fetches them back. With only the leg's 4 logs, no chest is begun and the skip is noted.
+
 ## Limits
 - No real-server run yet. The probe planned for issue 77 places a chest, stashes, fetches and reads the counts back.
-- The planner that crafts and places the home chest and decides what to stash and when is 77-stash's part (the planner section to come).
+- Until 77-keep's `Keep::need_in` is wired in, a run has no need table, so every trigger is noted as skipped.
+- The home chest is made at the Nether portal, the first leg with something to stash. A respawn far from it relies on the walk's route there. A walk that fails is noted, and the run goes on without the fetch.

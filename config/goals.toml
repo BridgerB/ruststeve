@@ -87,6 +87,30 @@ until = "furnace"
 doc = "a furnace placed near, crafted from eight cobblestone in a placed crafting table"
 provides = [["block:furnace", 1]]
 
+# >>> stash (issue 77, brain/ruststeve/design/chests.md, "The planner"): the home chest, made and
+# put down by the portal before the Nether when there is something to stash. The chest is the
+# generated recipe (8 planks round a ring at a crafting table); it is begun only with the wood to
+# spare: planks + 4 per log, less 4 per log of world::stage::READY_LOGS (the 4 logs the Nether
+# leg carries: the `ready` stage), at least the chest's 8 (`plan::stash::CHEST_PLANKS`). Only acts
+# done where the bot stands are taken (planks, the chest at a table, the table or the chest put
+# down); a gather or a mine is a trip, skipped and noted.
+[[goal]]
+id = "home-chest"
+priority = 7
+until = "home-chest"
+doc = "a chest put down near, crafted from eight planks in a placed crafting table"
+provides = [["block:chest", 1]]
+
+[[goal]]
+id = "place-chest"
+priority = 10
+doc = "put a held chest down near the player"
+needs = [["item:chest", 1]]
+provides = [["block:chest", 1]]
+act = "place"
+blocks = ["chest"]
+# <<< stash
+
 [[goal]]
 id = "ingots"
 priority = 8
