@@ -5,8 +5,8 @@ type: reference
 tags: [plan, combat, defend, survival, always-rows, pacing]
 aliases: [defend, Defend, Stance, danger line, danger_health, defend_radius, never_fight, creeper, swing pacing, cooldown, retreat, back away]
 status: verified
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@2b6b7f1 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/defend.rs#pub fn nearest_foe(w: &World, radius: f64) -> Option<(i32, EntityKind)> {"
   - "ruststeve:crates/plan/src/defend.rs#pub fn in_danger(w: &World, rules: &SurvivalRules) -> bool {"

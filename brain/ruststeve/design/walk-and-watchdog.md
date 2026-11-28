@@ -5,8 +5,8 @@ type: reference
 tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@6b1a3ba clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"

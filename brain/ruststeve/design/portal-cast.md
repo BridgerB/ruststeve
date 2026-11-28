@@ -5,8 +5,8 @@ type: reference
 tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@0d7fa7b clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
