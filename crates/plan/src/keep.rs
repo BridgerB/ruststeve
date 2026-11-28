@@ -108,6 +108,9 @@ pub struct Row {
     pub kind: ItemKind,
     pub when: Vec<Context>,
     pub needs: Vec<(Stage, i32)>,
+    /// Counts a stage uses while it runs (a leg's bridges and seals, for a stash), read only by
+    /// `need_in`: the drop rule never sees them.
+    pub during: Vec<(Stage, i32)>,
 }
 
 impl Row {
@@ -151,6 +154,8 @@ struct RawRow {
     when: Vec<Context>,
     #[serde(default)]
     needs: Vec<(String, i32)>,
+    #[serde(default)]
+    during: Vec<(String, i32)>,
 }
 
 fn always() -> Vec<Context> {
@@ -168,19 +173,20 @@ impl Keep {
             .map(|r| {
                 let kind = ItemKind::from_name(&r.name)
                     .ok_or_else(|| format!("keep.toml: no item {}", r.name))?;
-                let needs = r
-                    .needs
-                    .iter()
-                    .map(|(s, n)| {
-                        Stage::from_name(s)
-                            .map(|st| (st, *n))
-                            .ok_or_else(|| format!("keep.toml: {}: no stage {s}", r.name))
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
+                let stages = |l: &[(String, i32)]| {
+                    l.iter()
+                        .map(|(s, n)| {
+                            Stage::from_name(s)
+                                .map(|st| (st, *n))
+                                .ok_or_else(|| format!("keep.toml: {}: no stage {s}", r.name))
+                        })
+                        .collect::<Result<Vec<_>, String>>()
+                };
                 Ok(Row {
                     kind,
-                    when: r.when,
-                    needs,
+                    when: r.when.clone(),
+                    needs: stages(&r.needs)?,
+                    during: stages(&r.during)?,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -214,6 +220,23 @@ impl Keep {
             .filter(|(_, n)| *n > 0)
             .min_by_key(|(s, _)| *s)
             .map_or(Rank::Surplus, |(stage, by)| Rank::Needed { stage, by })
+    }
+
+    /// How many of `kind` a span of stages needs (a leg, for a stash: 77-stash): the largest
+    /// count any of its rows, in any context, names in `needs` or `during` for a stage in
+    /// `stages`. The largest, not the sum: a count is what is held by its stage, as in
+    /// `Row::kept`, so two stages naming 64 need 64. 0 with no row or no stage in the span.
+    /// `during` is read here only: the drop rule (`rank`, `junk`) never sees it.
+    pub fn need_in(&self, kind: ItemKind, stages: &[Stage]) -> i32 {
+        self.rows
+            .iter()
+            .filter(|r| r.kind == kind)
+            .flat_map(|r| r.needs.iter().chain(r.during.iter()))
+            .filter(|(s, _)| stages.contains(s))
+            .map(|(_, n)| *n)
+            .max()
+            .unwrap_or(0)
+            .max(0)
     }
 
     /// The droppable kinds with the count each keeps, as the old junk lists had them: every
@@ -779,6 +802,44 @@ mod tests {
         assert_eq!(wants(&p), 2);
         p.goal_wants("iron", std::slice::from_ref(&stick), 5);
         assert_eq!(wants(&p), 3);
+    }
+
+    /// A leg's need: the largest count its rows name in the span, `during` included, across
+    /// every context; the drop rule never sees `during` (77-stash's cases).
+    #[test]
+    fn a_legs_need_is_the_largest_count_in_its_span() {
+        let k = table();
+        let span = |r: std::ops::RangeInclusive<Stage>| -> Vec<Stage> {
+            Stage::ALL.into_iter().filter(|s| r.contains(s)).collect()
+        };
+        let leg = span(Stage::Nether..=Stage::Pearls12);
+        let after = span(Stage::Overworld..=Stage::Win);
+        assert_eq!(k.need_in(Cobblestone, &leg), 64);
+        assert_eq!(k.need_in(Feather, &leg), 0);
+        assert_eq!(k.need_in(Feather, &after), 16);
+        assert_eq!(k.need_in(Str, &after), 8);
+        assert_eq!(k.need_in(Gravel, &leg), 16);
+        assert_eq!(k.need_in(Bucket, &after), 0, "no row");
+        // Every context: netherrack's home-leg row names 192 by win.
+        assert_eq!(k.need_in(Netherrack, &after), 192);
+        let two = Keep::parse(
+            "[[item]]\nname = \"dirt\"\nneeds = [[\"win\", 8]]\nduring = [[\"nether\", 32], [\"spawner\", 48]]\n",
+        )
+        .unwrap();
+        assert_eq!(two.need_in(ItemKind::Dirt, &leg), 48, "the largest");
+        // `during` moves no count the drop rule keeps, and no rank.
+        let ctx = [Context::Always];
+        assert_eq!(
+            two.junk(Some(Stage::Nether), &ctx),
+            vec![(ItemKind::Dirt, 8)]
+        );
+        assert_eq!(
+            two.rank(ItemKind::Dirt, 8, Some(Stage::Nether), &ctx),
+            Rank::Needed {
+                stage: Stage::Win,
+                by: 8
+            }
+        );
     }
 
     #[derive(serde::Deserialize)]
