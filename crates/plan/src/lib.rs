@@ -73,6 +73,8 @@ pub mod redig;
 pub mod scoop;
 pub mod shield;
 pub mod smelt;
+// Issue 77: the chest tasks.
+pub mod stash;
 // >>> E4 (issue 20f): the crystals by pillar and strike.
 pub mod spikes;
 // <<< E4
