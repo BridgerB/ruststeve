@@ -593,3 +593,884 @@ impl Fetch {
         self.0.step(w, tick)
     }
 }
+
+// >>> stash (issue 77): the planner. When to stash, what, and where (the home chest); when to
+// fetch, and what (brain/ruststeve/design/chests.md, "The planner").
+
+use std::collections::BTreeMap;
+
+use world::stage::Stage;
+
+use crate::{Plan, Task};
+
+/// The legs, compiled in (commit-pinned): an edit needs a rebuild.
+pub const STASH_TOML: &str = include_str!("../../../config/stash.toml");
+/// A chest is 8 planks at a table (the generated `chest` recipe: a ring of 8 `#planks`).
+pub const CHEST_PLANKS: i32 = 8;
+/// A table is 4 planks (the generated `crafting_table` recipe): wanted too when none is held or
+/// at hand.
+pub const TABLE_PLANKS: i32 = 4;
+/// One log is 4 planks (the generated `*_planks` recipes).
+pub const PLANKS_PER_LOG: i32 = 4;
+/// Tasks begun for one home chest before it is given up: planks, a table put down, the chest
+/// crafted and put down are 4; one failure each besides is 8.
+pub const CHEST_TASKS: u32 = 8;
+/// Inventory slots of window 0 a chest window shows (main 9..=35, hotbar 36..=44): what can be
+/// stashed. Armour and the off hand are not in a chest's window.
+const PACK: std::ops::RangeInclusive<i16> = 9..=44;
+
+/// What a stage span needs of a kind: the largest count any keep.toml row names for a stage in
+/// `stages`, its `needs` and its `during` rows (`Keep::need_in`).
+pub trait Needs {
+    fn need_in(&self, kind: ItemKind, stages: &[Stage]) -> i32;
+}
+
+impl Needs for crate::keep::Keep {
+    fn need_in(&self, kind: ItemKind, stages: &[Stage]) -> i32 {
+        crate::keep::Keep::need_in(self, kind, stages)
+    }
+}
+
+/// A dangerous leg: entered from `from` through a `portal` block, spanning `stages`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Leg {
+    pub name: String,
+    pub from: String,
+    pub portal: data::BlockKind,
+    pub stages: Vec<Stage>,
+}
+
+impl Leg {
+    /// The stages after the leg: every one past its last.
+    pub fn after(&self) -> Vec<Stage> {
+        let Some(last) = self.stages.iter().max().copied() else {
+            return Vec::new();
+        };
+        Stage::ALL.into_iter().filter(|s| *s > last).collect()
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLegs {
+    #[serde(default)]
+    leg: Vec<RawLeg>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLeg {
+    name: String,
+    from: String,
+    portal: String,
+    stages: Vec<String>,
+}
+
+/// The legs from stash.toml's text. An unknown block or stage name is an error.
+pub fn parse_legs(text: &str) -> Result<Vec<Leg>, String> {
+    let raw: RawLegs = toml::from_str(text).map_err(|e| e.to_string())?;
+    raw.leg
+        .into_iter()
+        .map(|l| {
+            let portal = data::BlockKind::from_name(&l.portal)
+                .ok_or_else(|| format!("stash.toml: {}: no block {}", l.name, l.portal))?;
+            let stages = l
+                .stages
+                .iter()
+                .map(|s| {
+                    Stage::from_name(s)
+                        .ok_or_else(|| format!("stash.toml: {}: no stage {s}", l.name))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(Leg {
+                name: l.name,
+                from: l.from,
+                portal,
+                stages,
+            })
+        })
+        .collect()
+}
+
+/// What to stash before `leg`: each kind held that a stage after the leg needs, as many as that
+/// need, less what the leg itself needs (its reserve: keep.toml's `during` and `needs` rows for
+/// the leg's stages). A kind needed by no stage after the leg is never stashed (it is junk or
+/// the leg's own). Kinds in their order.
+pub fn stash_list(
+    held: &BTreeMap<ItemKind, i32>,
+    needs: &dyn Needs,
+    leg: &Leg,
+) -> Vec<(ItemKind, i32)> {
+    let after = leg.after();
+    held.iter()
+        .filter_map(|(k, h)| {
+            let later = needs.need_in(*k, &after);
+            if later <= 0 {
+                return None;
+            }
+            let during = needs.need_in(*k, &leg.stages);
+            let n = later.min(h - during);
+            (n > 0).then_some((*k, n))
+        })
+        .collect()
+}
+
+/// What to fetch from a chest's shown contents: each kind a stage still ahead (`reached` on)
+/// needs past what is held, as many as the chest shows.
+pub fn fetch_list(
+    contents: &BTreeMap<ItemKind, i32>,
+    held: &BTreeMap<ItemKind, i32>,
+    needs: &dyn Needs,
+    reached: Option<Stage>,
+) -> Vec<(ItemKind, i32)> {
+    let ahead: Vec<Stage> = Stage::ALL
+        .into_iter()
+        .filter(|s| reached.is_none_or(|r| *s >= r))
+        .collect();
+    contents
+        .iter()
+        .filter_map(|(k, n)| {
+            let want = needs.need_in(*k, &ahead) - held.get(k).copied().unwrap_or(0);
+            let take = want.min(*n);
+            (take > 0).then_some((*k, take))
+        })
+        .collect()
+}
+
+/// The wood held as planks: planks, and 4 a log.
+pub fn planks_held(held: &BTreeMap<ItemKind, i32>) -> i32 {
+    let of = |tag: &str| -> i32 {
+        data::generated::tags::item_tag(tag).map_or(0, |items| {
+            items
+                .iter()
+                .map(|k| held.get(k).copied().unwrap_or(0))
+                .sum()
+        })
+    };
+    of("planks") + PLANKS_PER_LOG * of("logs")
+}
+
+/// The wood to spare for a chest: the planks held less the `ready` stage's logs (the wood the
+/// Nether leg carries, `world::stage::READY_LOGS`), and whether it covers the chest (and a table
+/// when `table` is false: none held or at hand).
+pub fn wood_to_spare(held: &BTreeMap<ItemKind, i32>, table: bool) -> (i32, i32) {
+    let ready = i32::try_from(world::stage::READY_LOGS).unwrap_or(i32::MAX);
+    let spare = planks_held(held) - PLANKS_PER_LOG * ready;
+    let want = CHEST_PLANKS + if table { 0 } else { TABLE_PLANKS };
+    (spare, want)
+}
+
+/// What the development aim `chest-trip` stashes and fetches back: the parity row's numbers
+/// (lead-77, 2026-11-28), those of `plan/tests/stash.rs`: of 138 cobblestone held (64, 64, 10)
+/// the 64 and the 10, never the other 64 (a stack over what is left stays held), and 3 string.
+pub const TRIP: [(ItemKind, i32); 2] = [(ItemKind::Cobblestone, 74), (ItemKind::String, 3)];
+
+/// The development aim `chest-trip`'s steps, in order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TripStep {
+    /// The held chest put down (it becomes the home chest).
+    #[default]
+    Place,
+    Stash,
+    Fetch,
+    /// Fetched: the aim is met.
+    Over,
+}
+
+/// The planner's chest state: the home chest, the legs passed, a fetch due.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StashState {
+    /// The home chest: its dimension and cell (memory holds the chest itself).
+    pub home: Option<(String, Cell)>,
+    /// A chest is being put down: the chests memory held before, to tell the new one.
+    pub placing: Option<Vec<Cell>>,
+    /// A table was put down for the chest: taken along again after.
+    pub table_placed: bool,
+    /// Tasks begun for the home chest in hand (`CHEST_TASKS`).
+    pub chest_tasks: u32,
+    /// Legs whose trigger has run: stashed, or skipped with a reason in the ledger.
+    pub legs: Vec<String>,
+    /// A death and respawn happened: what is wanted is fetched from the home chest.
+    pub fetch_due: bool,
+    /// When a fetch waiting for safety may next say so.
+    pub wait_noted_at: u64,
+    /// Stashes and fetches ended, and how many items each way.
+    pub stashes: u32,
+    pub fetches: u32,
+    /// The development aim `chest-trip`'s next step.
+    #[serde(default)]
+    pub trip: TripStep,
+}
+
+/// Whether the eye is within `d` of a cell's centre.
+fn within(w: &World, c: Cell, d: f64) -> bool {
+    w.body.is_some_and(|b| {
+        let eye = [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]];
+        let m = [
+            f64::from(c.0) + 0.5,
+            f64::from(c.1) + 0.5,
+            f64::from(c.2) + 0.5,
+        ];
+        (0..3).map(|i| (eye[i] - m[i]).powi(2)).sum::<f64>().sqrt() <= d
+    })
+}
+
+/// The pack's stacks (what a chest window shows of the inventory), by kind.
+fn pack(w: &World) -> BTreeMap<ItemKind, i32> {
+    let mut c = BTreeMap::new();
+    for (_, (k, n)) in w.inventory.slots.range(PACK) {
+        *c.entry(*k).or_insert(0) += n;
+    }
+    c
+}
+
+fn list_text(l: &[(ItemKind, i32)]) -> String {
+    l.iter()
+        .map(|(k, n)| format!("{n} {}", name(*k)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+impl Plan {
+    /// The need table: the keep table (config/keep.toml), or none when it could not be read
+    /// (nothing is stashed or fetched then, noted).
+    fn stash_needs(&self) -> Option<std::sync::Arc<crate::keep::Keep>> {
+        self.keep.table.as_ref().ok().cloned()
+    }
+
+    /// The danger that skips a chest trip: under the danger line, or a foe in range.
+    fn stash_danger(&self, w: &World) -> Option<String> {
+        let rules = &self.table.as_ref()?.survival;
+        if crate::defend::in_danger(w, rules) {
+            return Some(format!(
+                "health {:.1} at or under the danger line {}",
+                w.player.health.unwrap_or(0.0),
+                rules.danger_health
+            ));
+        }
+        crate::defend::foe(w, rules, &[]).map(|(id, k)| format!("a foe in range ({k:?} {id})"))
+    }
+
+    /// The one call site, as the planner chooses a task: a fetch due after a respawn, then a
+    /// stash before a dangerous leg's portal; else the task chosen.
+    pub fn stash_gate(&mut self, w: &World, chosen: Task, tick: u64) -> Task {
+        // The chosen task's reason, the tick's last note before the gate's: written again after
+        // a skip, so the task ledger's reason for it stays its own (`track` takes the tick's
+        // last note).
+        let (before, reason) = (self.event_count, self.events.last().cloned());
+        if let Some(t) = self.stash_choice(w, &chosen, tick) {
+            return t;
+        }
+        if self.event_count > before
+            && !matches!(chosen, Task::Idle)
+            && let Some(e) = reason.filter(|e| e.tick == tick)
+        {
+            self.note(tick, e.what, e.why);
+        }
+        chosen
+    }
+
+    /// The gate's own choice: a fetch due, or a leg's stash; `None` leaves the chosen task.
+    fn stash_choice(&mut self, w: &World, chosen: &Task, tick: u64) -> Option<Task> {
+        if let Some(t) = self.fetch_after_revive(w, tick) {
+            return Some(t);
+        }
+        let Task::Enter(e) = chosen else {
+            return None;
+        };
+        let legs = parse_legs(STASH_TOML).ok()?;
+        let portal = |c: Cell| {
+            w.block_at(BlockPos::new(c.0, c.1, c.2))
+                .or_else(|| w.block_at(BlockPos::new(c.0, c.1 - 1, c.2)))
+        };
+        let here = portal(e.cell);
+        let from = e.from.as_deref();
+        let leg = legs
+            .into_iter()
+            .find(|l| from == Some(l.from.as_str()) && here == Some(l.portal))?;
+        self.stash_before(w, &leg, tick)
+    }
+
+    /// Before `leg`: the stash into the home chest of what is needed after it and not in it, the
+    /// home chest made first when there is none near. `None` once the trigger has run (stashed,
+    /// or skipped, each noted): the leg goes on.
+    pub fn stash_before(&mut self, w: &World, leg: &Leg, tick: u64) -> Option<Task> {
+        if self.stash.legs.contains(&leg.name) {
+            return None;
+        }
+        let done = |p: &mut Plan, what: String, why: String| {
+            p.stash.legs.push(leg.name.clone());
+            p.note(tick, what, why);
+            None
+        };
+        let Some(needs) = self.stash_needs() else {
+            return done(
+                self,
+                format!("stash before the {} skipped", leg.name),
+                "the keep table could not be read: nothing says what is needed after the leg"
+                    .to_owned(),
+            );
+        };
+        let list = stash_list(&pack(w), needs.as_ref(), leg);
+        if list.is_empty() {
+            return done(
+                self,
+                format!("stash before the {}: nothing to put away", leg.name),
+                "nothing held is needed after the leg past what the leg needs".to_owned(),
+            );
+        }
+        if let Some(why) = self.stash_danger(w) {
+            return done(
+                self,
+                format!("stash before the {} skipped: danger", leg.name),
+                format!("{why}; {} kept", list_text(&list)),
+            );
+        }
+        let dim = w.dimension.as_ref()?.name.clone();
+        self.home_placed(w, &dim, tick);
+        let home = self
+            .stash
+            .home
+            .clone()
+            .filter(|(d, c)| *d == dim && within(w, *c, crate::TABLE_SEARCH));
+        if let Some((_, c)) = home {
+            // The table put down for the chest comes along first.
+            if std::mem::take(&mut self.stash.table_placed)
+                && let Some(t) = self.carry_table(w, tick)
+            {
+                return Some(t);
+            }
+            return match Stash::new(w, c, &list, tick) {
+                Some(s) => {
+                    self.stash.legs.push(leg.name.clone());
+                    self.note(
+                        tick,
+                        format!(
+                            "stash before the {} at {c:?}: {}",
+                            leg.name,
+                            list_text(&list)
+                        ),
+                        "needed after the leg and not in it; the leg's own kept".to_owned(),
+                    );
+                    Some(Task::Stash(Box::new(s)))
+                }
+                None => done(
+                    self,
+                    format!("stash before the {} skipped", leg.name),
+                    format!("the home chest {c:?} is not in memory"),
+                ),
+            };
+        }
+        match self.home_chest_task(w, tick) {
+            Ok(t) => Some(t),
+            Err(why) => done(
+                self,
+                format!("stash before the {} skipped: no home chest", leg.name),
+                format!("{why}; {} kept", list_text(&list)),
+            ),
+        }
+    }
+
+    /// The chest just put down becomes the home chest: the nearest chest memory holds that it
+    /// did not hold before the place (no X-ray: memory has it from the block update).
+    fn home_placed(&mut self, w: &World, dim: &str, tick: u64) {
+        let Some(before) = self.stash.placing.clone() else {
+            return;
+        };
+        if !matches!(self.task, Task::Idle) {
+            return;
+        }
+        let new = w
+            .memory
+            .chests(dim)
+            .into_iter()
+            .map(|(c, _)| c)
+            .filter(|c| !before.contains(c) && within(w, *c, crate::TABLE_SEARCH))
+            .min_by_key(|c| {
+                w.body.map_or(0, |b| {
+                    let f = crate::path::feet_cell(b.pos);
+                    (c.0 - f.0).abs() + (c.1 - f.1).abs() + (c.2 - f.2).abs()
+                })
+            });
+        self.stash.placing = None;
+        if let Some(c) = new {
+            self.stash.home = Some((dim.to_owned(), c));
+            self.stash.chest_tasks = 0;
+            self.note(
+                tick,
+                format!("home chest at {c:?}"),
+                "the chest put down for the stash".to_owned(),
+            );
+        }
+    }
+
+    /// The next step toward a home chest where the bot stands (the `home-chest` row), or why
+    /// none is begun: no wood to spare, a trip, or the tasks' bound.
+    fn home_chest_task(&mut self, w: &World, tick: u64) -> Result<Task, String> {
+        let table = self.table.clone().ok_or("no goal table")?;
+        let goal = table
+            .until("home-chest")
+            .ok_or("no home-chest row in the goal table")?;
+        if self.stash.chest_tasks >= CHEST_TASKS {
+            return Err(format!("{CHEST_TASKS} tasks begun for it"));
+        }
+        let counts = crate::held(w);
+        let at_table = self.at_hand(w, data::BlockKind::CraftingTable, tick);
+        // The first step only: once begun, the wood is in planks, a table or the chest.
+        if self.stash.chest_tasks == 0 {
+            let has_table =
+                at_table.is_some() || counts.get(&ItemKind::CraftingTable).is_some_and(|n| *n > 0);
+            let (spare, want) = wood_to_spare(&counts, has_table);
+            if spare < want {
+                return Err(format!(
+                    "wood to spare {spare} planks of {want} (the leg's {} logs kept)",
+                    world::stage::READY_LOGS
+                ));
+            }
+        }
+        let table_near = at_table.is_some();
+        let near = move |b: data::BlockKind| b == data::BlockKind::CraftingTable && table_near;
+        let choice = crate::make::make_with(&table, &counts, &near, false, goal);
+        let row = match choice {
+            crate::make::Choice::Act(r) => r,
+            crate::make::Choice::Done => return Err("the needs planner has it held".to_owned()),
+            crate::make::Choice::Stuck => return Err("not makeable from what is held".to_owned()),
+        };
+        let task = match row.act {
+            Some(crate::make::Act::Craft(r)) if crate::make::fits_grid(r) => {
+                Task::Craft(crate::craft::Craft::new(r, tick))
+            }
+            Some(crate::make::Act::Craft(r)) => match at_table {
+                Some(t) => Task::Craft(crate::craft::Craft::at_table(r, t, tick)),
+                None => return Err(format!("craft {} wants a table at hand", r.id)),
+            },
+            Some(crate::make::Act::Place(b)) => {
+                let p = crate::place::Place::new(b, tick).ok_or(format!("{b:?} has no item"))?;
+                if b == data::BlockKind::Chest {
+                    let dim = w.dimension.as_ref().map_or("", |d| d.name.as_str());
+                    self.stash.placing =
+                        Some(w.memory.chests(dim).into_iter().map(|(c, _)| c).collect());
+                } else if b == data::BlockKind::CraftingTable {
+                    self.stash.table_placed = true;
+                }
+                Task::Place(p)
+            }
+            Some(
+                crate::make::Act::Gather
+                | crate::make::Act::Mine { .. }
+                | crate::make::Act::Smelt(_)
+                | crate::make::Act::Redig(_)
+                | crate::make::Act::Scoop,
+            )
+            | None => return Err(format!("{} would be a trip", row.id)),
+        };
+        self.stash.chest_tasks += 1;
+        self.note(
+            tick,
+            format!("home chest: {}", row.id),
+            format!(
+                "something to stash and no chest near; task {} of at most {CHEST_TASKS}",
+                self.stash.chest_tasks
+            ),
+        );
+        Ok(task)
+    }
+
+    /// After a death and a respawn: what the stages ahead want of the home chest's shown
+    /// contents, fetched, unless danger holds (it waits, noted) or nothing is wanted (noted).
+    fn fetch_after_revive(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if !self.stash.fetch_due {
+            return None;
+        }
+        let dim = w.dimension.as_ref()?.name.clone();
+        let over = |p: &mut Plan, what: &str, why: String| {
+            p.stash.fetch_due = false;
+            p.note(tick, format!("fetch after the respawn {what}"), why);
+            None
+        };
+        let Some((hd, c)) = self.stash.home.clone() else {
+            return over(self, "skipped", "no home chest".to_owned());
+        };
+        if hd != dim {
+            return over(self, "skipped", format!("the home chest is in {hd}"));
+        }
+        let Some(contents) = w.memory.chest(&dim, c).and_then(|s| s.contents.clone()) else {
+            return over(
+                self,
+                "skipped",
+                format!("the home chest {c:?} never shown open"),
+            );
+        };
+        let Some(needs) = self.stash_needs() else {
+            return over(
+                self,
+                "skipped",
+                "the keep table could not be read".to_owned(),
+            );
+        };
+        let list = fetch_list(&contents, &pack(w), needs.as_ref(), w.stage_reached);
+        if list.is_empty() {
+            return over(
+                self,
+                "not needed",
+                format!("nothing the chest {c:?} shows is wanted by a stage ahead"),
+            );
+        }
+        if let Some(why) = self.stash_danger(w) {
+            if tick >= self.stash.wait_noted_at {
+                self.stash.wait_noted_at = tick + crate::FAILURE_MEMORY_TICKS;
+                self.note(
+                    tick,
+                    "fetch after the respawn waits".to_owned(),
+                    format!("{why}; {} wanted", list_text(&list)),
+                );
+            }
+            return None;
+        }
+        let f = Fetch::new(w, c, &list, tick)?;
+        self.stash.fetch_due = false;
+        self.note(
+            tick,
+            format!("fetch after the respawn at {c:?}: {}", list_text(&list)),
+            "wanted by a stage ahead and not held".to_owned(),
+        );
+        Some(Task::Fetch(Box::new(f)))
+    }
+
+    /// The development aim `chest-trip` (parity only; never a frontier start nor a race's
+    /// evidence): the held chest put down, `TRIP` stashed in it, then fetched back, each a task
+    /// of the planner's own and each noted; met when the fetch has ended.
+    pub(crate) fn chest_trip_aim(&mut self, w: &World, tick: u64) -> Task {
+        let Some(dim) = w.dimension.as_ref().map(|d| d.name.clone()) else {
+            return Task::Idle;
+        };
+        self.home_placed(w, &dim, tick);
+        let met = |p: &mut Plan, why: String| {
+            p.stash.trip = TripStep::Over;
+            p.met = true;
+            p.note(tick, "chest trip met".to_owned(), why);
+            Task::Idle
+        };
+        match self.stash.trip {
+            TripStep::Place => {
+                if let Some((_, c)) = self.stash.home.clone() {
+                    self.stash.trip = TripStep::Stash;
+                    self.note(
+                        tick,
+                        format!("chest trip: the chest at {c:?} is down"),
+                        "stash next".to_owned(),
+                    );
+                    return Task::Idle;
+                }
+                if self.stash.placing.is_some() || self.stash.chest_tasks >= CHEST_TASKS {
+                    return met(self, "the chest was not put down".to_owned());
+                }
+                let Some(pl) = crate::place::Place::new(data::BlockKind::Chest, tick)
+                    .filter(|_| crate::craft::count(w, ItemKind::Chest) > 0)
+                else {
+                    return met(self, "no chest held".to_owned());
+                };
+                self.stash.chest_tasks += 1;
+                self.stash.placing =
+                    Some(w.memory.chests(&dim).into_iter().map(|(c, _)| c).collect());
+                self.note(
+                    tick,
+                    "chest trip: place the chest".to_owned(),
+                    "the development aim chest-trip, its first step".to_owned(),
+                );
+                Task::Place(pl)
+            }
+            TripStep::Stash | TripStep::Fetch => {
+                let Some((_, c)) = self.stash.home.clone() else {
+                    return met(self, "the chest is gone".to_owned());
+                };
+                let stash = self.stash.trip == TripStep::Stash;
+                let t = if stash {
+                    Stash::new(w, c, &TRIP, tick).map(|s| Task::Stash(Box::new(s)))
+                } else {
+                    Fetch::new(w, c, &TRIP, tick).map(|f| Task::Fetch(Box::new(f)))
+                };
+                let Some(t) = t else {
+                    return met(self, format!("the chest at {c:?} is not in memory"));
+                };
+                self.stash.trip = if stash {
+                    TripStep::Fetch
+                } else {
+                    TripStep::Over
+                };
+                self.note(
+                    tick,
+                    format!(
+                        "chest trip: {} {} at {c:?}",
+                        if stash { "stash" } else { "fetch" },
+                        list_text(&TRIP)
+                    ),
+                    "the development aim chest-trip".to_owned(),
+                );
+                t
+            }
+            TripStep::Over => met(
+                self,
+                format!(
+                    "{} stashes and {} fetches ended",
+                    self.stash.stashes, self.stash.fetches
+                ),
+            ),
+        }
+    }
+
+    /// The chest task in hand, one tick: its acts sent, its notes into the ledger, its end
+    /// handled. The task loop's one call site for `Task::Stash` and `Task::Fetch`.
+    pub(crate) fn chest_step(&mut self, w: &World, tick: u64) -> physics::Controls {
+        let (c, act, status, notes, t) = if let Task::Stash(s) = &mut self.task {
+            let (c, act, status) = s.step(w, tick);
+            (c, act, status, std::mem::take(&mut s.0.notes), s.0.clone())
+        } else if let Task::Fetch(f) = &mut self.task {
+            let (c, act, status) = f.step(w, tick);
+            (c, act, status, std::mem::take(&mut f.0.notes), f.0.clone())
+        } else {
+            return physics::Controls::default();
+        };
+        self.acts.extend(act);
+        for n in notes {
+            self.note(tick, n, format!("{} (issue 77)", t.way.word()));
+        }
+        let moved: i32 = t.wants.iter().map(|x| x.moved).sum();
+        match status {
+            ChestStatus::Running => return c,
+            ChestStatus::Done => {
+                self.failed_in_row = 0;
+                match t.way {
+                    Way::Stash => self.stash.stashes += 1,
+                    Way::Fetch => self.stash.fetches += 1,
+                }
+                self.note(
+                    tick,
+                    format!("{} done: {moved} items at {:?}", t.way.word(), t.chest),
+                    "back to the leg".to_owned(),
+                );
+            }
+            ChestStatus::Failed(f) => {
+                *self.failures.entry(format!("{f:?}")).or_default() += 1;
+                self.retry_at = tick + crate::RETRY_TICKS;
+                // A chest gone or covered is no home any more.
+                if matches!(f, ChestFailure::Gone | ChestFailure::Blocked)
+                    && self.stash.home.as_ref().is_some_and(|(_, h)| *h == t.chest)
+                {
+                    self.stash.home = None;
+                }
+                self.note(
+                    tick,
+                    format!("{} failed: {f:?}, {moved} items moved", t.way.word()),
+                    "the leg goes on without it".to_owned(),
+                );
+            }
+        }
+        self.task = Task::Idle;
+        physics::Controls::default()
+    }
+}
+// <<< stash
+
+// >>> stash (issue 77): the trigger at a real leg's portal, on the server model.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use protocol::decode;
+    use sim::{Config, In, Sim, flat_world};
+    use world::{Effect, Event};
+
+    const CONFIG: Config = Config {
+        view_distance: 2,
+        simulation_distance: 2,
+        peaceful: true,
+    };
+
+    /// The bot and the model joined on a flat world with a nether portal block at `PORTAL`.
+    struct Pair {
+        w: World,
+        sim: Sim,
+        tick: u64,
+    }
+
+    const PORTAL: Cell = (3, 64, 0);
+
+    impl Pair {
+        fn new(give: &[(ItemKind, i32)]) -> Self {
+            let mut m = flat_world(3, 63).unwrap();
+            let portal = data::BlockKind::NetherPortal.info().unwrap().default_state;
+            m.set_block(PORTAL.0, PORTAL.1, PORTAL.2, portal).unwrap();
+            let mut sim = Sim::new(CONFIG, m).seeded(11);
+            for g in give {
+                assert_eq!(sim.survival.give(*g), 0);
+            }
+            let mut p = Self {
+                w: World::new(),
+                sim,
+                tick: 0,
+            };
+            let protocol = i32::try_from(data::VERSION.protocol).unwrap();
+            let mut first = Vec::new();
+            for c in protocol::session::opening(protocol, "model", 0, "rs-gate") {
+                first.extend(p.sim.step(&In::Packet(c)).unwrap());
+            }
+            p.deliver(first);
+            for _ in 0..40 {
+                p.step(Vec::new());
+            }
+            assert!(p.w.body.is_some(), "joined and placed");
+            p
+        }
+
+        fn deliver(&mut self, mut to_bot: Vec<sim::Wire>) {
+            for _ in 0..64 {
+                if to_bot.is_empty() {
+                    return;
+                }
+                let mut to_model = Vec::new();
+                for wire in to_bot.drain(..) {
+                    if let Ok(p) = decode(wire.state, wire.id, &wire.body) {
+                        to_model.extend(self.w.step(&Event::Packet(p)));
+                    }
+                }
+                for e in to_model {
+                    if let Effect::Send(c) = e {
+                        to_bot.extend(self.sim.step(&In::Packet(c)).unwrap());
+                    }
+                }
+            }
+        }
+
+        fn step(&mut self, acts: Vec<Act>) {
+            let mut to_bot = self.sim.step(&In::Tick).unwrap();
+            for a in acts {
+                for e in self.w.step(&Event::Act(a)) {
+                    if let Effect::Send(c) = e {
+                        to_bot.extend(self.sim.step(&In::Packet(c)).unwrap());
+                    }
+                }
+            }
+            for e in self.w.step(&Event::Tick {
+                now_ms: self.tick * 50,
+                seed: self.tick | 1,
+            }) {
+                if let Effect::Send(c) = e {
+                    to_bot.extend(self.sim.step(&In::Packet(c)).unwrap());
+                }
+            }
+            self.deliver(to_bot);
+            self.tick += 1;
+        }
+    }
+
+    fn planner() -> Plan {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+        let goals: crate::make::Goals =
+            toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let table = crate::make::Table::new(&goals).unwrap();
+        Plan::with_table(crate::Aim::Race, std::sync::Arc::new(table))
+    }
+
+    /// The walk into the portal, as `nether_task` makes it (its note first).
+    fn enter(plan: &mut Plan, w: &World, tick: u64) -> Task {
+        let mut walk = Walk::new(
+            PORTAL,
+            crate::path::Goal::Block { pos: PORTAL },
+            crate::walk::Arrive::Goal,
+            tick,
+        );
+        assert!(walk.route_now(w, tick), "a way to the portal");
+        plan.note(
+            tick,
+            format!("enter the portal at {PORTAL:?}"),
+            "a lit portal seen".to_owned(),
+        );
+        Task::Enter(Box::new(crate::Enter {
+            walk,
+            cell: PORTAL,
+            inside_since: None,
+            from: w.dimension.as_ref().map(|d| d.name.clone()),
+        }))
+    }
+
+    fn whats(plan: &Plan) -> Vec<String> {
+        plan.events.iter().map(|e| e.what.clone()).collect()
+    }
+
+    /// A bot at the Nether portal with the bow's feathers to stash and only the leg's 4 logs:
+    /// no home chest was ever placed and none can be, so the stash is skipped with a note, the
+    /// walk in goes ahead with its own reason, and the trigger never runs again for the leg.
+    #[test]
+    fn at_the_portal_without_a_home_chest_the_stash_is_skipped_and_the_run_goes_on() {
+        let mut p = Pair::new(&[(ItemKind::OakLog, 4), (ItemKind::Feather, 16)]);
+        let mut plan = planner();
+        let t = enter(&mut plan, &p.w, p.tick);
+        let out = plan.stash_gate(&p.w, t, p.tick);
+        assert!(matches!(out, Task::Enter(_)), "the walk in goes ahead");
+        let what = whats(&plan);
+        assert!(
+            what.iter()
+                .any(|x| x == "stash before the nether skipped: no home chest"),
+            "{what:?}"
+        );
+        let why = plan
+            .events
+            .iter()
+            .map(|e| e.why.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            why.iter()
+                .any(|x| x.contains("wood to spare 0 planks of 12") && x.contains("16 feather")),
+            "{why:?}"
+        );
+        // The tick's last note is the walk's own again: the task ledger's reason for it.
+        assert_eq!(
+            what.last().map(String::as_str),
+            Some("enter the portal at (3, 64, 0)")
+        );
+        assert_eq!(plan.stash.legs, vec!["nether".to_owned()]);
+        assert!(plan.stash.home.is_none());
+        // The run goes on: the walk runs, no chest task is begun, the gate is quiet after.
+        plan.begin(out);
+        let notes = plan.event_count;
+        for _ in 0..20 {
+            plan.step(&p.w);
+            let acts = plan.take_acts();
+            p.step(acts);
+            assert!(
+                !matches!(
+                    plan.task,
+                    Task::Craft(_) | Task::Place(_) | Task::Stash(_) | Task::Fetch(_)
+                ),
+                "{}",
+                plan.task.name()
+            );
+        }
+        let again = enter(&mut plan, &p.w, p.tick);
+        let before = plan.event_count;
+        assert!(matches!(
+            plan.stash_gate(&p.w, again, p.tick),
+            Task::Enter(_)
+        ));
+        assert_eq!(plan.event_count, before, "no note the second time");
+        assert!(plan.event_count >= notes);
+        assert_eq!(crate::craft::count(&p.w, ItemKind::Feather), 16);
+    }
+
+    /// The same portal with nothing to stash: noted as such, no chest begun.
+    #[test]
+    fn at_the_portal_with_nothing_to_stash_no_chest_is_begun() {
+        let p = Pair::new(&[(ItemKind::OakPlanks, 64), (ItemKind::CraftingTable, 1)]);
+        let mut plan = planner();
+        let t = enter(&mut plan, &p.w, p.tick);
+        assert!(matches!(plan.stash_gate(&p.w, t, p.tick), Task::Enter(_)));
+        let what = whats(&plan);
+        assert!(
+            what.iter()
+                .any(|x| x == "stash before the nether: nothing to put away"),
+            "{what:?}"
+        );
+        assert!(plan.stash.home.is_none());
+    }
+}
+// <<< stash

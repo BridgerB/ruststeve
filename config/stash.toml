@@ -1,0 +1,28 @@
+# The stash planner's legs (issue 77, brain/ruststeve/design/chests.md, "The planner"): a dangerous
+# leg is entered through a portal from the overworld; before the step in, the planner stashes in
+# the home chest what config/keep.toml needs after the leg and not in it (`plan::stash::stash_list`).
+# Item counts are never here: keep.toml alone says how many of an item a stage needs
+# (`Keep::need_in` over a leg's stages), so the two files cannot drift (lead-77, 2026-11-28).
+#
+# A leg: its name (the ledger's), the dimension it is entered from, the portal block it is
+# entered through, and the stages it spans, by world::stage::Stage::name, in the ladder's order.
+# The stages after the last one are "after the leg". This file is compiled into the planner
+# (include_str!, commit-pinned): an edit needs a rebuild.
+
+# The Nether: entered through the bot's own nether portal (issue 15c), the leg from the first step
+# in (`nether`) to the twelve pearls (`pearls_12`); `overworld` is home again with the eyes
+# (issue 19's first checkpoint), so it and everything after are after the leg.
+[[leg]]
+name = "nether"
+from = "minecraft:overworld"
+portal = "nether_portal"
+stages = ["nether", "fortress", "spawner", "rods_7", "endermen", "forest", "pearls_6", "pearls_9", "pearls_12"]
+
+# The End: entered through the stronghold's end portal (issue 20d), the leg from the first step
+# in (`end`) to the credits (`win`); no stage comes after it, so nothing is needed after it and its
+# stash puts nothing away (the trigger still runs and says so).
+[[leg]]
+name = "end"
+from = "minecraft:overworld"
+portal = "end_portal"
+stages = ["end", "island", "crystals_5", "crystals_1", "crystals", "win"]

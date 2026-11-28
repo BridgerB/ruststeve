@@ -301,6 +301,65 @@ pub fn least_needed(
         .min_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(&b.0)))
 }
 
+/// The sub-planners whose `make` calls write want lines, each tagged in the line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Sub {
+    /// The forest base's rows (`plan::base`).
+    Base,
+    /// The eyes craft (`plan::eyes`).
+    Eyes,
+    /// The End's kit (`plan::end_portal`).
+    EndPortal,
+    /// The stronghold's stone pickaxes (`plan::stronghold`).
+    Stronghold,
+}
+
+impl Sub {
+    pub const ALL: [Sub; 4] = [Sub::Base, Sub::Eyes, Sub::EndPortal, Sub::Stronghold];
+
+    /// The tag a want line carries.
+    pub fn name(self) -> &'static str {
+        match self {
+            Sub::Base => "base",
+            Sub::Eyes => "eyes",
+            Sub::EndPortal => "end_portal",
+            Sub::Stronghold => "stronghold",
+        }
+    }
+}
+
+/// One episode step of the want lines: `state` is the goal last written for and the keys written.
+/// A key joining the short set is a line (what, why); one still short is none; one gone leaves
+/// the set, so its return is a line again; a new goal starts afresh. `tag` ends each line.
+fn episode(
+    state: &mut (String, Vec<String>),
+    goal: &str,
+    short: &[crate::make::Short],
+    tag: &str,
+) -> Vec<(String, String)> {
+    if state.0 != goal {
+        *state = (goal.to_owned(), Vec::new());
+    }
+    state.1.retain(|k| short.iter().any(|s| s.key == *k));
+    let mut out = Vec::new();
+    for s in short {
+        if state.1.contains(&s.key) {
+            continue;
+        }
+        state.1.push(s.key.clone());
+        let kinds = if s.items.is_empty() {
+            "fuel".to_owned()
+        } else {
+            kinds_text(&s.items)
+        };
+        out.push((
+            format!("want {kinds} {} for goal {goal}{tag}", s.n),
+            format!("the needs planner makes {} rather than holds it", s.key),
+        ));
+    }
+    out
+}
+
 /// Kinds as a want line names them: one, or every kind the recipe's cell takes, joined by `|`.
 fn kinds_text(set: &[ItemKind]) -> String {
     set.iter()
@@ -437,28 +496,33 @@ impl Plan {
     /// joins the short set, not again while it stays short, again if it leaves and comes back;
     /// a new goal starts afresh.
     pub(crate) fn goal_wants(&mut self, goal: &str, short: &[crate::make::Short], tick: u64) {
-        if self.keep_wants.0 != goal {
-            self.keep_wants = (goal.to_owned(), Vec::new());
+        let lines = episode(&mut self.keep_wants, goal, short, "");
+        for (what, why) in lines {
+            self.note(tick, what, why);
         }
-        self.keep_wants
-            .1
-            .retain(|k| short.iter().any(|s| s.key == *k));
-        for s in short {
-            if self.keep_wants.1.contains(&s.key) {
-                continue;
-            }
-            self.keep_wants.1.push(s.key.clone());
-            let kinds = if s.items.is_empty() {
-                "fuel".to_owned()
-            } else {
-                kinds_text(&s.items)
-            };
-            self.note(
-                tick,
-                format!("want {kinds} {} for goal {goal}", s.n),
-                format!("the needs planner makes {} rather than holds it", s.key),
-            );
+    }
+
+    /// A sub-planner's `make` call with its want lines: `traced` is `make::make_traced`'s answer,
+    /// and the choice is handed back. Lines read `want <kinds> <n> for goal <id> (<sub>)`, once an
+    /// episode with each sub's own memory (`Plan::keep_sub_wants`), so one sub's goal never
+    /// resets another's.
+    pub(crate) fn traced_want<'a>(
+        &mut self,
+        sub: Sub,
+        goal: &str,
+        tick: u64,
+        traced: (crate::make::Choice<'a>, Vec<crate::make::Short>),
+    ) -> crate::make::Choice<'a> {
+        let (choice, short) = traced;
+        let state = self
+            .keep_sub_wants
+            .entry(sub.name().to_owned())
+            .or_default();
+        let lines = episode(state, goal, &short, &format!(" ({})", sub.name()));
+        for (what, why) in lines {
+            self.note(tick, what, why);
         }
+        choice
     }
 
     /// The ledger's `want` lines for a craft that failed `Missing`: one for each ingredient it is
@@ -840,6 +904,56 @@ mod tests {
                 by: 8
             }
         );
+    }
+
+    /// A sub-planner's want line: tagged with its source, once an episode, its memory its own.
+    fn a_subs_want_fires_once_an_episode(sub: Sub) {
+        let mut p = Plan::new(crate::Aim::Race);
+        let stick = crate::make::Short {
+            key: "item:stick".to_owned(),
+            items: vec![ItemKind::Stick],
+            n: 4,
+        };
+        let tagged = format!("want Stick 4 for goal kit ({})", sub.name());
+        let count = |p: &Plan| p.events.iter().filter(|e| e.what == tagged).count();
+        let traced = |short: &[crate::make::Short]| (crate::make::Choice::Stuck, short.to_vec());
+        let one = std::slice::from_ref(&stick);
+        assert_eq!(
+            p.traced_want(sub, "kit", 1, traced(one)),
+            crate::make::Choice::Stuck
+        );
+        p.traced_want(sub, "kit", 2, traced(one));
+        assert_eq!(count(&p), 1, "once while it stays short");
+        // The main planner and the other subs keep their own memory.
+        p.goal_wants("other", one, 3);
+        for other in Sub::ALL.into_iter().filter(|o| *o != sub) {
+            p.traced_want(other, "other", 3, traced(one));
+        }
+        p.traced_want(sub, "kit", 4, traced(one));
+        assert_eq!(count(&p), 1, "another source's goal resets nothing");
+        p.traced_want(sub, "kit", 5, traced(&[]));
+        p.traced_want(sub, "kit", 6, traced(one));
+        assert_eq!(count(&p), 2, "gone and back is a new episode");
+    }
+
+    #[test]
+    fn the_bases_want_fires_once_an_episode() {
+        a_subs_want_fires_once_an_episode(Sub::Base);
+    }
+
+    #[test]
+    fn the_eyes_want_fires_once_an_episode() {
+        a_subs_want_fires_once_an_episode(Sub::Eyes);
+    }
+
+    #[test]
+    fn the_end_portals_want_fires_once_an_episode() {
+        a_subs_want_fires_once_an_episode(Sub::EndPortal);
+    }
+
+    #[test]
+    fn the_strongholds_want_fires_once_an_episode() {
+        a_subs_want_fires_once_an_episode(Sub::Stronghold);
     }
 
     #[derive(serde::Deserialize)]

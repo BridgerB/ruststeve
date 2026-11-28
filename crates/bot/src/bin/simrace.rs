@@ -283,6 +283,9 @@ fn landings(a: &Args, file: &str) -> Result<bool, String> {
         | plan::Aim::Nether
         | plan::Aim::Race
         | plan::Aim::Base
+        // >>> stash (issue 77)
+        | plan::Aim::ChestTrip
+        // <<< stash
         | plan::Aim::Hold => Some(std::sync::Arc::new(bot::goals_table(&a.goals)?)),
     };
     let kit: Vec<(data::ItemKind, i32)> = match &a.start {
