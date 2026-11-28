@@ -293,7 +293,7 @@ pub fn measure(
             let last = r
                 .plan
                 .as_ref()
-                .and_then(|p| p.events.last())
+                .and_then(|p| p.last_task_event())
                 .map_or(String::new(), |e| format!("{} ({})", e.what, e.why));
             format!("landing {}: {}", r.index, last)
         })

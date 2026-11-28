@@ -49,7 +49,7 @@ fn churned(p: &Plan) -> Option<String> {
     let tasks: Vec<&plan::PlanEvent> = p
         .events
         .iter()
-        .filter(|e| !e.what.starts_with("sprint "))
+        .filter(|e| !plan::sprint::is_note(&e.what))
         .collect();
     tasks.windows(2).find_map(|e| {
         let (a, b) = (&e[0], &e[1]);

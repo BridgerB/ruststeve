@@ -1167,9 +1167,15 @@ impl Plan {
 
     /// Why the current task runs, for the case file and the live stream.
     pub fn why(&self) -> String {
-        self.events
-            .last()
+        self.last_task_event()
             .map_or_else(|| "no task yet".to_owned(), |e| e.why.clone())
+    }
+
+    /// The newest event about the task, not its pace: what the bot is doing, for the case
+    /// file's "doing" and the progress rows. The pace gate's notes (`sprint::is_note`) come
+    /// after the task's own event and are skipped.
+    pub fn last_task_event(&self) -> Option<&PlanEvent> {
+        self.events.iter().rev().find(|e| !sprint::is_note(&e.what))
     }
 
     /// One tick: the controls to press. The world is read, never changed. Every task begun or
