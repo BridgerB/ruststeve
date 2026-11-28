@@ -183,6 +183,89 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             Ok(())
         }
+        Some("level-time") => {
+            // level-time <level.dat>: Data.Time and every seed and time in the world's files (69).
+            let path = args.get(1).ok_or("level-time needs a level.dat")?;
+            print!(
+                "{}",
+                results::seeds::render_level(&results::seeds::level(Path::new(path))?)
+            );
+            Ok(())
+        }
+        Some("lineage-assets") => {
+            // lineage-assets <lineage.toml>: `<tag> <asset>` a line, for a probe to download (69).
+            let path = args.get(1).ok_or("lineage-assets needs a lineage file")?;
+            for k in results::seeds::Lineage::read(Path::new(path))?.links {
+                println!("{} {}", k.tag, k.asset);
+            }
+            Ok(())
+        }
+        Some("seeds") => {
+            // seeds [--lineage <file> <root>] [--rows <out.toml>] <dirs>... (issue 69): per seed
+            // the game ticks from spawn to each stage, then the table.
+            let (mut lineage, mut rows_out, mut dirs) = (None, None, Vec::new());
+            let mut it = args.iter().skip(1);
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--lineage" => {
+                        let file = it.next().ok_or("--lineage needs a file and a root")?;
+                        let root = it.next().ok_or("--lineage needs a file and a root")?;
+                        lineage = Some((file.clone(), root.clone()));
+                    }
+                    "--rows" => rows_out = Some(it.next().ok_or("--rows needs a file")?.clone()),
+                    _ => dirs.push(a.clone()),
+                }
+            }
+            let mut snaps = Vec::new();
+            if let Some((file, root)) = lineage {
+                let l = results::seeds::Lineage::read(Path::new(&file))?;
+                for k in &l.links {
+                    let dir = results::seeds::Lineage::link_dir(Path::new(&root), k);
+                    let found =
+                        results::seeds::snapshot_dirs(&[dir.to_string_lossy().into_owned()]);
+                    let one = found.first().ok_or_else(|| {
+                        format!("{}: no snapshot under {}", k.asset, dir.display())
+                    })?;
+                    if let Some(mut s) = results::seeds::read_snapshot(one)? {
+                        if s.stage != k.stage {
+                            eprintln!(
+                                "seeds: {} says {}, the lineage {}",
+                                k.asset, s.stage, k.stage
+                            );
+                        }
+                        s.seed.clone_from(&l.seed);
+                        eprintln!("seeds: link {} {} {}", s.stage, s.ticks, k.asset);
+                        snaps.push(s);
+                    }
+                }
+            }
+            for d in results::seeds::snapshot_dirs(&dirs) {
+                if let Some(s) = results::seeds::read_snapshot(&d)? {
+                    snaps.push(s);
+                }
+            }
+            // The runs under the same dirs (issue 56's stage ticks; the stalls): each batch's
+            // seed from the nearest lanes.toml, its ledgers beside it.
+            let mut batches = Vec::new();
+            for f in files_under(&dirs, |n| n == "batch.rsb") {
+                let mut b = results::read_batch(&f)?;
+                let dir = f.parent().unwrap_or(Path::new(".")).to_path_buf();
+                results::fill_stage_ticks(&mut b, &dir);
+                batches.push((results::seeds::batch_seed(&f, b.lane), dir, b));
+            }
+            let stalls = results::seeds::stalls(&batches);
+            if let Some(out) = rows_out {
+                std::fs::write(&out, results::seeds::rows_toml(&snaps, &stalls)?)
+                    .map_err(|e| format!("{out}: {e}"))?;
+            }
+            print!("{}", results::seeds::render(&results::seeds::fold(&snaps)));
+            print!("{}", results::seeds::render_stalls(&stalls));
+            print!(
+                "{}",
+                results::seeds::render_run_ticks(&results::seeds::run_ticks(&batches))
+            );
+            Ok(())
+        }
         Some("endermen") => {
             let files = files_under(args.get(1..).unwrap_or(&[]), |n| n.ends_with(".senses.rss"));
             let mut census = results::census::EndermanCensus::default();

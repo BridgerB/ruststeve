@@ -3,8 +3,12 @@
 //! ```text
 //! cargo run -q -p xtask -- deps-boundary       the core crates depend on nothing that does I/O
 //! cargo run -q -p xtask -- commit-msg <file>   a commit message keeps the repository's rules
-//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful] [--config config/race.toml] [--rcon-port 25575] [--view-distance N]
+//! cargo run -q -p xtask -- server [--dir target/server] [--port 25565] [--jar target/datagen/server.jar] [--difficulty peaceful] [--config config/race.toml] [--rcon-port 25575] [--view-distance N] [--seed VALUE]
 //!                                            a local vanilla 26.1.2 server (offline, simulation distance 3)
+//! cargo run -q -p xtask -- seeds [--file config/seeds.toml]
+//!                                            the seeds' names, one a line, in file order (the relay's matrix)
+//! cargo run -q -p xtask -- seed <name> [--file config/seeds.toml]
+//!                                            that seed's level-seed value; exit 1 when the name is unknown
 //! ```
 //!
 //! Standard library only, like `brain-check`: it must build in seconds.
@@ -48,8 +52,12 @@ fn main() -> ExitCode {
             }
         },
         Some("server") => server(&std::env::args().skip(2).collect::<Vec<_>>()),
+        Some("seeds") => seeds(&std::env::args().skip(2).collect::<Vec<_>>()),
+        Some("seed") => seed(&std::env::args().skip(2).collect::<Vec<_>>()),
         other => {
-            eprintln!("unknown task {other:?}; tasks: deps-boundary, commit-msg, server");
+            eprintln!(
+                "unknown task {other:?}; tasks: deps-boundary, commit-msg, server, seeds, seed"
+            );
             ExitCode::FAILURE
         }
     }
@@ -203,39 +211,23 @@ fn server_properties(
 /// accept the EULA, write the properties, `java -jar server.jar nogui` (Java 25: `nix develop`).
 /// The world in `dir` is kept between runs; nothing here deletes one.
 fn server(args: &[String]) -> ExitCode {
-    let mut dir = "target/server".to_owned();
-    let mut port = "25565".to_owned();
-    let mut jar = "target/datagen/server.jar".to_owned();
-    let mut difficulty = None;
-    let mut config = "config/race.toml".to_owned();
-    let mut rcon_port = "25575".to_owned();
-    let mut view_distance: Option<u32> = None;
-    let mut it = args.iter();
-    while let Some(flag) = it.next() {
-        let Some(value) = it.next() else {
-            eprintln!("{flag} needs a value");
+    let a = match ServerArgs::parse(args) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("server: {e}");
             return ExitCode::FAILURE;
-        };
-        match flag.as_str() {
-            "--dir" => dir.clone_from(value),
-            "--port" => port.clone_from(value),
-            "--jar" => jar.clone_from(value),
-            "--difficulty" => difficulty = Some(value.clone()),
-            "--config" => config.clone_from(value),
-            "--rcon-port" => rcon_port.clone_from(value),
-            "--view-distance" => match value.parse() {
-                Ok(v) => view_distance = Some(v),
-                Err(e) => {
-                    eprintln!("--view-distance: {e}");
-                    return ExitCode::FAILURE;
-                }
-            },
-            other => {
-                eprintln!("unknown flag {other}");
-                return ExitCode::FAILURE;
-            }
         }
-    }
+    };
+    let ServerArgs {
+        dir,
+        port,
+        jar,
+        difficulty,
+        config,
+        rcon_port,
+        view_distance,
+        seed,
+    } = a;
     let mut race = match results::config::RaceConfig::read(&config) {
         Ok((c, _)) => c,
         Err(e) => {
@@ -243,6 +235,11 @@ fn server(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    // Issue 69: a relay lane runs its own seed's world (`xtask seed <name>`); without the flag
+    // the server keeps the race seed, so every older workflow and local server is unchanged.
+    if let Some(s) = seed {
+        race.server.seed = s;
+    }
     // A capture server sends only what it captures: a smaller view distance generates fewer
     // chunks per landing.
     if let Some(v) = view_distance {
@@ -273,8 +270,9 @@ fn server(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     }
     println!(
-        "server: {} on port {port}, rcon {}",
+        "server: {} on port {port}, seed {}, rcon {}",
         dir.display(),
+        race.server.seed,
         if password.is_some() {
             rcon_port.as_str()
         } else {
@@ -298,9 +296,176 @@ fn server(args: &[String]) -> ExitCode {
     }
 }
 
+/// `xtask server`'s flags, each `--flag value`; a flag left out keeps its default.
+#[derive(Debug, PartialEq, Eq)]
+struct ServerArgs {
+    dir: String,
+    port: String,
+    jar: String,
+    difficulty: Option<String>,
+    config: String,
+    rcon_port: String,
+    view_distance: Option<u32>,
+    /// `level-seed` in place of the race config's `seed` (issue 69).
+    seed: Option<String>,
+}
+
+impl ServerArgs {
+    fn parse(args: &[String]) -> Result<Self, String> {
+        let mut a = Self {
+            dir: "target/server".to_owned(),
+            port: "25565".to_owned(),
+            jar: "target/datagen/server.jar".to_owned(),
+            difficulty: None,
+            config: "config/race.toml".to_owned(),
+            rcon_port: "25575".to_owned(),
+            view_distance: None,
+            seed: None,
+        };
+        let mut it = args.iter();
+        while let Some(flag) = it.next() {
+            let value = it.next().ok_or_else(|| format!("{flag} needs a value"))?;
+            match flag.as_str() {
+                "--dir" => a.dir.clone_from(value),
+                "--port" => a.port.clone_from(value),
+                "--jar" => a.jar.clone_from(value),
+                "--difficulty" => a.difficulty = Some(value.clone()),
+                "--config" => a.config.clone_from(value),
+                "--rcon-port" => a.rcon_port.clone_from(value),
+                "--view-distance" => {
+                    a.view_distance =
+                        Some(value.parse().map_err(|e| format!("--view-distance: {e}"))?);
+                }
+                // An empty value would make vanilla pick a random world: never a fixed seed.
+                "--seed" if value.trim().is_empty() => {
+                    return Err("--seed: an empty value".to_owned());
+                }
+                "--seed" => a.seed = Some(value.clone()),
+                other => return Err(format!("unknown flag {other}")),
+            }
+        }
+        Ok(a)
+    }
+}
+
+/// The seeds file `seeds` and `seed` read: `--file <path>` anywhere, else `config/seeds.toml`;
+/// the other words, in order.
+fn seeds_args(args: &[String]) -> Result<(String, Vec<String>), String> {
+    let mut file = "config/seeds.toml".to_owned();
+    let mut rest = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--file" {
+            file.clone_from(it.next().ok_or("--file needs a value")?);
+        } else {
+            rest.push(a.clone());
+        }
+    }
+    Ok((file, rest))
+}
+
+/// `xtask seeds`: every seed's name, one a line, in file order.
+fn seeds(args: &[String]) -> ExitCode {
+    let listed = seeds_args(args).and_then(|(file, rest)| match rest.as_slice() {
+        [] => results::config::Seeds::read(&file),
+        _ => Err(format!(
+            "unexpected {rest:?}; usage: xtask seeds [--file <path>]"
+        )),
+    });
+    match listed {
+        Ok(s) => {
+            for seed in &s.seed {
+                println!("{}", seed.name);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("seeds: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The value of the seed named `name`, or why there is none.
+fn seed_value(seeds: &results::config::Seeds, name: &str) -> Result<String, String> {
+    seeds
+        .find(name)
+        .map(|s| s.value.to_string())
+        .ok_or_else(|| {
+            let names: Vec<&str> = seeds.seed.iter().map(|s| s.name.as_str()).collect();
+            format!("no seed {name:?}; seeds: {}", names.join(", "))
+        })
+}
+
+/// `xtask seed <name>`: that seed's `level-seed` value, for `xtask server --seed`.
+fn seed(args: &[String]) -> ExitCode {
+    let value = seeds_args(args).and_then(|(file, rest)| match rest.as_slice() {
+        [name] => seed_value(&results::config::Seeds::read(&file)?, name),
+        _ => Err("usage: xtask seed <name> [--file <path>]".to_owned()),
+    });
+    match value {
+        Ok(v) => {
+            println!("{v}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("seed: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::message_problems;
+    use super::{ServerArgs, message_problems, seed_value, seeds_args};
+
+    fn words(s: &str) -> Vec<String> {
+        s.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn no_seed_flag_keeps_the_race_seed() {
+        let a = ServerArgs::parse(&words("--port 25566 --view-distance 4")).expect("args");
+        assert_eq!(a.seed, None);
+        assert_eq!(a.port, "25566");
+        assert_eq!(a.view_distance, Some(4));
+        assert_eq!(a.config, "config/race.toml");
+    }
+
+    #[test]
+    fn the_seed_flag_overrides() {
+        let a = ServerArgs::parse(&words("--seed -4172144997902289642 --dir d")).expect("args");
+        assert_eq!(a.seed.as_deref(), Some("-4172144997902289642"));
+        assert_eq!(a.dir, "d");
+    }
+
+    #[test]
+    fn bad_server_flags_are_refused() {
+        assert!(ServerArgs::parse(&words("--seed")).is_err());
+        assert!(ServerArgs::parse(&["--seed".to_owned(), " ".to_owned()]).is_err());
+        assert!(ServerArgs::parse(&words("--sed 1")).is_err());
+        assert!(ServerArgs::parse(&words("--view-distance x")).is_err());
+    }
+
+    #[test]
+    fn seeds_args_take_a_file_anywhere() {
+        assert_eq!(
+            seeds_args(&words("typecraft --file f.toml")).expect("args"),
+            ("f.toml".to_owned(), words("typecraft"))
+        );
+        assert_eq!(
+            seeds_args(&[]).expect("args"),
+            ("config/seeds.toml".to_owned(), Vec::new())
+        );
+        assert!(seeds_args(&words("--file")).is_err());
+    }
+
+    #[test]
+    fn a_seed_is_looked_up_by_name() {
+        let seeds = results::config::Seeds::read("../../config/seeds.toml").expect("seeds");
+        assert_eq!(seed_value(&seeds, "typecraft").as_deref(), Ok("typecraft"));
+        assert!(seed_value(&seeds, "no-such-seed").is_err());
+    }
 
     #[test]
     fn a_plain_message_passes() {

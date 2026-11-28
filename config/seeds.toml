@@ -1,0 +1,115 @@
+# The fixed list of seeds the relay races on (issue 69; brain/ruststeve/design/seeds.md). Chosen
+# once and kept: a seed's frontier (config/frontier/<name>.toml) and every number measured on it
+# mean nothing if its world changes. `xtask seeds` lists the names in this order; `xtask seed
+# <name>` prints the value for `xtask server --seed`.
+#
+# The facts in comments (spawn biome, the nearest stronghold and fortress) were measured on a probe
+# server per seed and cite its run. They are development knowledge, never a bot input: the bot
+# finds every structure the way it does on any world (strict no X-ray).
+#
+# name: [a-z0-9-]+. value: server.properties' level-seed, a string (vanilla hashes it) or a
+# 64-bit number (taken as it is). Seeds are only ever added, at the end; none is renamed,
+# re-valued or removed.
+
+# The facts below are from probe 46118069221 (2026-11-27). There, one vanilla 26.1.2 server per
+# seed was asked over RCON:
+# - the spawn chunk (`forceload add ~ ~`: the console stands at the world spawn);
+# - the spawn's biome (`execute if biome ~ ~ ~`);
+# - `locate`, from the spawn: the nearest ocean (#is_ocean), village, ruined portal and
+#   stronghold;
+# - `locate`, in the Nether, from the spawn's chunk position / 8: the fortress and the bastion.
+# Distances are as `locate` printed them. A forest spawn is vanilla's usual one: 7 of the 15
+# candidates. None of the 15 spawned in a desert or on an ocean (vanilla's spawn search avoids
+# water).
+[[seed]]
+# The issue-20 lineage: every frontier up to the win (config/frontier.toml) is this world, and
+# config/race.toml's `seed` is this value.
+# Spawn: chunk (0, 0), plains. Ocean 131. Village (savanna) 878. Ruined portal 343. Stronghold
+# (1648, -16), 1,648 east. Nether from (0, 0): fortress (48, 176) 182, bastion (-128, -192) 230.
+# End (probe 46118698150, as config/end.toml): caged spikes [-34, 24] and [42, 0]; the island
+# on z 0 ends at x 72 in the lip at y 52; end stone top at (0, 0) 62.
+name = "typecraft"
+value = "typecraft"
+tests = "the win lineage"
+
+[[seed]]
+# Kept for the farthest stronghold of the 15: the overland walk and the eyes' line run more than
+# 1.5 times typecraft's distance, mostly north.
+# Spawn: chunk (-2, 0), forest. Ocean (cold) 295. Village 452. Ruined portal 339. Stronghold
+# (-368, -2592), 2,613. Nether from (-4, 0): fortress (-288, -192) 342, bastion (-352, 336) 483.
+# End (probe 46118698150): caged [-34, 24] and [42, 0], heights shuffled; the island on z 0
+# rises to y 57 and runs past x 76 toward the platform; (0, 0) top 64.
+name = "far-stronghold"
+value = 2
+tests = "a far stronghold (2,613 blocks): the overland walk and the eyes over a long way"
+
+[[seed]]
+# Kept for the farthest fortress of the 15, nearly four times typecraft's: the Nether leg's
+# heading, its tunnels and its food all run long before the first blaze. The stronghold is far too.
+# Spawn: chunk (0, 1), birch forest. Ocean 400. Village 244. Ruined portal 197. Stronghold
+# (-272, 2144), 2,145. Nether from (0, 2): fortress (-128, 688) 697, bastion (64, 240) 246.
+# End (probe 46118698150): caged [12, 39] and [-42, -1]; the island on z 0 ends at x 65 at
+# y 44, under the platform's 48; (0, 0) top 60.
+name = "far-fortress"
+value = "ruststeve"
+tests = "a far fortress (697 blocks in the Nether): a long Nether leg before the blazes"
+
+[[seed]]
+# Kept as the one dry spawn of the 15: wooded badlands. The biome (vanilla's surface rules) lays
+# terracotta bands and red sand, and its only trees are the plateau's oaks. It tests the first
+# wood, and a surface that is not stone.
+# Spawn: chunk (0, 0), wooded badlands. Ocean (warm) 815. Village (desert) 457. Ruined portal 305.
+# Stronghold (-1312, -2032), 2,418. Nether from (0, 0): fortress (32, 352) 353, bastion
+# (-96, -352) 364.
+# End (probe 46118698150): caged [-34, -25] and [-13, -40]; the island on z 0 slopes from y 57
+# at x 60 to 42 at x 76; (0, 0) top 61.
+name = "badlands"
+value = 1337
+tests = "a dry spawn (wooded badlands): little wood, terracotta for stone"
+
+[[seed]]
+# Kept as the cold spawn: snowy taiga beside a frozen ocean, so it has snow, ice, powder snow,
+# strays at night and the ocean in sight from the start.
+# Spawn: chunk (2, -4), snowy taiga. Ocean (frozen) 71. Village (snowy) 710. Ruined portal
+# (ocean) 499. Stronghold (-1424, 16), 1,458. Nether from (4, -8): fortress (304, -128) 323,
+# bastion (-352, -192) 400.
+# End (probe 46118698150): caged [12, 39] and [-13, -40]; the island on z 0 at y 46 to 50 past
+# x 76; (0, 0) top 61.
+name = "cold"
+value = "glacier"
+tests = "a cold spawn by a frozen ocean: snow, ice, strays"
+
+[[seed]]
+# Kept as the dense spawn: a bamboo jungle, where the walk, the sight lines and the first tree
+# all differ from open forest. The fortress is far too.
+# Spawn: chunk (2, -4), bamboo jungle. Ocean (lukewarm) 135. Village (desert) 912. Ruined portal
+# (ocean) 524. Stronghold (96, -1632), 1,580. Nether from (4, -6): fortress (-384, -256) 461,
+# bastion (272, -336) 425.
+# End (probe 46118698150): caged [12, 39] and [-13, -40]; the island on z 0 at y 58 to 59 past
+# x 76; (0, 0) top 61.
+name = "jungle"
+value = 404
+tests = "a dense spawn (bamboo jungle): walking, sight and the first wood"
+
+[[seed]]
+# Kept as the pale garden spawn (the creaking at night, pale oak for wood), the farthest from
+# any ocean (995), with a ruined portal 80 away and a near fortress. Value "ocean" is only the
+# word tried; the world has no ocean near.
+# Spawn: chunk (0, 0), pale garden. Ocean (lukewarm) 995. Village (savanna) 745. Ruined portal 80.
+# Stronghold (-1376, 464), 1,452. Nether from (0, 0): fortress (-160, -80) 178, bastion (16, 224)
+# 224.
+# End (probe 46118698150): caged [12, 39] and [-13, 39]; the island on z 0 ends at x 63 at
+# y 40 to 43; (0, 0) top 58.
+name = "pale-garden"
+value = "ocean"
+tests = "a pale garden spawn: the creaking at night, pale oak, no ocean near"
+
+[[seed]]
+# Added from probe 46118698150's 17 further candidates (none spawned in a desert either, 32 in all):
+# the nearest to an ocean spawn, on a stony shore 64 from a warm ocean, with the nearest fortress
+# of any kept seed. It tests the first wood and food on a coast, and water from the first minute.
+# Spawn: stony shore. Ocean (warm) 64. Stronghold (1328, 480), 1,335. Nether (from the spawn's
+# position, unscaled): fortress (112, 32) 107. Its End is not measured.
+name = "shore"
+value = 11
+tests = "a shore spawn by a warm ocean: water and a coast from the first minute"
