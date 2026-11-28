@@ -964,6 +964,41 @@ impl Plan {
         let body = w.body?;
         let feet = path::stand_cell(w, body.pos);
         let floor = kind(w, (feet.0, feet.1 - 1, feet.2));
+        // A resume past the island (a snapshot on a spike's stand, a pillar): no arrival and never a
+        // bridge (race 46108868213 lane 3: resumed atop spike [42, 0] at (42.5, 82, 3.5), taken for a
+        // fresh arrival, a sky bridge west at y 81, knocked off, dead).
+        if !self.end.bridged
+            && w.stage_reached
+                .is_some_and(|s| s >= world::stage::Stage::Island)
+        {
+            self.end.arrived = true;
+            self.end.bridged = true;
+            self.note(
+                tick,
+                format!("end: resumed at {feet:?}, past the island"),
+                format!(
+                    "stage {:?}: no arrival, no bridge; {:.0} from the fountain",
+                    w.stage_reached,
+                    flat_to_fountain(body.pos)
+                ),
+            );
+        }
+        // Up a spike or a pillar: E4's step-off first, before any other path of E3's.
+        if self.end.bridged
+            && (crate::spikes::on_spike(w, feet)
+                || crate::spikes::on_pillar(w, feet, &self.spikes.pillars))
+            && let Some(t) = self.end_spikes(w, tick)
+        {
+            if !self.end.down_noted {
+                self.end.down_noted = true;
+                self.note(
+                    tick,
+                    format!("end: up a spike or pillar at {feet:?}, the crystals' task first"),
+                    "E4's step-off and descent".to_owned(),
+                );
+            }
+            return Some(t);
+        }
         if !self.end.arrived {
             self.end.arrived = true;
             self.note(

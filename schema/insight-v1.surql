@@ -98,3 +98,33 @@ DEFINE TABLE IF NOT EXISTS deaths AS
 DEFINE TABLE IF NOT EXISTS endings AS
     SELECT commit, start, ending, killer, doing, why, count() AS n
     FROM run GROUP BY commit, start, ending, killer, doing, why;
+
+-- Issue 69 (accreted): one row per snapshot, its seed and its world's clock, so per-seed time
+-- across commits is a query. seed_stage:[<race run id>, <bot>, <stage name>], from the
+-- `seed-rows*.toml` files `results seeds --rows` writes (a stage snapshot's level.dat Data.Time).
+DEFINE TABLE IF NOT EXISTS seed_stage SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS seed ON seed_stage TYPE string;              -- config/seeds.toml's name
+DEFINE FIELD IF NOT EXISTS stage ON seed_stage TYPE string;
+DEFINE FIELD IF NOT EXISTS rank ON seed_stage TYPE int;
+DEFINE FIELD IF NOT EXISTS ticks ON seed_stage TYPE int;               -- game ticks since the world was made
+DEFINE FIELD IF NOT EXISTS commit ON seed_stage TYPE string;
+DEFINE FIELD IF NOT EXISTS race_run ON seed_stage TYPE string;
+DEFINE FIELD IF NOT EXISTS lane ON seed_stage TYPE int;
+DEFINE FIELD IF NOT EXISTS bot ON seed_stage TYPE string;
+-- The least ticks to each stage, per seed and commit: the trend across commits.
+DEFINE TABLE IF NOT EXISTS seed_best AS
+    SELECT seed, stage, rank, commit, math::min(ticks) AS ticks, count() AS n
+    FROM seed_stage GROUP BY seed, stage, rank, commit;
+-- Issue 69 (accreted): where a seed's bots stopped and why, per seed and race run:
+-- seed_stall:[<seed>, <race run id>]. Reasons are `<signature> x<n>`, most first.
+DEFINE TABLE IF NOT EXISTS seed_stall SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS seed ON seed_stall TYPE string;
+DEFINE FIELD IF NOT EXISTS stage ON seed_stall TYPE string;            -- the furthest stage reached
+DEFINE FIELD IF NOT EXISTS rank ON seed_stall TYPE int;
+DEFINE FIELD IF NOT EXISTS k ON seed_stall TYPE int;                   -- counted runs that reached it
+DEFINE FIELD IF NOT EXISTS n ON seed_stall TYPE int;                   -- counted runs of the seed
+DEFINE FIELD IF NOT EXISTS reasons ON seed_stall TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS bot ON seed_stall TYPE string;              -- the first to reach it
+DEFINE FIELD IF NOT EXISTS race_run ON seed_stall TYPE string;
+DEFINE FIELD IF NOT EXISTS lane ON seed_stall TYPE int;
+DEFINE FIELD IF NOT EXISTS last_task ON seed_stall TYPE string;        -- its ledger's last task

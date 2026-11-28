@@ -6,7 +6,7 @@ tags: [decision, physics, oracle, clojurecraft, jump, sprint]
 aliases: [inertia before the move, pre-move inertia, landed inertia, travelInAir inertia]
 status: verified
 lastUpdated: 2026-11-28
-verifiedAgainst: ruststeve@97525c3 clojurecraft@be85a92
+verifiedAgainst: ruststeve@c22160a clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#clojurecraft read it after the move; decision inertia-before-the-move."
   - "ruststeve:crates/physics/tests/differential.rs#fn every_step_from_clojurecraft_state_agrees() {"
@@ -41,3 +41,13 @@ Walking jumps and steps off a ledge carried the same error, hidden from the pari
 
 ## What would change it
 A real-server trace of a jump that settles at 0.91 on its take-off tick. The parity rows that jump (p02-sprint-jump, the m-rows' `jump:` scripts) are where it would show.
+
+## The cost, and why it stays
+The old rule moved the client further on every hop than vanilla allows. The server never checks a move's speed against the sprint or the jump (`moved too quickly` is a 100-squared bound per packet), so the extra distance was taken as sent: an unearned speed edge. "No cheats" rules that out, so the vanilla rule stays even where it costs.
+
+It costs on retreats. Two 8 × 14 iron-kit races on 8643d925 (the vanilla rule, no sprint; 46121815604, 46125605993) against two on f2408e5 (the old rule; 46115072696, 46115074754):
+- iron_kit: 144/224 against 142/224;
+- creeper retreats started (`defend Creeper` notes): 154 against 101;
+- creeper deaths: 10 against 2, so 6.5% of retreats against 2.0%.
+
+The bot's shorter vanilla hops lose ground to a creeper. Sprinting ([[sprint]]) is the honest way to win the distance back.
