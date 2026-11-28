@@ -5,8 +5,8 @@ type: reference
 tags: [plan, make, smelting, fuel, needs, spares]
 aliases: [fuel:ticks, smelt rows, burn order, wood covers, log reserve, spares, make_with, gather_now, batch, collect, iron-kit, ingots, furnace row, make-expected-iron]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#fn resolve_fuel(&self, counts: Counts, n: i32, path: &[Vec<ItemKind>]) -> Resolved<'a> {"
   - "ruststeve:crates/plan/src/make.rs#pub fn burn_order() -> Vec<ItemKind> {"
@@ -35,7 +35,7 @@ Issue 13b. Iron is the first item the planner gets from a furnace: its needs rea
 ## How it works
 - **Smelt rows** (`smelt-row`): one producer per furnace recipe: its input, then `fuel:ticks` for one cook (after the input, so the input is never its own fuel), then `block:furnace`; it provides the result. A furnace near comes from memory (a placed furnace is watched); else `place-furnace`, and the furnace is crafted at a table from 8 cobblestone.
 - **The fuel need** (`resolve-fuel-need`): met when the fuel held burns the ticks, taken out in the smelt's own burn order (the `coals` tag, then the `planks` tag, each by name and only what burns, then sticks over a reserve of 2 (a pickaxe's handle, wall 20); never logs or tools); else the rest is planned from coal (mine-coal), then planks, planks first when the logs held, less a reserve of one (a new pickaxe's wood), make them (`wood-covers?`).
-- **Spares** (`resolve-spares`): a row keeps one more of each `spares` item than it holds, made only when the producer is worth it now: never a mine or a scoop, a gather only when a log can be started (`make_with`'s `gather_now`, the world's nearest log) or when low on digs. `mine-iron` spares a stone pickaxe and 24 sticks; `ingots`, `portal-kit` and `portal` 24 sticks; `fill-bucket` a pickaxe.
+- **Spares** (`resolve-spares`): a row keeps one more of each `spares` item than it holds, made only when the producer is worth it now: never a mine or a scoop, a gather only when a log can be started (`make_with`'s `gather_now`, the world's nearest log) or when low on digs. `mine-iron` spares a stone pickaxe and 24 sticks; `ingots`, `portal-kit` and `portal` 24 sticks; `fill-bucket`, `mine-coal` and `dig-gravel` a pickaxe.
 - **Wear** (blaze wall 7, `make_with_wear`, `make::Wear` from `Plan::wear`): a spare is counted without worn tools (`without-worn`: fewer than `[survival] spare_uses` 40 uses left), so a nearly broken pickaxe is not the spare; and when the digs held (`dig_budget`: the pickaxes' uses left, plus 131 for each stone pickaxe the held wood and stone make with a table held or near) are under `travel_reserve_digs` 131, a spare's gather is worth it from anywhere, while the bot can still dig to the trees.
 - **Batching**: a smelt act cooks all of the input held (to 64): one trip to the furnace for the ore. A smelt cut with its batch loaded (an always-row) leaves `Plan::batch`, and the next decision goes back to collect it before anything else, so the planner never mines for iron already cooking (clojurecraft's iron-kit wall).
 - `iron-kit` (issue 13's measure) provides an iron pickaxe, a bucket and flint and steel; the water bucket is the portal's (issue 14).

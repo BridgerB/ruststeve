@@ -6,7 +6,7 @@ tags: [plan, end, crystals, bow, arrow, ballistics]
 aliases: [bow, BowState, bow_task, bow_step, solve_pitch, stand_columns, Shot, the bow line]
 status: draft
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@117843e
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/bow.rs#pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Result<Aim, Miss> {"
   - "ruststeve:crates/plan/src/bow.rs#pub fn solve_pitch(flat: f64, rise: f64) -> Option<f64> {"

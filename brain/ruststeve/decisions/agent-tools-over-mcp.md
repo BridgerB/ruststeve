@@ -5,8 +5,8 @@ type: decision
 tags: [decision, mcp, tooling, agents]
 aliases: [rmcp, MCP server, ruststeve-mcp, .mcp.json, model context protocol, agent tools]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/mcp/src/main.rs#//! ruststeve-mcp: an MCP server (the official Rust SDK, rmcp) that gives coding agents"
   - "ruststeve:crates/mcp/Cargo.toml#rmcp = { version = \"=3.9.0\", features = [\"server\", \"transport-io\"] }"
@@ -29,6 +29,7 @@ Tools today:
 | `probe_run` | dispatch the probe workflow: one command on a runner, for a branch |
 | `probe_output` | download a probe's artifact and return `probe.log` |
 | `run_status`, `run_log` | a run's jobs and timings; its failed steps' log lines |
+| `run_done` | is a run done: its status, conclusion and title in one API request, its artifact names once completed; the way to wait on a race, probe or CI (one call every 4 minutes or more, never a loop) |
 | `ci_runs` | recent CI and probe runs, optionally for one branch |
 | `race_summary` | a race's release (`race-<run id>`): its summary body and its asset names |
 | `race_read` | a text file of a race's bundle (case, ledger, senses, a lane's progress), found by the end of its path; without a file, the list. The bundle is downloaded once into `target/races/<id>` |

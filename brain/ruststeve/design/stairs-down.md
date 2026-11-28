@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@b09de3d clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -80,6 +80,7 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - **Back from a ledge** (overworld-leg wall 9): two own-stairs legs from one cell that left the feet there walk the bot back up the leg that led to it, once (`Plan::own_into`, "own stairs back to …"); the next leg from there turns from that heading (`own_back`, "own stairs turned from … to …").
 - **Laid stairs need ground**: only with ground within 6 under the step (`LAY_OVER`), never out over a drop; a block that has shown leaves the list and the next gets its own click.
 - **A staircase is bounded**: one stair's cells take at most 8 digs (`MAX_CUT_TRIES`) and the feet stay in one cell at most 1,200 ticks (`STAND_TICKS`); a travel tunnel's step whose walk fails is steered straight (the end note counts blocks laid and steps steered).
+- **An empty cursor** (`Plan::cursor_watch`, issue 19): a stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` 100 is put down in a free main slot, noted (race 45715674818 lane 0: netherrack on the cursor, a tunnel's stairs stood 1,200 ticks twice with no dig begun).
 - **Infested blocks** (issue 19f, the stronghold): a cell to open that is an infested kind (`stairs::infested`, read from chunk data as lava beside is) is refused ("infested at …"), and the travel tunnel's route reads it as a wall: a silverfish woken is a fight under no-heal health.
 - **No bricks seen, in the Nether**: `Plan::explore_tunnel`, a search tunnel on a held compass heading, 48 blocks a leg, before any explore walk.
 - **Raced again** (race 45344386490, d4422d4): 2 of 3 at `fortress`, refusals 7 a bot (22 before); the third died to a ghast on the portal ledge at tick 240, before its first stretch.

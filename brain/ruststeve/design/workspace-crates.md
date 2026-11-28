@@ -5,8 +5,8 @@ type: reference
 tags: [crates, layout, architecture]
 aliases: [crate layout, protocol crate, world crate, plan crate, sim crate, net crate, bins, bot-core]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: clojurecraft@be85a92 ruststeve@6907139
+lastUpdated: 2026-11-27
+verifiedAgainst: clojurecraft@be85a92 ruststeve@a5a7aa4
 sourceRefs:
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#protocol/    packet specs as data, decode/encode, state transitions; no I/O"
   - "clojurecraft:docs/HANDOFF-RUSTSTEVE.md#Crate boundaries: core crates (protocol, world, plan, sim) have no I/O dependencies at all. Only net, rcon, record and the binaries touch sockets and files."
@@ -35,6 +35,7 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `physics` | vanilla movement as a pure function, collision, fluids; bit-equal to clojurecraft ([[physics]]) | no |
 | `memory` | sightings with time, indexed by position and column; `Seen` enforces no X-ray ([[memory-sightings]]) | no |
 | `plan` | the planner: aims, tasks, the pathfinder, the walk, progress invariants (exists from issue 09a, [[planner]]) | no |
+| `observe` | what the bot senses as data: snapshot diffs into the ledger's facts, the senses row a second ([[observability]]) | no |
 | `sim` | the server model as a pure reducer, grown per issue: join, chunks, time, the movement check, falls, generated terrain so far ([[server-model]]) | no |
 | `record` | recordings: zstd MessagePack, commit-pinned, `Folder` ([[recordings]]) | files |
 | `replay` | the `replay` (verify, export) and `why` binaries ([[replay-and-why]]) | files |
@@ -43,8 +44,9 @@ One cargo workspace (the root `Cargo.toml` already exists, `members = ["crates/*
 | `results` | race config and starts, case and batch files, the k/n summary ([[race-and-results]]) | files |
 | `bot` | the bot loop as a library; binaries `bot` and `race` ([[race-and-results]]) | sockets, files |
 | `stream` | the live snapshot stream to steve's local relay; the `relay-stub` binary ([[snapshot-stream]]) | sockets |
-| `brain-check` | the brain's checker (exists) | files |
+| `brain-check` | the brain's checker; it reads the checkout its working directory is in, never the one it was built in (worktrees share binaries) | files |
 | `mcp` (`ruststeve-mcp`) | the MCP server of agent tools, built on `rmcp` ([[agent-tools-over-mcp]]) | `gh`, files |
+| `navprobe` (`navmap`), `survey` | probe tools: fold a recording to a moment and print the known terrain as layer maps, the pathfinder's route over it, or a section (runners only) | files |
 | `xtask` | repository automation run in CI (`deps-boundary`) | runs `cargo` |
 
 Binaries: `bot` (one bot against a server; exists), `race` (a lane of bots on one server, case and batch files; exists, [[race-and-results]]), `simrace` (many bots against the model, in parallel), `replay` (fold a recording, verify effects), `why` (fold to time t and explain the planner's choice), `datagen` (the vanilla jar and reports into `crates/data`, now a crate of its own). Data files: `config/` (the race config and starts, [[race-and-results]]; goals, thresholds and problem statements join it). Workflows rebuilt lean on the runners ([[runners-not-the-mac]]).

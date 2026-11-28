@@ -5,8 +5,8 @@ type: reference
 tags: [plan, home, portal, nether, overworld, eyes]
 aliases: [EnderPhase::Home, home_task, home_race_task, home_done, portal_far, HomeRules, HomeState, HOME_STEPS, CLIMB_STEPS, way home, the way home, "[home]"]
 status: draft
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@6b1a3ba
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/home.rs#pub fn portal_far(w: &World, dim: &str, at: [f64; 3], chunks: i32) -> Option<Cell> {"
   - "ruststeve:crates/plan/src/home.rs#pub(crate) fn home_race_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
