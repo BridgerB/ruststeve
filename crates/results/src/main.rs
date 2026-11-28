@@ -73,6 +73,17 @@ fn run(args: &[String]) -> Result<(), String> {
             print!("{}", results::diagnose::diagnose(&cases));
             Ok(())
         }
+        // >>> keep (issue 77): keep <dirs>...: per run the drops, the wants by source, the
+        // dropped-then-wanted kinds with their ticks and the stash paths; a total a seed, then all.
+        Some("keep") => {
+            let files = files_under(args.get(1..).unwrap_or(&[]), |n| n == "batch.rsb");
+            if files.is_empty() {
+                return Err("no batch.rsb found".to_owned());
+            }
+            print!("{}", results::keep::render(&results::keep::runs(&files)?));
+            Ok(())
+        }
+        // <<< keep
         Some("offline-uuid") => {
             let name = args.get(1).ok_or("offline-uuid needs a name")?;
             println!("{}", results::snapshot::offline_uuid(name));
