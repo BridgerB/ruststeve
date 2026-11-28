@@ -88,3 +88,13 @@ Physics needs no change: the real body moved exactly as the client physics predi
 - **Decision:** fixed in #56 only if the sprint arm does not clear it. Sprinting widens the gap on each retreat, but it does not end the loop.
 - **Done, in world terms:** in the races, no bot dies to a creeper after more than two retreats from the same creeper.
 ||||||| 8744ed3b
+
+### The cost of the vanilla inertia rule, by ledger lines (probe 46129430056)
+Every creeper retreat (`defend Creeper … (Retreat)`) in four 8 × 14 iron-kit races from `start=stone`:
+
+| arm | races | creeper retreats | fuse lit during the retreat | died in the retreat |
+|---|---|---|---|---|
+| baseline, old inertia (f2408e5) | 46115072696, 46115074754 | 94 | 14 (14.9%) | 1 |
+| no-sprint, vanilla inertia (8643d925) | 46121815604, 46125605993 | 152 | 21 (13.8%) | 10 |
+
+A creeper reaches fuse range about as often in both arms. What changed is getting away once the fuse is lit: 13 of 14 escaped under the old rule, 11 of 21 under vanilla. The old rule's longer hops outran the 30-tick fuse, but that was an unearned edge the server never checked ([[inertia-before-the-move]]). Sprinting is how vanilla wins the distance back. The sprint arm is judged against this table, by the same probe.
