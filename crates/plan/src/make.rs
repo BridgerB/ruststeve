@@ -300,6 +300,11 @@ pub struct Survival {
     /// fight's shield; overworld-leg wall 8). 0: none.
     #[serde(default)]
     pub kit_shields: i32,
+    /// Iron pickaxes with `spare_uses` left held under this and the cook site crafts one from the
+    /// iron held beyond `kit_ingots` (three ingots and two sticks at its table; issue 83
+    /// lava-portal wall 2). 0: none.
+    #[serde(default)]
+    pub kit_iron_pickaxe: i32,
     /// Stone pickaxes with `spare_uses` left held under this and the race makes more from what
     /// it holds, before the next task (overworld-leg wall 2). 0: never.
     #[serde(default)]
@@ -424,6 +429,7 @@ impl Default for Survival {
             meat_stock: 0,
             kit_ingots: 0,
             kit_shields: 0,
+            kit_iron_pickaxe: 0,
             spare_pickaxes: 0,
             danger_health: danger_health(),
             never_fight: Vec::new(),
@@ -500,6 +506,7 @@ pub struct SurvivalRules {
     pub meat_stock: i32,
     pub kit_ingots: i32,
     pub kit_shields: i32,
+    pub kit_iron_pickaxe: i32,
     pub spare_pickaxes: i32,
 }
 
@@ -793,6 +800,7 @@ impl Table {
                 meat_stock: g.survival.meat_stock,
                 kit_ingots: g.survival.kit_ingots,
                 kit_shields: g.survival.kit_shields,
+                kit_iron_pickaxe: g.survival.kit_iron_pickaxe,
                 spare_pickaxes: g.survival.spare_pickaxes,
                 never_fight,
                 ranged,

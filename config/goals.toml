@@ -384,6 +384,13 @@ kit_ingots = 3
 # cooked food took 7 rods at 20 health (agent A11's race 45347052453), and two because a shield
 # is 336 uses and a blocked fireball takes 6. A made shield counts as an ingot of kit_ingots.
 kit_shields = 2
+# An iron pickaxe crafted at the cook's table (three ingots and two sticks) from the raw iron or
+# ingots held beyond kit_ingots, when none with spare_uses left is held; never a trip for iron
+# (docs/problems/lava-portal.md wall 2: race 46139640077, both lanes held 8 raw iron at `ready`,
+# no iron pickaxe, and cut every stair, tunnel and room with stone ones, 4 broken each). The
+# generated tool table (data::generated::item_props) gives iron 6 against stone 4 on stone and
+# deepslate: 8 ticks a stone block against 12, 15 a deepslate against 23; 250 uses against 131.
+kit_iron_pickaxe = 1
 # The portal is entered with this much safe food or more; under it the bot looks for animals only
 # under the open sky and for provision_ticks at most (docs/problems/overworld-leg.md wall 3). 24 is
 # the eight raw beef or porkchop the reserve was first counted as: the snapshot bot holds 36 and

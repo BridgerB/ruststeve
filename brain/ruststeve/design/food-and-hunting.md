@@ -5,13 +5,15 @@ type: reference
 tags: [plan, food, eat, hunt, survival, always-rows, loot]
 aliases: [eat, hunt, Eat, Hunt, hungry_below, unsafe_foods, hunt_radius, starving_radius, prey, game animals, MOB_DROPS, mob_drops_of, meals, kills, survival rules]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@32d56fc clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/eat.rs#pub fn best_food(w: &World, rules: &SurvivalRules) -> Option<ItemKind> {"
   - "ruststeve:crates/plan/src/hunt.rs#pub fn game(kind: EntityKind, rules: &SurvivalRules) -> bool {"
   - "ruststeve:crates/plan/src/lib.rs#fn choose_prey("
   - "ruststeve:config/goals.toml#hungry_below = 14"
+  - "ruststeve:crates/plan/src/lib.rs#pub fn iron_pickaxes_due("
+  - "ruststeve:crates/plan/tests/iron_pickaxe.rs#fn the_cook_site_makes_an_iron_pickaxe_after_the_shields() {"
   - "ruststeve:crates/bot/tests/food.rs#fn hungry_with_nothing_it_hunts_a_cow_and_eats_the_beef() {"
   - "clojurecraft:src/clojurecraft/eat.clj#(def hungry-below 14)"
   - "clojurecraft:src/clojurecraft/forage.clj#(def hunt-radius 24)"
@@ -55,6 +57,7 @@ Issue 12c. An hour of play spends the food bar (jumps, digging, healing), and on
 
 - **A stock of cooked meat before the Nether** (docs/problems/overworld-leg.md wall 4): with `meat_stock` set (30 pieces) the race hunts on the surface for one `provision_ticks` before it goes down, the bot resumed from a `ready` snapshot too, then cooks every raw piece (`Flow::Cook`, `cook_goal`: planks for the whole cook first, then a furnace made and placed where it stands, a batch a kind through the smelt task). A kind whose meat cooks into safe food is game, so chickens are hunted; raw chicken is never eaten. `eat::meat_pieces` counts pieces, `eat::food_points` each item's own hunger, so cooked pieces count 8.
 - **The kit's iron and shields at the cook site** (overworld-leg walls 4 and 8): after the meat, `cook_goal` smelts held raw iron until `kit_ingots` (3) ingots are held, a shield made counting as its ingot, then crafts shields at the cook's table up to `kit_shields` (2) from the ingots held ("cook-shield"; planks from held logs; ledger "shields at the cook site: …"). The "cooked" note counts ingots and shields.
+- **An iron pickaxe at the cook site** (issue 83, lava-portal wall 2: race 46139640077 held 8 raw iron at `ready` and dug the whole portal leg with stone pickaxes): with fewer than `kit_iron_pickaxe` (1) iron pickaxes held with `spare_uses` left, `iron_pickaxes_due` counts the pickaxes the iron held beyond `kit_ingots` (less the shields made) makes, `IRON_PICKAXE_INGOTS` (3, the recipe's) each; `cook_goal_with` smelts their ingots with the kit's ("cook-iron"), crafts the shields, then the pickaxe at the cook's table ("cook-pickaxe", two sticks from held planks). Never a trip for iron: only what is held, and the cook takes only a craft, a placing, a smelt or a gather. Ledger "iron pickaxe at the cook site: <step>" with the pickaxes held, the fresh ones, the due count, ingots, raw iron and sticks. `cook_goal` (no wear known) takes the kit's pickaxe as held, the shields' cook as before; the planner calls `cook_goal_with` with `fresh_iron_pickaxes`. Tests: `crates/plan/tests/iron_pickaxe.rs`.
 - **Warped and crimson wood is no fuel, its sticks are** (issue 19d): the jar's `#non_flammable_wood` holds every warped and crimson item, but not `stick`, which burns 100 ticks whatever planks made it. `cook_goal` counts sticks over `STICK_RESERVE` as fuel, and its fuel row counts only planks that burn; with nether wood held it names the planks of a held log that burns ("item:oak_planks"), else sticks ("item:stick", crafted from the warped planks). Test `warped_wood_burns_as_sticks_and_the_cook_asks_for_them` (plan home).
 - **The cook's hut** (overworld-leg wall 11): before the first smelt on the surface the bot walls itself in with held cobblestone (`cover::hut_block`, `Plan::hut_step`), and hunts nothing while walled in; the fuel row holds the shields' planks as well.
 - **A meal has a cap, and the dragon cuts one** (issue 20g, end-dragon walls 39 and 44): a running eat is cut, its use let go, past `dragon::MEAL_CAP_TICKS` (100: the 32 of a meal and the 60 of its answer), in any dimension, and in the End at once unless the dragon is in its holding pattern more than `MEAL_CLEAR` (40) off and no cloud is on the feet (`Plan::meal_cut`, `dragon_holds_meal`; ledger "eat cut: …"). An eat held off by a row froze for 2,360 ticks (dev race 46048455555 lane 1).

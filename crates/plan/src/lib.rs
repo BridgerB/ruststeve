@@ -768,6 +768,11 @@ pub struct Plan {
     pub cursor_since: Option<u64>,
     #[serde(default)]
     pub cursor_puts: u32,
+    // >>> iron pickaxe (issue 83)
+    /// The pickaxe kind last seen in the hand, noted at each change (lava-portal wall 2).
+    #[serde(default)]
+    pub pick_held: Option<data::ItemKind>,
+    // <<< iron pickaxe
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
     #[serde(default)]
@@ -1018,6 +1023,9 @@ impl Plan {
             home_cook: false,
             cursor_since: None,
             cursor_puts: 0,
+            // >>> iron pickaxe (issue 83)
+            pick_held: None,
+            // <<< iron pickaxe
             hut_blocks: 0,
             hut_done: false,
             full_since: None,
@@ -1172,6 +1180,9 @@ impl Plan {
         let swings_before = self.swing_count();
         let c = self.step_inner(w);
         self.cursor_watch(w);
+        // >>> iron pickaxe (issue 83): the pickaxe in the hand, noted at each change.
+        self.pick_watch(w);
+        // <<< iron pickaxe
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
@@ -1225,6 +1236,47 @@ impl Plan {
         );
         self.acts.push(act);
     }
+
+    // >>> iron pickaxe (issue 83)
+    /// The pickaxe in the hand, noted once at each change of its kind (lava-portal wall 2): the
+    /// dig's own choice (`data::dig::best_tool`) takes the fastest held, so this says when an
+    /// iron pickaxe cuts over a stone one, and with the stairs' task ticks and the "tool broke"
+    /// facts it counts digs and pickaxes on the leg.
+    fn pick_watch(&mut self, w: &World) {
+        let picks = data::generated::tags::item_tag("pickaxes").unwrap_or(&[]);
+        let Some(kind) = hold::held_item(w).filter(|k| picks.contains(k)) else {
+            return;
+        };
+        if self.pick_held == Some(kind) {
+            return;
+        }
+        let was = self.pick_held.replace(kind);
+        let slot = 36 + i16::from(w.held);
+        let uses = w
+            .inventory
+            .uses_left(slot)
+            .map_or_else(|| "?".to_owned(), |u| u.to_string());
+        let others: Vec<&str> = picks
+            .iter()
+            .filter(|k| **k != kind && craft::count(w, **k) > 0)
+            .filter_map(|k| k.name())
+            .collect();
+        let name = kind.name().unwrap_or("pickaxe");
+        self.note(
+            w.session.server_ticks,
+            format!("pickaxe in hand: {name}"),
+            format!(
+                "{uses} uses left; was {}; other pickaxes held: {}",
+                was.and_then(|k| k.name()).unwrap_or("none"),
+                if others.is_empty() {
+                    "none".to_owned()
+                } else {
+                    others.join(", ")
+                }
+            ),
+        );
+    }
+    // <<< iron pickaxe
 
     /// A junk stack dropped and its kind back by `REPICKUP_JUMP` or more at once within
     /// `REPICKUP_TICKS`: a
@@ -4141,7 +4193,8 @@ impl Plan {
         let pieces = eat::meat_pieces(&counts, rules);
         let raw: i32 = eat::raw_held(&counts, rules).iter().map(|r| r.1).sum();
         // Something left for the cook phase: raw meat, or the kit's ingots still to smelt.
-        let to_cook = cook_goal(&counts, rules).is_some();
+        let to_cook =
+            cook_goal_with(&counts, rules, fresh_iron_pickaxes(w, rules.spare_uses)).is_some();
         let kit = geared(w)
             && n(data::ItemKind::WaterBucket) >= 1
             && n(data::ItemKind::Bucket) >= 1
@@ -4409,7 +4462,11 @@ impl Plan {
             _ => self.aim.name(),
         };
         let cook_goal = if cook_row {
-            cook_goal(&held(w), &table.survival)
+            cook_goal_with(
+                &held(w),
+                &table.survival,
+                fresh_iron_pickaxes(w, table.survival.spare_uses),
+            )
         } else {
             None
         };
@@ -4640,6 +4697,25 @@ impl Plan {
                         craft::count(w, data::ItemKind::Shield),
                         table.survival.kit_shields,
                         craft::count(w, data::ItemKind::IronIngot)
+                    ),
+                );
+            }
+            // The iron pickaxe at the cook's table (lava-portal wall 2): each step says so, the
+            // ingots smelted for it too.
+            let fresh_iron = fresh_iron_pickaxes(w, table.survival.spare_uses);
+            let picks_due = iron_pickaxes_due(&counts, &table.survival, fresh_iron);
+            if (goal.id == "cook-pickaxe" || (goal.id == "cook-iron" && picks_due > 0))
+                && let make::Choice::Act(r) = &choice
+            {
+                self.note(
+                    tick,
+                    format!("iron pickaxe at the cook site: {}", r.id),
+                    format!(
+                        "{} iron pickaxes held, {fresh_iron} with uses to spare, {picks_due} due; {} iron ingots, {} raw iron, {} sticks",
+                        craft::count(w, data::ItemKind::IronPickaxe),
+                        craft::count(w, data::ItemKind::IronIngot),
+                        craft::count(w, data::ItemKind::RawIron),
+                        craft::count(w, data::ItemKind::Stick)
                     ),
                 );
             }
@@ -6511,26 +6587,75 @@ const COOK_TASKS: u32 = 60;
 /// The goal the cook phase hands the needs planner (overworld-leg wall 4), from what is held:
 /// while the coal and planks held burn for less than all the raw meat's cook time, the planks
 /// that cover it (crafted from logs; with no log, a gather); then, for the first raw kind, all
-/// of it cooked. `None` with nothing raw to cook.
+/// of it cooked. `None` with nothing raw to cook. This is the cook with the kit's iron pickaxe
+/// taken as held (`kit_iron_pickaxe` with uses to spare: none due), as overworld-leg walls 4
+/// and 8 test it; the planner calls `cook_goal_with` with the count really held.
 pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<make::Row> {
+    cook_goal_with(counts, rules, rules.kit_iron_pickaxe)
+}
+
+/// Ingots an iron pickaxe takes: its shaped recipe's three, with two sticks (`iron_pickaxe` in
+/// the generated recipes; `crates/plan/tests/iron_pickaxe.rs` reads it there).
+pub const IRON_PICKAXE_INGOTS: i32 = 3;
+
+/// Iron pickaxes the cook site makes (lava-portal wall 2): under `kit_iron_pickaxe` held with
+/// uses to spare (`fresh`), as many as the iron held beyond the kit's ingots (`kit_ingots`, less
+/// the shields made) makes, three ingots or raw iron each. Never more than is held: no trip for
+/// iron.
+pub fn iron_pickaxes_due(counts: &make::Counts, rules: &make::SurvivalRules, fresh: i32) -> i32 {
+    let n = |k: data::ItemKind| counts.get(&k).copied().unwrap_or(0).max(0);
+    let reserve = (rules.kit_ingots - n(data::ItemKind::Shield)).max(0);
+    let beyond = (n(data::ItemKind::IronIngot) + n(data::ItemKind::RawIron) - reserve).max(0);
+    (rules.kit_iron_pickaxe - fresh.max(0))
+        .max(0)
+        .min(beyond / IRON_PICKAXE_INGOTS)
+}
+
+/// `cook_goal` with `fresh` iron pickaxes held with `spare_uses` left: after the meat, the
+/// kit's ingots and an iron pickaxe's (`iron_pickaxes_due`) smelted from raw iron; then the
+/// shields; then the pickaxe (lava-portal wall 2).
+pub fn cook_goal_with(
+    counts: &make::Counts,
+    rules: &make::SurvivalRules,
+    fresh: i32,
+) -> Option<make::Row> {
     let raw = eat::raw_held(counts, rules);
     // The kit's ingots (the shields'), from held raw iron, once the meat is done; a shield made
-    // counts as the ingot it took.
+    // counts as the ingot it took. An iron pickaxe due adds its three.
     let ingots = counts.get(&data::ItemKind::IronIngot).copied().unwrap_or(0);
     let shields = counts.get(&data::ItemKind::Shield).copied().unwrap_or(0);
     let raw_iron = counts.get(&data::ItemKind::RawIron).copied().unwrap_or(0);
-    let iron = (rules.kit_ingots - ingots - shields).clamp(0, raw_iron.max(0));
+    let pick_more = iron_pickaxes_due(counts, rules, fresh);
+    let iron = (rules.kit_ingots + IRON_PICKAXE_INGOTS * pick_more - ingots - shields)
+        .clamp(0, raw_iron.max(0));
     // Then the shields themselves, at the cook's table, from the ingots held (overworld-leg
     // wall 8): crafted under the open sky, not at a portal down a mine.
     let shield_more = (rules.kit_shields - shields).clamp(0, ingots.max(0));
     if raw.is_empty() && iron == 0 {
-        if shield_more == 0 {
+        if shield_more > 0 {
+            return Some(make::Row {
+                id: "cook-shield".to_owned(),
+                needs: Vec::new(),
+                provides: vec![(make::Need::parse("item:shield")?, shields + shield_more)],
+                holds: Vec::new(),
+                spares: Vec::new(),
+                wants: Vec::new(),
+                act: None,
+            });
+        }
+        if pick_more == 0 {
             return None;
         }
+        // The iron pickaxe at the cook's table (lava-portal wall 2): every dig after takes it
+        // over a stone one (`data::dig::best_tool`, iron 6 against stone 4).
+        let held = counts
+            .get(&data::ItemKind::IronPickaxe)
+            .copied()
+            .unwrap_or(0);
         return Some(make::Row {
-            id: "cook-shield".to_owned(),
+            id: "cook-pickaxe".to_owned(),
             needs: Vec::new(),
-            provides: vec![(make::Need::parse("item:shield")?, shields + shield_more)],
+            provides: vec![(make::Need::parse("item:iron_pickaxe")?, held + pick_more)],
             holds: Vec::new(),
             spares: Vec::new(),
             wants: Vec::new(),
@@ -6636,6 +6761,26 @@ pub fn cook_goal(counts: &make::Counts, rules: &make::SurvivalRules) -> Option<m
         make::Need::parse(&format!("item:{name}"))?,
         cooked + n,
     ))
+}
+
+/// Iron pickaxes held (the cursor too) with `spare_uses` or more left, or of unknown wear: those
+/// with uses to spare, for `cook_goal_with`.
+pub fn fresh_iron_pickaxes(w: &World, spare_uses: i32) -> i32 {
+    let kind = data::ItemKind::IronPickaxe;
+    let slots = w
+        .inventory
+        .slots
+        .iter()
+        .filter(|(slot, (k, _))| {
+            **slot >= 1
+                && *k == kind
+                && w.inventory
+                    .uses_left(**slot)
+                    .is_none_or(|u| u >= spare_uses)
+        })
+        .count();
+    let carried = w.inventory.carried.is_some_and(|(k, _)| k == kind);
+    i32::try_from(slots).unwrap_or(i32::MAX) + i32::from(carried)
 }
 
 /// The most of a batch of `count` that `held` items of a fuel burning `fuel_ticks` each cook, at
