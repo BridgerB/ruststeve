@@ -7,7 +7,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use data::ItemKind;
-use plan::stash::{Leg, NeedRows, STASH_TOML, fetch_list, parse_legs, stash_list, wood_to_spare};
+use plan::keep::{KEEP_TOML, Keep};
+use plan::stash::{Leg, STASH_TOML, fetch_list, parse_legs, stash_list, wood_to_spare};
 use plan::{Aim, Plan, Task};
 use protocol::decode;
 use sim::{Config, In, Sim, flat_world};
@@ -20,17 +21,10 @@ const CONFIG: Config = Config {
     peaceful: true,
 };
 
-/// keep.toml's rows as 77-keep wrote them (the bow's feathers and string; the stone kept to
-/// the end and through the Nether), the stub of `Keep::need_in`.
-fn needs() -> NeedRows {
-    NeedRows(vec![
-        (ItemKind::Feather, Stage::BowArmed, 16),
-        (ItemKind::Feather, Stage::Win, 16),
-        (ItemKind::String, Stage::BowArmed, 8),
-        (ItemKind::String, Stage::Win, 8),
-        (ItemKind::Cobblestone, Stage::Win, 64),
-        (ItemKind::Cobblestone, Stage::Nether, 64),
-    ])
+/// The keep table as compiled in: the bow's feathers (16) and string (8) needed by `bow_armed`
+/// and `win`, the stone (64) by `win` and `during` the Nether.
+fn needs() -> Keep {
+    Keep::parse(KEEP_TOML).unwrap()
 }
 
 fn nether() -> Leg {
@@ -200,9 +194,7 @@ fn planner() -> Plan {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let goals: plan::make::Goals = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let table = plan::make::Table::new(&goals).unwrap();
-    let mut plan = Plan::with_table(Aim::Race, Arc::new(table));
-    plan.stash.needs = needs();
-    plan
+    Plan::with_table(Aim::Race, Arc::new(table))
 }
 
 fn ledger(plan: &Plan) -> String {

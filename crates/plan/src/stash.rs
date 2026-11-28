@@ -619,26 +619,15 @@ pub const CHEST_TASKS: u32 = 8;
 /// stashed. Armour and the off hand are not in a chest's window.
 const PACK: std::ops::RangeInclusive<i16> = 9..=44;
 
-/// What a stage span needs of a kind: `plan::keep::Keep::need_in` (77-keep), the largest count
-/// any keep.toml row names for a stage in `stages`.
+/// What a stage span needs of a kind: the largest count any keep.toml row names for a stage in
+/// `stages`, its `needs` and its `during` rows (`Keep::need_in`).
 pub trait Needs {
     fn need_in(&self, kind: ItemKind, stages: &[Stage]) -> i32;
 }
 
-/// A need table written out: (kind, stage, count). For tests, and for a run with no keep table
-/// (empty: nothing is stashed, noted).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NeedRows(pub Vec<(ItemKind, Stage, i32)>);
-
-impl Needs for NeedRows {
+impl Needs for crate::keep::Keep {
     fn need_in(&self, kind: ItemKind, stages: &[Stage]) -> i32 {
-        self.0
-            .iter()
-            .filter(|(k, s, _)| *k == kind && stages.contains(s))
-            .map(|(_, _, n)| *n)
-            .max()
-            .unwrap_or(0)
-            .max(0)
+        crate::keep::Keep::need_in(self, kind, stages)
     }
 }
 
@@ -811,9 +800,6 @@ pub struct StashState {
     /// The development aim `chest-trip`'s next step.
     #[serde(default)]
     pub trip: TripStep,
-    /// The need table the planner asks; empty until the keep table is wired (77-keep).
-    #[serde(skip)]
-    pub needs: NeedRows,
 }
 
 /// Whether the eye is within `d` of a cell's centre.
@@ -846,10 +832,10 @@ fn list_text(l: &[(ItemKind, i32)]) -> String {
 }
 
 impl Plan {
-    /// The need table: the stash's own when set (tests), else none yet (the keep table is
-    /// wired when 77-keep's `Keep::need_in` merges).
-    fn stash_needs(&self) -> Option<NeedRows> {
-        (!self.stash.needs.0.is_empty()).then(|| self.stash.needs.clone())
+    /// The need table: the keep table (config/keep.toml), or none when it could not be read
+    /// (nothing is stashed or fetched then, noted).
+    fn stash_needs(&self) -> Option<std::sync::Arc<crate::keep::Keep>> {
+        self.keep.table.as_ref().ok().cloned()
     }
 
     /// The danger that skips a chest trip: under the danger line, or a foe in range.
@@ -921,10 +907,11 @@ impl Plan {
             return done(
                 self,
                 format!("stash before the {} skipped", leg.name),
-                "no need table to say what is needed after the leg".to_owned(),
+                "the keep table could not be read: nothing says what is needed after the leg"
+                    .to_owned(),
             );
         };
-        let list = stash_list(&pack(w), &needs, leg);
+        let list = stash_list(&pack(w), needs.as_ref(), leg);
         if list.is_empty() {
             return done(
                 self,
@@ -1115,9 +1102,13 @@ impl Plan {
             );
         };
         let Some(needs) = self.stash_needs() else {
-            return over(self, "skipped", "no need table".to_owned());
+            return over(
+                self,
+                "skipped",
+                "the keep table could not be read".to_owned(),
+            );
         };
-        let list = fetch_list(&contents, &pack(w), &needs, w.stage_reached);
+        let list = fetch_list(&contents, &pack(w), needs.as_ref(), w.stage_reached);
         if list.is_empty() {
             return over(
                 self,
