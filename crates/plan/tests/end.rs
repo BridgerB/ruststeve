@@ -1829,3 +1829,34 @@ fn the_drowning_guard_waits_for_low_air_and_never_holds_against_a_cloud() {
     p.end.bridged = true;
     assert!(p.drown_guard(&w, 0).is_none(), "{:?}", notes(&p));
 }
+
+#[test]
+fn a_resume_on_a_spike_top_past_the_island_never_bridges() {
+    // Race 46108868213 lane 3: resumed on the stand atop spike [42, 0] at (42.5, 82, 3.5), taken
+    // for a fresh arrival, a sky bridge west at y 81, knocked off at 1,360, dead at 1,420.
+    let mut w = world(0, 0..=7, [42.5, 82.0, 3.5]);
+    for y in 0..=81 {
+        set(&mut w, (42, y, 3), BlockKind::Obsidian);
+    }
+    w.stage_reached = Some(world::stage::Stage::Crystals);
+    let mut p = racer();
+    let _ = p.end_task(&w, 0);
+    assert!(p.end.bridged && p.end.arrived);
+    assert!(
+        noted(&p, "end: resumed at (42, 82, 3), past the island"),
+        "{:?}",
+        notes(&p)
+    );
+    for not in ["end: bridge west from", "end: pillar up", "end: arrived at"] {
+        assert!(!noted(&p, not), "{not}: {:?}", notes(&p));
+    }
+    // Up a spike: E4's task asked first (its step-off or descent, noted as its own).
+    assert!(plan::spikes::on_spike(&w, (42, 82, 3)));
+    assert!(
+        p.events
+            .iter()
+            .any(|e| e.what.starts_with("spikes:") || e.what.starts_with("end: up a spike")),
+        "{:?}",
+        notes(&p)
+    );
+}
