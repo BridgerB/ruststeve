@@ -3,7 +3,7 @@ title: Game pillar
 type: moc
 tags: [pillar, hub, game]
 status: verified
-lastUpdated: 2026-11-11
+lastUpdated: 2026-11-28
 verifiedAgainst: clojurecraft@be85a92
 related:
   - "[[_index]]"
@@ -21,6 +21,7 @@ Vanilla Minecraft 26.1.2 facts the bot depends on, each read from where a bot's 
 - [[mc-blaze]] - the volley cycle, fireballs and fire, drops, the spawner.
 - [[mc-endermen]] - neutral until provoked, teleport rules, pearls one in two.
 - [[mc-mob-facts]] - simulation-distance freezes, anger, knockback, magma hops, fireball damage events, armour arithmetic.
+- [[mc-pumpkin]] - the carved pumpkin on the head against the stare, shears on a pumpkin, pumpkin patches.
 
 ## See also
 - [[_index]]

@@ -212,10 +212,12 @@ fn eye_report(
 }
 
 /// A piece of armour's equipment slot, window 0 slot and armour points (vanilla's
-/// `ArmorMaterials.IRON`: helmet 2, chestplate 6, leggings 5, boots 2).
+/// `ArmorMaterials.IRON`: helmet 2, chestplate 6, leggings 5, boots 2). A carved pumpkin is
+/// worn on the head with no armour (issue 80, `brain/game/mc-pumpkin.md`).
 fn armor_piece(item: &str) -> Option<(&'static str, usize, f32)> {
     match item {
         "iron_helmet" => Some(("head", 5, 2.0)),
+        "carved_pumpkin" => Some(("head", 5, 0.0)),
         "iron_chestplate" => Some(("chest", 6, 6.0)),
         "iron_leggings" => Some(("legs", 7, 5.0)),
         "iron_boots" => Some(("feet", 8, 2.0)),
