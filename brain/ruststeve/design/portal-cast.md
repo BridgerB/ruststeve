@@ -5,8 +5,8 @@ type: reference
 tags: [portal, cast, build, obsidian, lava, plan, site]
 aliases: [plan::build, plan::cast, portal_plan, frame_plan, cast_one_plan, Op, Done, Frame, Facing, Cast, Site, choose_site, blocks_needed, spent, foundation, Aim::Portal, portal row, kit start, lava hunt, LAVA_DEPTH]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@32d56fc clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn choose_site(w: &World, given_up: &[Cell]) -> Option<Site> {"
   - "ruststeve:crates/plan/src/station.rs#pub fn station_among("
@@ -16,6 +16,8 @@ sourceRefs:
   - "ruststeve:crates/plan/src/cast.rs#pub fn spent(w: &World, lava: Cell, frame: Frame) -> bool {"
   - "ruststeve:crates/plan/tests/build_differential.rs#fn portal_plans_equal_clojurecraft() {"
   - "ruststeve:crates/bot/tests/cast.rs#fn the_kit_casts_and_lights_a_portal_beside_lava() {"
+  - "ruststeve:crates/plan/src/cast.rs#    pub fn fresh(site: Site, tick: u64) -> Self {"
+  - "ruststeve:crates/plan/tests/lava_first.rs#fn a_fresh_cast_with_no_lava_bucket_fills_one_first() {"
   - "clojurecraft:src/clojurecraft/build.clj#(defn cell-ops"
   - "clojurecraft:src/clojurecraft/build.clj#(defn choose-site"
 related:
@@ -45,7 +47,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - **The plan** (a port of `build.clj`): the room dug out in front of the face (the landing first, then every cell nearest the landing first, then firm floors), each frame cell in cast order (walls made firm where the rock is missing, hole and the cell over it dug, lava poured, water poured, water scooped back), the 2x3 inside dug, flint and steel on the bottom cell. Each op is done by a predicate over the world; a dig is done once its cell is obsidian, so **obsidian is never dug** (v1 dug its own frame and restarted forever). Positions are written for working from the south and turned for each facing.
 - **The executor** works the first op not done, so a death or a reload resumes from the world. A dig is worked from wherever the bot reaches the block, by the eye's distance to the cell's box, not its centre (cast.md wall 3: the server takes a dig or a click within 5.5 of the box, and the wall behind the frame's top cells lay 4.1 from the top stand's eye to its centre); a walk to within 2.5 when not. A place clicks a solid neighbour's face toward the cell, the block under first, after stepping out of the cell if the body is in it; a cell no neighbour holds gets a foundation built up through the air under it, at most 4 deep. A pour, a scoop and the light are worked from the op's own stand with the look on its aim, held 6 ticks before the use.
 - **No walk to an op** (wall 22): the approach digs the first block of the straight way at the feet's height toward the op, when it is in reach, never the frame's rock or a cell the plan places, at most 12 an op (clojurecraft's `toward-stand`). Before, three tries went in three ticks and the site was given up.
-- **Refills**: a pour whose bucket is empty fills it first, water at a remembered surface source ([[buckets-and-fluids]]), lava in this order:
+- **Refills**: **the lava bucket first** (issue 83, `docs/problems/lava-portal.md` wall 1): a cast at a newly chosen site (`Cast::fresh`) that holds no lava bucket while a lava pour is still to do fills one by the ladder below before its first op; a failed fill fails the cast `NoRefill` at 0 ops, so the planner's lava fetch and then its give-up apply as to any cast out of lava, and no room is cut first. A cast resumed at a kept site (`Cast::new`: after a fetch or a pause) works as before. Notes: "lava first: filled at <feet> from <source> after N ticks", "lava first failed: NoRefill at 0 ops" with the refill's trail, and every ending note's uses carry the state (`LavaFirst::text`). Unit tests: `crates/plan/tests/lava_first.rs` (a hand-built pool). Then, a pour whose bucket is empty fills it first, water at a remembered surface source ([[buckets-and-fluids]]), lava in this order:
   1. the station (below), when one stands;
   2. else the nearest four sources of the site's pool, the first whose scoop routes; a scoop's route counts only when its end, or the eye when the bot is already there, sees a face of the source (wall 26);
   3. else the first block on the eye's line to a source in reach is dug: under the feet, never kept or placed, no lava beside it at its height or over it (lava never flows up; wall 24), at most 24 a cast;
@@ -95,6 +97,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - A pool's edge sources go first; the rest lie four or more blocks from the bank, reached over the flowing lava (a source-only ray passes over it): the scoop reaches 4.4 and walks to within 3.5.
 - A site whose room fronts open ground needs its stair floors built on foundations, many blocks, so the chooser prefers rooms cut from rock, as clojurecraft's do.
 - A checkpoint that puts bots at the same pool measures the crowd, not the cast: twelve places round five pools had three or four bots a pool on one server, digging each other's cells (wall 19).
+- A cast fills its lava bucket only when a pour needs it, after every room op before it: race 46139640077 lane 0 cut two rooms (68 and 50 ops, 6,040 ticks) and lost both at the first lava pour with 0 fills, the site's lava out of every scoop's reach. A fresh cast now fills first (lava-portal.md wall 1); its tick cost and the casts given up at 0 ops are not raced yet.
 - Three fixes reasoned from reach and geometry, with no bot's own lines to confirm them, were reverted after racing worse (walls 21, 23, 25). A cause is confirmed in a recording first, and its new path leaves a note so its firings can be counted.
 
 ## Limits
