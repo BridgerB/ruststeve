@@ -699,11 +699,15 @@ pub fn step_fed(
     // The block's speed factor ends every move (`Entity.move`), before the tick's inertia.
     let slow = block_speed_factor(solid, surface, pos2, landed);
     let (vx, vz) = (vx * slow, vz * slow);
+    // The inertia is the ground the body stood on before it moved, not where it ended
+    // (`LivingEntity.travelInAir` reads `onGround()` before `handleRelativeFrictionAndCalculate
+    // Movement` moves it): a jump tick keeps the ground's 0.546, a landing tick the air's 0.91.
+    // clojurecraft read it after the move; decision inertia-before-the-move.
     let inertia = if in_lava {
         LAVA_INERTIA
     } else if in_water {
         WATER_INERTIA
-    } else if landed {
+    } else if body.on_ground {
         GROUND_INERTIA
     } else {
         AIR_INERTIA
@@ -998,12 +1002,15 @@ mod tests {
                 ..sprint()
             },
         );
-        // The same tick's inertia applies to both: the boost survives it × 0.91 (in the air).
-        let boost = jumped.vel[2] / AIR_INERTIA - ran.vel[2] / GROUND_INERTIA;
+        // The same tick's inertia applies to both, the ground's (both stood on it before moving).
+        let boost = (jumped.vel[2] - ran.vel[2]) / GROUND_INERTIA;
         assert!((boost - SPRINT_JUMP_BOOST).abs() < 1e-9, "boost {boost}");
         assert!(jumped.vel[0].abs() < 1e-12);
-        // Held, sprint-jumping keeps a pace well over the sprint's (vanilla's is about 7.1 b/s).
-        // Measured over 240 ticks, many hops, after 100 to settle.
+        // Held, sprint-jumping keeps a pace well over the sprint's: vanilla's 7.127 b/s, worked
+        // by hand over its 12-tick cycle (the jump tick at 0.1274 + the 0.2 push and the ground's
+        // 0.546, then 11 air ticks at 0.02548 and 0.91). Inertia read after the move (the old,
+        // clojurecraft rule) gives 8.756 (decision inertia-before-the-move). Measured over 240
+        // ticks, 20 hops, after 100 to settle.
         let hopping = Controls {
             jump: true,
             ..sprint()
@@ -1017,7 +1024,10 @@ mod tests {
             hb = step(&ground, &no_fluid, &hb, &hopping);
         }
         let hop = (hb.pos[2] - from) * 20.0 / 240.0;
-        assert!(hb.sprinting && hop > 6.5 && hop < 7.6, "sprint-jump {hop}");
+        assert!(
+            hb.sprinting && (hop - 7.127).abs() < 0.02,
+            "sprint-jump {hop}"
+        );
     }
 
     #[test]

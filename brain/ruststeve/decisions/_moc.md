@@ -3,7 +3,7 @@ title: Decisions
 type: moc
 tags: [moc, decisions]
 status: verified
-lastUpdated: 2026-11-23
+lastUpdated: 2026-11-28
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -26,6 +26,7 @@ Each says what was chosen, what was rejected with the reason, and what would cha
 - [[data-out]] - files are the truth; an embedded SurrealDB built from them for insight; steve is the front end; never in the core.
 - [[sync-core-and-time]] - threads and bounded channels; the clock and a seed on every tick.
 - [[clojure-is-the-oracle]] - port clojurecraft, not v1 or steve; it sets every bar until passed.
+- [[inertia-before-the-move]] - a tick's inertia is the ground stood on before the move (vanilla), not after (clojurecraft): the oracle overruled (issue 56).
 - [[own-protocol-not-azalea]] - we parse the byte stream ourselves; no azalea, no sidecar.
 - [[one-owner-no-shared-mutation]] - one owner and `&mut`; never `Rc<RefCell>` or `Arc<Mutex>` in the core.
 - [[ordered-collections]] - `BTreeMap`/`IndexMap`, never `HashMap`, in the core.
