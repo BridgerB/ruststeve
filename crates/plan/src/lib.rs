@@ -721,6 +721,9 @@ pub struct Plan {
     /// The goal the needs planner's want lines were last written for, and the keys written.
     #[serde(default)]
     pub keep_wants: (String, Vec<String>),
+    /// The same for each sub-planner's want lines, by `keep::Sub::name`.
+    #[serde(default)]
+    pub keep_sub_wants: std::collections::BTreeMap<String, (String, Vec<String>)>,
     // <<< keep
     /// A goal aim is met.
     #[serde(default)]
@@ -1017,6 +1020,7 @@ impl Plan {
             keep: keep::Loaded::compiled(),
             keep_noted: false,
             keep_wants: (String::new(), Vec::new()),
+            keep_sub_wants: std::collections::BTreeMap::new(),
             // <<< keep
             met: false,
             digs: 0,

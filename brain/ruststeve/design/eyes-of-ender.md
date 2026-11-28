@@ -5,7 +5,7 @@ type: reference
 tags: [plan, eyes, stronghold, triangulation, crafting]
 aliases: [eyes, eye of ender, throw, Task::Throw, fix, triangulation, eyes_task, eyes_craft_task, eyes_way, EyeRules]
 status: draft
-lastUpdated: 2026-11-27
+lastUpdated: 2026-11-28
 verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/eyes.rs#pub fn fix_why(lines: &[Line]) -> Result<Fix, Refusal> {"
@@ -27,6 +27,7 @@ Issue 19 (#24), part 19c: the eyes are made in the warped forest before the way 
 - `crates/plan/src/eyes.rs` (pure): `fix`/`fix_why`, `Flight` (an eye's positions, `line`, `near_point`), `due` and `way` (the throw policy), `eyes_target`/`eyes_row` (the craft), `Throw` (the task: aim, use, follow, read, pick up), and `impl Plan` with `eyes_task`, `eyes_craft_task`, `eyes_way`, `eyes_kept`/`restore_eyes` and `throw_step` (the one call site, in `step_inner`).
 - `config/goals.toml`: the `eyes` goal row and `[eyes]`, every number with its source.
 - `crates/plan/tests/eyes_row.rs`: the row on the real goal table (12 pearls and 7 rods make 12 eyes and keep a rod).
+- The eyes craft's `make` call writes `want <kinds> <n> for goal <id> (eyes)` once an episode (issue 77, [[keep-rule]]).
 
 ## The eye (the 26.1.2 jar, Q5's probe 45685968956)
 It spawns at the thrower's (x, y + 0.9, z) and flies straight along the exact bearing to the stronghold point, 12 blocks out and 8 up (or to the point itself and down, within 12), through terrain; after 81 ticks it drops as an item four times in five, else shatters. A use whose look hits an end portal frame throws nothing, so the throw looks up (pitch -10). Nothing is thrown in the Nether.
