@@ -265,3 +265,44 @@ fn the_read_s_refill_digs_the_wall_and_fills() {
     );
     assert!(k.uses_text().contains("station sight digs "));
 }
+
+#[test]
+fn the_dug_cell_over_lava_is_never_walked_into() {
+    // The read's feet-level dig: (23, -54, 43) left open beside the stand, lava straight under it.
+    // Here (-1, 64, 4) and its head, over the lava at (-1, 63, 4).
+    let mut w = world(BlockKind::Stone);
+    let dug = (-1, 64, 4);
+    set(&mut w, dug, BlockKind::Air);
+    set(&mut w, (-1, 65, 4), BlockKind::Air);
+    let mut cells = plan::path::Cells::new(&w);
+    // Lava under it: neither a node nor a cell any move's body passes (`clear` reads lava under
+    // and beside), so no route crosses it and no drop lands in it. The stand stays a node.
+    assert!(!cells.clear(dug));
+    assert!(!cells.standable(dug));
+    assert!(cells.standable(STAND));
+    let budget = plan::path::Budget::Far.expansions();
+    for goal in [
+        plan::path::Goal::Block { pos: dug },
+        // Every cell within 1 of (-2, 64, 4) but the dug one lies over the pool.
+        plan::path::Goal::Near {
+            pos: (-2, 64, 4),
+            range: 1.0,
+        },
+    ] {
+        let r = plan::path::plan(&w, STAND, &goal, budget);
+        assert_ne!(r.status, plan::path::Status::Found, "{goal:?}: {r:?}");
+        assert!(!r.waypoints.contains(&dug), "{goal:?}: {r:?}");
+    }
+    // A walk along the wall, past the hole, keeps out of it.
+    let r = plan::path::plan(
+        &w,
+        STAND,
+        &plan::path::Goal::Block { pos: (0, 64, -2) },
+        budget,
+    );
+    assert!(!r.waypoints.contains(&dug), "{r:?}");
+    // No scoop stands in it.
+    for src in [(-2, 63, 4), (-2, 63, 3), (-2, 63, 5)] {
+        assert!(!plan::scoop::stands(&w, src).contains(&dug), "{src:?}");
+    }
+}
