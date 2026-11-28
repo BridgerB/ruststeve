@@ -12,8 +12,12 @@ fn table() -> Table {
     Table::new(&goals).unwrap()
 }
 
+/// The pack as counts, a kind named twice summed.
 fn counts(held: &[(ItemKind, i32)]) -> Counts {
-    held.iter().copied().collect()
+    held.iter().fold(Counts::new(), |mut c, (k, n)| {
+        *c.entry(*k).or_default() += n;
+        c
+    })
 }
 
 /// The cook goal's id and count for a pack, with `fresh` iron pickaxes held with uses to spare.
@@ -167,6 +171,7 @@ fn only_the_iron_held_beyond_the_kit_makes_one() {
     assert_eq!(goal(&three_over, 0), Some(("cook-iron".to_owned(), 4)));
     let worn = [
         (CookedPorkchop, 30),
+        (OakPlanks, 4),
         (IronIngot, 4),
         (Shield, 2),
         (IronPickaxe, 1),
@@ -256,5 +261,90 @@ fn the_pickaxe_in_hand_is_noted_at_each_change() {
     assert!(
         why.contains("250 uses left; was stone_pickaxe; other pickaxes held: stone_pickaxe"),
         "{why}"
+    );
+}
+
+/// The cook's next step through the needs planner with the old entry point (`cook_goal`, no
+/// iron pickaxe).
+fn old_step(held: &[(ItemKind, i32)]) -> String {
+    let t = table();
+    let c = counts(held);
+    let Some(goal) = plan::cook_goal(&c, &t.survival) else {
+        return "nothing".to_owned();
+    };
+    let near = |k: BlockKind| matches!(k, BlockKind::CraftingTable | BlockKind::Furnace);
+    match make_with_wear(&t, &c, &near, true, &Wear::default(), &goal) {
+        Choice::Act(r) => r.id.clone(),
+        Choice::Done => "done".to_owned(),
+        Choice::Stuck => "stuck".to_owned(),
+    }
+}
+
+/// Race 46148925674 (typecraft `ready`, tick 20): 3 birch and 1 oak log, an oak plank, 25
+/// sticks, 8 raw iron, 6 beef and 6 porkchop, and the chickens hunted after. The four logs
+/// cover the meat, the kit's ingots and the shields' planks (7,400 fuel ticks held or made
+/// against 6,600) but not the pickaxe's smelts and sticks too (7,500): it is skipped, and the
+/// cook's goal and every step are the old cook's, with no gather for its fuel. With planks to
+/// spare it is made.
+#[test]
+fn short_of_fuel_the_cook_runs_as_without_the_pickaxe() {
+    use ItemKind::{
+        Beef, BirchLog, BirchPlanks, Chicken, Cobblestone, OakLog, OakPlanks, Porkchop, RawIron,
+        Stick,
+    };
+    let t = table();
+    let r = &t.survival;
+    for chickens in 0..=6 {
+        let mut pack = vec![
+            (BirchLog, 3),
+            (OakLog, 1),
+            (OakPlanks, 1),
+            (Stick, 25),
+            (RawIron, 8),
+            (Beef, 6),
+            (Porkchop, 6),
+            (Cobblestone, 64),
+        ];
+        if chickens > 0 {
+            pack.push((Chicken, chickens));
+        }
+        // The cook's road: the planks crafted from the logs, then each kind cooked.
+        let planked = |p: &[(ItemKind, i32)]| {
+            p.iter()
+                .map(|(k, n)| match k {
+                    BirchLog | OakLog => (BirchPlanks, 4 * n),
+                    _ => (*k, *n),
+                })
+                .collect::<Vec<_>>()
+        };
+        for held in [pack.clone(), planked(&pack)] {
+            let c = counts(&held);
+            assert_eq!(plan::iron_pickaxes_due(&c, r, 0), 1, "{held:?}");
+            assert_eq!(plan::iron_pickaxes_fuelled(&c, r, 0), 0, "{held:?}");
+            assert_eq!(
+                plan::cook_goal_with(&c, r, 0),
+                plan::cook_goal(&c, r),
+                "{held:?}"
+            );
+            assert_eq!(step(&held, 0), old_step(&held), "{held:?}");
+            assert_ne!(step(&held, 0), "gather", "{held:?}");
+        }
+    }
+    // Four planks over the cook's need (8,600 held against 7,500): the pickaxe is made.
+    let spare = [
+        (BirchLog, 3),
+        (OakLog, 1),
+        (OakPlanks, 5),
+        (Stick, 25),
+        (RawIron, 8),
+        (Beef, 6),
+        (Porkchop, 6),
+    ];
+    assert_eq!(plan::iron_pickaxes_fuelled(&counts(&spare), r, 0), 1);
+    assert_eq!(
+        plan::cook_goal_with(&counts(&spare), r, 0)
+            .map(|g| g.id)
+            .as_deref(),
+        Some("cook-fuel")
     );
 }

@@ -772,6 +772,9 @@ pub struct Plan {
     /// The pickaxe kind last seen in the hand, noted at each change (lava-portal wall 2).
     #[serde(default)]
     pub pick_held: Option<data::ItemKind>,
+    /// The cook site's iron pickaxe skipped for want of fuel, noted once.
+    #[serde(default)]
+    pub pick_fuel_noted: bool,
     // <<< iron pickaxe
     /// The cook walled in (wall 11): blocks placed for its hut, and whether the hut is done
     /// (closed, or none could be built).
@@ -1025,6 +1028,7 @@ impl Plan {
             cursor_puts: 0,
             // >>> iron pickaxe (issue 83)
             pick_held: None,
+            pick_fuel_noted: false,
             // <<< iron pickaxe
             hut_blocks: 0,
             hut_done: false,
@@ -4704,14 +4708,30 @@ impl Plan {
             // ingots smelted for it too.
             let fresh_iron = fresh_iron_pickaxes(w, table.survival.spare_uses);
             let picks_due = iron_pickaxes_due(&counts, &table.survival, fresh_iron);
-            if (goal.id == "cook-pickaxe" || (goal.id == "cook-iron" && picks_due > 0))
+            let picks_made = iron_pickaxes_fuelled(&counts, &table.survival, fresh_iron);
+            // Short of fuel for it: the cook runs as without it, said once (race 46148925674).
+            if picks_made < picks_due && !self.pick_fuel_noted {
+                self.pick_fuel_noted = true;
+                let base = cook_fuel_need(&counts, &table.survival, picks_made);
+                let with = cook_fuel_need(&counts, &table.survival, picks_due)
+                    + IRON_PICKAXE_STICK_FUEL * picks_due;
+                self.note(
+                    tick,
+                    "iron pickaxe at the cook site: skipped, fuel".to_owned(),
+                    format!(
+                        "{} fuel ticks held or made here; the cook needs {base}, with {picks_due} iron pickaxes {with}; no gather for it",
+                        home::fuel_ticks_held(&counts)
+                    ),
+                );
+            }
+            if (goal.id == "cook-pickaxe" || (goal.id == "cook-iron" && picks_made > 0))
                 && let make::Choice::Act(r) = &choice
             {
                 self.note(
                     tick,
                     format!("iron pickaxe at the cook site: {}", r.id),
                     format!(
-                        "{} iron pickaxes held, {fresh_iron} with uses to spare, {picks_due} due; {} iron ingots, {} raw iron, {} sticks",
+                        "{} iron pickaxes held, {fresh_iron} with uses to spare, {picks_made} of {picks_due} due made; {} iron ingots, {} raw iron, {} sticks",
                         craft::count(w, data::ItemKind::IronPickaxe),
                         craft::count(w, data::ItemKind::IronIngot),
                         craft::count(w, data::ItemKind::RawIron),
@@ -6611,8 +6631,55 @@ pub fn iron_pickaxes_due(counts: &make::Counts, rules: &make::SurvivalRules, fre
         .min(beyond / IRON_PICKAXE_INGOTS)
 }
 
+/// Fuel ticks an iron pickaxe's sticks are charged: a plank's 300 (two sticks are a plank's
+/// craft, or two of the sticks over the reserve the cook counts as fuel; generated fuel table).
+const IRON_PICKAXE_STICK_FUEL: i32 = 300;
+
+/// Raw iron the cook smelts with `picks` iron pickaxes made: the kit's ingots (a shield made
+/// counts as its ingot) and three for each pickaxe, from what is held.
+fn cook_iron(counts: &make::Counts, rules: &make::SurvivalRules, picks: i32) -> i32 {
+    let n = |k: data::ItemKind| counts.get(&k).copied().unwrap_or(0);
+    (rules.kit_ingots + IRON_PICKAXE_INGOTS * picks
+        - n(data::ItemKind::IronIngot)
+        - n(data::ItemKind::Shield))
+    .clamp(0, n(data::ItemKind::RawIron).max(0))
+}
+
+/// The fuel ticks the cook still burns with `picks` iron pickaxes made: every raw piece's cook
+/// time, 200 a raw iron smelted, and the shields' planks (six a shield at a plank's 300 ticks, so
+/// the wood is held before the hut is closed: wall 11).
+fn cook_fuel_need(counts: &make::Counts, rules: &make::SurvivalRules, picks: i32) -> i32 {
+    let n = |k: data::ItemKind| counts.get(&k).copied().unwrap_or(0);
+    let iron = cook_iron(counts, rules, picks);
+    let shields = n(data::ItemKind::Shield);
+    eat::raw_held(counts, rules)
+        .iter()
+        .map(|(_, n, r)| n * i32::try_from(r.ticks).unwrap_or(200))
+        .sum::<i32>()
+        + iron * 200
+        + 6 * 300 * (rules.kit_shields - shields).clamp(0, n(data::ItemKind::IronIngot) + iron)
+}
+
+/// The iron pickaxes the cook makes (lava-portal wall 2): those due by the iron held
+/// (`iron_pickaxes_due`) that the fuel held or made where the bot stands
+/// (`home::fuel_ticks_held`: planks, coal, logs as their planks, sticks over the reserve) burns
+/// for beyond the cook without them: the pickaxe's smelts and its sticks. A pickaxe never adds a
+/// fuel gather (race 46148925674: four logs covered the meat and the shields exactly, the
+/// pickaxe's 600 ticks asked for a fifth, and the cook gave up on a gather with no way).
+pub fn iron_pickaxes_fuelled(
+    counts: &make::Counts,
+    rules: &make::SurvivalRules,
+    fresh: i32,
+) -> i32 {
+    let held = home::fuel_ticks_held(counts);
+    (1..=iron_pickaxes_due(counts, rules, fresh))
+        .rev()
+        .find(|p| cook_fuel_need(counts, rules, *p) + IRON_PICKAXE_STICK_FUEL * p <= held)
+        .unwrap_or(0)
+}
+
 /// `cook_goal` with `fresh` iron pickaxes held with `spare_uses` left: after the meat, the
-/// kit's ingots and an iron pickaxe's (`iron_pickaxes_due`) smelted from raw iron; then the
+/// kit's ingots and an iron pickaxe's (`iron_pickaxes_fuelled`) smelted from raw iron; then the
 /// shields; then the pickaxe (lava-portal wall 2).
 pub fn cook_goal_with(
     counts: &make::Counts,
@@ -6621,13 +6688,11 @@ pub fn cook_goal_with(
 ) -> Option<make::Row> {
     let raw = eat::raw_held(counts, rules);
     // The kit's ingots (the shields'), from held raw iron, once the meat is done; a shield made
-    // counts as the ingot it took. An iron pickaxe due adds its three.
+    // counts as the ingot it took. An iron pickaxe due and fuelled adds its three.
     let ingots = counts.get(&data::ItemKind::IronIngot).copied().unwrap_or(0);
     let shields = counts.get(&data::ItemKind::Shield).copied().unwrap_or(0);
-    let raw_iron = counts.get(&data::ItemKind::RawIron).copied().unwrap_or(0);
-    let pick_more = iron_pickaxes_due(counts, rules, fresh);
-    let iron = (rules.kit_ingots + IRON_PICKAXE_INGOTS * pick_more - ingots - shields)
-        .clamp(0, raw_iron.max(0));
+    let pick_more = iron_pickaxes_fuelled(counts, rules, fresh);
+    let iron = cook_iron(counts, rules, pick_more);
     // Then the shields themselves, at the cook's table, from the ingots held (overworld-leg
     // wall 8): crafted under the open sky, not at a portal down a mine.
     let shield_more = (rules.kit_shields - shields).clamp(0, ingots.max(0));
@@ -6662,14 +6727,7 @@ pub fn cook_goal_with(
             act: None,
         });
     }
-    let need: i32 = raw
-        .iter()
-        .map(|(_, n, r)| n * i32::try_from(r.ticks).unwrap_or(200))
-        .sum::<i32>()
-        + iron * 200
-        // The shields' planks too, six a shield at a plank's 300 ticks, so the wood is held
-        // before the hut is closed (wall 11): no walk to the trees from inside it.
-        + 6 * 300 * (rules.kit_shields - shields).clamp(0, ingots + iron);
+    let need = cook_fuel_need(counts, rules, pick_more);
     let planks = data::generated::tags::item_tag("planks").unwrap_or(&[]);
     let coals = data::generated::tags::item_tag("coals").unwrap_or(&[]);
     let burns = |k: &data::ItemKind| {
