@@ -1773,14 +1773,8 @@ impl Plan {
         let row = eyes_row(&table, &counts)?;
         let target = row.provides.first().map_or(0, |(_, n)| *n);
         let wear = make::Wear::default();
-        let next = match make::make_with_wear(
-            &table,
-            &counts,
-            &|_: BlockKind| false,
-            false,
-            &wear,
-            &row,
-        ) {
+        let traced = make::make_traced(&table, &counts, &|_: BlockKind| false, false, &wear, &row);
+        let next = match self.traced_want(crate::keep::Sub::Eyes, &row.id, tick, traced) {
             Choice::Act(r) => match r.act {
                 Some(make::Act::Craft(rec)) if make::fits_grid(rec) => Ok(rec),
                 Some(_) | None => Err(format!("{} is not a 2x2 craft", r.id)),

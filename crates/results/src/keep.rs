@@ -22,6 +22,10 @@ pub struct KeepCounts {
     pub dropped_then_wanted: u64,
     /// Those wants, as `<tick> <what>`, in order.
     pub cases: Vec<String>,
+    /// Want lines by their source (`want_source`): craft, smelt, goal (the main planner), or a
+    /// sub-planner's tag (base, eyes, end_portal, stronghold).
+    #[serde(default)]
+    pub wants_by_source: BTreeMap<String, u64>,
 }
 
 /// The kind a drop line names: "drop Cobblestone from slot 21" is `Cobblestone`, and so are
@@ -44,6 +48,21 @@ pub fn want_kinds(what: &str) -> Option<Vec<&str>> {
     Some(kinds.split('|').collect())
 }
 
+/// Where a want line came from: "want Stick 4 for goal kit (base)" is `base`, "... for goal
+/// kit" is `goal`, "... for craft bow" is `craft`, "... for smelt IronIngot" is `smelt`.
+pub fn want_source(what: &str) -> Option<&str> {
+    want_kinds(what)?;
+    let (_, rest) = what.split_once(" for ")?;
+    if let Some(tag) = rest
+        .strip_suffix(')')
+        .and_then(|r| r.rsplit_once(" ("))
+        .map(|(_, t)| t)
+    {
+        return Some(tag);
+    }
+    rest.split_whitespace().next()
+}
+
 /// The keep counts of one run's ledger.
 pub fn keep_counts(l: &Ledger) -> KeepCounts {
     let mut first_drop: BTreeMap<String, u64> = BTreeMap::new();
@@ -57,6 +76,9 @@ pub fn keep_counts(l: &Ledger) -> KeepCounts {
             first_drop.entry(k.to_owned()).or_insert(*at);
         } else if let Some(kinds) = want_kinds(what) {
             c.wants += 1;
+            if let Some(src) = want_source(what) {
+                *c.wants_by_source.entry(src.to_owned()).or_default() += 1;
+            }
             if kinds
                 .iter()
                 .any(|k| first_drop.get(*k).is_some_and(|d| d < at))
@@ -119,6 +141,21 @@ mod tests {
             Some(vec!["fuel"])
         );
         assert_eq!(want_kinds("want to go home"), None);
+        assert_eq!(
+            want_source("want Stick 4 for goal kit (base)"),
+            Some("base")
+        );
+        assert_eq!(
+            want_source("want Stick 4 for goal end-kit-fuel (end_portal)"),
+            Some("end_portal")
+        );
+        assert_eq!(want_source("want Stick 4 for goal kit"), Some("goal"));
+        assert_eq!(want_source("want String 1 for craft bow"), Some("craft"));
+        assert_eq!(
+            want_source("want fuel 1 for smelt IronIngot"),
+            Some("smelt")
+        );
+        assert_eq!(want_source("drop Dirt from slot 9"), None);
     }
 
     /// A want of a kind dropped earlier counts; one of a kind never dropped, or dropped only
@@ -135,6 +172,10 @@ mod tests {
         ]);
         let c = keep_counts(&l);
         assert_eq!((c.drops, c.wants, c.dropped_then_wanted), (2, 4, 1));
+        assert_eq!(
+            c.wants_by_source,
+            BTreeMap::from([("craft".to_owned(), 3), ("smelt".to_owned(), 1)])
+        );
         assert_eq!(
             c.cases,
             vec!["40 want Cobblestone|Blackstone 3 for craft stone_pickaxe".to_owned()]

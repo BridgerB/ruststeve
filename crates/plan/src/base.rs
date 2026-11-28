@@ -1381,14 +1381,9 @@ impl Plan {
         };
         let counts = crate::held(w);
         let gather_now = true;
-        let (act, rid) = match make::make_with_wear(
-            table,
-            &counts,
-            &near,
-            gather_now,
-            &make::Wear::default(),
-            &row,
-        ) {
+        let traced =
+            make::make_traced(table, &counts, &near, gather_now, &Default::default(), &row);
+        let (act, rid) = match self.traced_want(crate::keep::Sub::Base, id, tick, traced) {
             Choice::Done => {
                 if step == Step::Table {
                     return Next::Done(format!(

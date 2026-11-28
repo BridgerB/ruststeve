@@ -1729,8 +1729,8 @@ impl Plan {
             _ => false,
         };
         let counts = crate::held(w);
-        let choice =
-            make::make_with_wear(&table, &counts, &near, true, &make::Wear::default(), row);
+        let traced = make::make_traced(&table, &counts, &near, true, &Default::default(), row);
+        let choice = self.traced_want(crate::keep::Sub::EndPortal, &label, tick, traced);
         let act = match choice {
             Choice::Done => return RowStep::Over(format!("the {label} row is met")),
             Choice::Stuck => {
@@ -1795,13 +1795,19 @@ impl Plan {
                             wants: Vec::new(),
                             act: None,
                         };
-                        if let Choice::Act(a) = make::make_with_wear(
+                        let traced = make::make_traced(
                             &table,
                             &counts,
                             &near,
                             false,
                             &make::Wear::default(),
                             &fuel_row,
+                        );
+                        if let Choice::Act(a) = self.traced_want(
+                            crate::keep::Sub::EndPortal,
+                            &fuel_row.id,
+                            tick,
+                            traced,
                         ) && let Some(make::Act::Craft(rec)) = a.act
                             && make::fits_grid(rec)
                         {

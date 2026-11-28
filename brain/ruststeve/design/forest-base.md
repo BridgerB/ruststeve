@@ -43,6 +43,7 @@ Issue 18d (`docs/problems/pearls-base.md`). The frontier bot reaches a warped fo
 - **Never** with an angry enderman (`endermen::angry`): the base waits, noted. Under 4 free main slots a stack of `drop` goes, never pearls, rods, powder or eyes: since issue 77 the least needed first by the keep table's rank (`drop_slot_by`, [[keep-rule]]), then the list's order (granite, tuff, dirt first). Every look leaves through `Plan::keep_look`.
 - **Other step lists** (issue 19d, [[way-home]]): `BaseState::steps` set runs that list instead of the forest's: `HOME_STEPS` (eyes, stems to `home_logs`, a table placed, spare wooden pickaxes, sticks, a table carried) before the trip back, `CLIMB_STEPS` (a table placed, stone pickaxes) on the overworld climb. The eyes step uses Q3's `eyes` row when the table has it, else `home-eyes`. `[base]` sets the trip's kit: `home_logs` 48, `home_sticks` 8, `home_picks` 2 with `home_pick_uses` 40 or more. On the way home with no main slot free, the biggest stack of the Nether's blocks (netherrack, basalt, soul soil and the like) is dropped before a craft begins (`home_free_slot`; every wooden pickaxe craft failed `StaleWindow` on a full pack in race 45766983995).
 - **The hunt** calls `base_task` in its `base` row; `Aim::Base` (`--goal base`) runs it alone for development and tests.
+- **Want lines** (issue 77): each row's `make` call writes `want <kinds> <n> for goal <id> (base)` once an episode ([[keep-rule]]).
 
 ## Gotchas
 - `base_done(w)` reads `Base::default()`; a test holds it equal to the config's `[base]`.

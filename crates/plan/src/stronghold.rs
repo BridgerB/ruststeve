@@ -1115,7 +1115,9 @@ impl Plan {
             end(self, "no stone-pickaxe row".to_owned());
             return None;
         };
-        let task = match crate::make::make(&table, &counts, &near, goal) {
+        let wear = crate::make::Wear::default();
+        let traced = crate::make::make_traced(&table, &counts, &near, false, &wear, goal);
+        let task = match self.traced_want(crate::keep::Sub::Stronghold, &goal.id, tick, traced) {
             crate::make::Choice::Act(row) => match row.act {
                 Some(crate::make::Act::Craft(r)) if !crate::make::fits_grid(r) => {
                     table_cell.map(|t| Task::Craft(crate::craft::Craft::at_table(r, t, tick)))

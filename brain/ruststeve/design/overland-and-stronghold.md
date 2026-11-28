@@ -5,7 +5,7 @@ type: reference
 tags: [plan, overworld, stronghold, travel, stairs, tunnel]
 aliases: [overland, overland_task, stronghold_task, Room, room_of, stand_target, portal room, infested]
 status: draft
-lastUpdated: 2026-11-27
+lastUpdated: 2026-11-28
 verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/overland.rs#pub fn overland_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
@@ -49,3 +49,4 @@ Issue 19 (#24), parts e and f: from the overworld surface with the eyes' fix in 
 - **Pickaxes** (`stronghold_pickaxes`): between tasks, outside the room, fewer than `spare_pickaxes` stone pickaxes with `spare_uses` left are made from the stairs' cobblestone, the pack's sticks and its table (placed beside the feet, dug again after), `pick_tasks` a round. Ledger: "stronghold pickaxes", "stronghold pickaxes held", "stronghold pickaxes not made", "stronghold wall step", "stronghold wall broken", "stronghold search at depth".
 - **Junk churn** (`junk_watch`, `junk_now`, `junk_place`): a junk kind back by 4 or more within 200 ticks of its drop is held back for `JUNK_BACK_TICKS` (2,400). It is not dropped again; a kind with no block form may still go while a walk is the task. With no main slot free, a held-back block is put down beside the feet, never dropped, only from a stack of `JUNK_PLACE_MAX` 8 or under and at most 8 placings a hold; then the kind is released and the drop takes the stack whole (races 45719263137, 45732530352). Ledger: "junk held back", "junk placed".
 - **The capped tunnel** (`Plan::tunnel_toward_capped`, `tunnel::Limits::max_y`): the room's route is kept within `STAIR_LEG` over the floor. `SAFE_Y`'s cost under y 40 is the Nether's lava sea, and in the overworld it took routes to y 40 under a river and into its water. With no capped way, the approach turns to the room's north or south side (`SIDE_OFF`), twice (`CAP_TRIES`); then the uncapped route, noted "stronghold tunnel uncapped".
+- **Want lines** (issue 77): the stone pickaxes' `make` call writes `want <kinds> <n> for goal stone-pickaxe (stronghold)` once an episode ([[keep-rule]]).
