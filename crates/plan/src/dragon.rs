@@ -2039,6 +2039,8 @@ pub const WAIT_RING: f64 = 16.0;
 /// Blocks from the fountain the fight's wait keeps within (wall 56, the coordinator's call: the
 /// island's flat middle, a charge's knock onto ground).
 pub const HOME_RING: f64 = 25.0;
+/// Food the health comes back at (`FoodData.tick`: natural regeneration needs 18 or more).
+pub const REGEN_FOOD: i32 = 18;
 pub const WAIT_FROM: f64 = 15.0;
 
 /// The wait while the dragon flies: the bunker when there is one, else a cell on the ring
@@ -5005,6 +5007,25 @@ impl Plan {
             )
             .min_by(|a, b| flat(*a, feet).total_cmp(&flat(*b, feet)));
         let Some(t) = threat else {
+            // Nothing near: a meal while food is under `REGEN_FOOD`, or the health never comes
+            // back (wall 57: race 46103123144 lanes 12 and 13 held at 6.5 health, food under 18,
+            // the always row's meal waiting for 14).
+            if matches!(self.task, Task::Idle)
+                && w.player.food.is_some_and(|f| f < REGEN_FOOD)
+                && !self.dragon_holds_meal(w)
+                && let Some(food) = self
+                    .table
+                    .as_ref()
+                    .and_then(|t| crate::eat::best_food(w, &t.survival))
+            {
+                self.note(
+                    tick,
+                    "recover: eat to heal".to_owned(),
+                    format!("{food:?}; health {health:.1}, food {:?}", w.player.food),
+                );
+                self.task = Task::Eat(crate::eat::Eat::new(w, food, tick));
+                return None;
+            }
             return Some(stand);
         };
         let r = [feet[0] - t[0], feet[2] - t[2]];

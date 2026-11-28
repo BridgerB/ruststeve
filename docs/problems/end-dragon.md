@@ -468,3 +468,5 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix (the coordinator's call):**
     - With the crystals done and no bunker, the fight begins at once with the dragon down on its perch, or once the site's walks are spent (`end::end_task`, E5 fence).
     - The fight's wait with no bunker comes in from past `HOME_RING` (25) to the ring at 16 to 20 ("in from the edge to wait on the ring"), on the island's flat middle, where a knock lands on ground.
+- **Wall 57: recovery that never heals** (race 46103123144 on b359a01, lanes 12 and 13). Both held at about 6.5 health in `recover_step`. Health comes back only with food at 18 or more (`FoodData`), and the always row's meal waits for 14.
+  - **Fix:** recovering with nothing near and food under `REGEN_FOOD` (18), the meal is begun ("recover: eat to heal"), unless `dragon_holds_meal` holds it off.

@@ -2775,3 +2775,36 @@ fn the_wait_between_perches_comes_in_from_the_edge_to_the_ring() {
     with_dragon(&mut near, [-30.5, 80.0, 0.5], 0, 0.0);
     assert!(matches!(decide(&near, &ask()), Want::Hold(_)));
 }
+
+#[test]
+fn recovery_eats_while_food_is_under_eighteen_or_the_health_never_comes_back() {
+    // Wall 57: race 46103123144 lanes 12 and 13 held at 6.5 health in recovery, food under 18 (no
+    // natural regeneration), the always row's meal waiting for 14.
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../config/goals.toml"
+    ))
+    .unwrap_or_default();
+    let goals: plan::make::Goals =
+        toml::from_str(&text).unwrap_or_else(|e| panic!("goals.toml: {e}"));
+    let table = Arc::new(plan::make::Table::new(&goals).unwrap_or_else(|e| panic!("table: {e}")));
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    w.player.health = Some(6.5);
+    w.player.food = Some(16);
+    w.inventory
+        .slots
+        .insert(36, (data::ItemKind::CookedBeef, 10));
+    let mut p = Plan::with_table(Aim::Race, table);
+    assert_eq!(p.recover_step(&w, 0), None, "the meal's row steps it");
+    assert!(matches!(p.task, plan::Task::Eat(_)), "{:?}", p.task.name());
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "recover: eat to heal")
+    );
+    // Fed: stands.
+    w.player.food = Some(20);
+    let mut q = Plan::new(Aim::Race);
+    assert!(q.recover_step(&w, 0).is_some());
+    assert!(matches!(q.task, plan::Task::Idle));
+}
