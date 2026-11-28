@@ -449,3 +449,7 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix:**
     - A pour's source is looked for at the feet's height and one under (`pour_cells`).
     - A take-back's use is sent only on the ground with the source within 4 of the eye (`TAKE_REACH`), and no use is counted otherwise. Off the source within 12 on the plane (`TAKE_WALK`) the bot walks back to it; beyond that the water is left there ("left behind out of the take-back's walk").
+- **Wall 53: the takeoff flew into the bot it had turned to face** (dev race 46099602480 lane 0, the death at 5,980; `why` at 6,048 to 6,054).
+  - The fight held the bot "under the perch line" through the scan, 13.4 ahead of the head and 1.2 across. The scan turns the dragon to face the bot, and the takeoff flew out along that facing, from (1, 66, 1) to (4, 66, -10) in about 10 ticks.
+  - `knock_risk` began the dodge only inside 10 of the body, 6 ticks into the takeoff. In the 6 ticks before it, the water against endermen poured at the feet. Two blows of 5 took the bot from 12.7 to 2.7, then dead.
+  - **Fix:** at the takeoff, a bot ahead of the head within `KNOCK_AHEAD` (24) and within 10 across is at risk from the takeoff's first tick. It dodges sideways to the facing, and the dodge row comes ahead of the water.

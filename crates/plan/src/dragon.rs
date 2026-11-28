@@ -810,6 +810,11 @@ pub const KNOCK: i32 = i32::MIN + 2;
 /// body, that must have ground under them (no void, no edge).
 pub const KNOCK_CLEAR: f64 = 10.0;
 pub const KNOCK_ZONE: f64 = 20.0;
+/// Blocks ahead of the dragon's head a takeoff's knock is dodged from. The scan turns the dragon
+/// to face the bot and the takeoff flies out along that facing, about a block a tick (wall 53: dev
+/// race 46099602480 lane 0, held 13.4 ahead and 1.2 across through the scan. The dodge began 6
+/// ticks into the takeoff, once inside `KNOCK_CLEAR`; two blows of 5, dead).
+pub const KNOCK_AHEAD: f64 = 24.0;
 pub const KNOCK_BEHIND: i32 = 16;
 
 /// The dragon landing or taking off within `KNOCK_ZONE` of the fountain with the bot within
@@ -825,6 +830,15 @@ pub fn knock_risk(w: &World, feet: [f64; 3]) -> Option<([f64; 2], f64)> {
     }
     let r = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
     let d = r[0].hypot(r[1]);
+    // Taking off with the bot ahead of the head: out of its lane, sideways to its facing, from
+    // the takeoff's first tick.
+    let (along, across) = ahead(&v, feet);
+    if v.phase() == Some(Phase::Takeoff)
+        && (0.0..KNOCK_AHEAD).contains(&along)
+        && across.abs() < KNOCK_CLEAR
+    {
+        return Some((facing(v.yaw), d.max(1e-6)));
+    }
     if !(1e-6..KNOCK_CLEAR).contains(&d) {
         return None;
     }

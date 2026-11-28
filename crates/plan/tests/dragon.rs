@@ -2665,3 +2665,32 @@ fn a_pour_gone_a_block_under_is_found_and_a_take_back_is_sent_only_from_the_grou
             .any(|e| e.what == "end: the water against endermen lost at [12, 63, 0]")
     );
 }
+
+#[test]
+fn a_takeoff_with_the_bot_ahead_of_the_head_is_dodged_from_its_first_tick() {
+    // Wall 53: dev race 46099602480 lane 0, 13.4 ahead and 1.2 across at the takeoff: the dodge
+    // began only inside 10, six ticks in; two blows of 5.
+    let feet = [0.5, 64.0, -12.5];
+    // Yaw 0 faces -z (sin 0, -cos 0): the bot 13 ahead.
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [0.5, 66.0, 0.5], 4, 0.0);
+    let (flight, d) = dragon::knock_risk(&w, feet).expect("in the takeoff's lane");
+    assert!((d - 13.0).abs() < 0.01, "{d}");
+    assert!(
+        flight[0].abs() < 1e-6 && (flight[1] + 1.0).abs() < 1e-6,
+        "{flight:?}"
+    );
+    // Behind the head, 13 off: out of its wings' reach.
+    let mut behind = end_at(feet);
+    with_dragon(&mut behind, [0.5, 66.0, 0.5], 4, 180.0);
+    assert_eq!(dragon::knock_risk(&behind, feet), None);
+    // Ahead but wide of the lane: nothing.
+    let wide = [14.5, 64.0, -12.5];
+    let mut side = end_at(wide);
+    with_dragon(&mut side, [0.5, 66.0, 0.5], 4, 0.0);
+    assert_eq!(dragon::knock_risk(&side, wide), None);
+    // Still sitting (the scan): not yet.
+    let mut scan = end_at(feet);
+    with_dragon(&mut scan, [0.5, 66.0, 0.5], 6, 0.0);
+    assert_eq!(dragon::knock_risk(&scan, feet), None);
+}
