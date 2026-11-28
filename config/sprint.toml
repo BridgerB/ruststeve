@@ -176,3 +176,7 @@ clear_blocks = 3.0
 # ticks): a task that keeps meeting what stops it sprints less and less, never by a tuned number
 # of its own.
 max_doublings = 3
+# Blocks a body falls with no damage: LivingEntity.calculateFallDamage is
+# ceil(fallDistance - safeFallDistance) with the safe_fall_distance attribute's 3. A step down of
+# this or less is no drop for the sprint (probe 46153338301: every one-block step refused "drop").
+safe_drop = 3
