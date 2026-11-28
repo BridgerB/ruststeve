@@ -393,6 +393,10 @@ pub struct Breath {
     pub id: i32,
     pub pos: [f64; 3],
     pub radius: f64,
+    /// Does it grow (a fireball's cloud, or the fireball itself), or keep its radius (the perched
+    /// dragon's flame: radius 5 for its 200 ticks, gone when the flaming turn ends,
+    /// `DragonSittingFlamingPhase`)? Wall 55.
+    pub grows: bool,
 }
 
 impl Breath {
@@ -405,7 +409,11 @@ impl Breath {
     /// 7 over its 600 ticks: `DragonFireball.onHit`, `setRadiusPerTick((7 - 3) / 600)`) and the
     /// margin (wall 47: bots waited at an edge that grew over them).
     pub fn end_reach(&self) -> f64 {
-        self.radius.max(CLOUD_MAX) + BREATH_MARGIN
+        if self.grows {
+            self.radius.max(CLOUD_MAX) + BREATH_MARGIN
+        } else {
+            self.reach()
+        }
     }
 }
 
@@ -415,24 +423,31 @@ pub fn breaths(w: &World) -> Vec<Breath> {
     w.entities
         .iter()
         .filter_map(|(id, e)| {
-            let radius = match e.kind {
+            let (radius, grows) = match e.kind {
                 // Never under a fireball's cloud as it grows (race 45873410249 lane 0: a cloud
                 // shown with radius 0.0 on the feet was stood in for 80 ticks, 20 to dead).
                 EntityKind::AreaEffectCloud => {
                     let age = w.session.server_ticks.saturating_sub(e.first_seen) as f64;
                     let grown = (CLOUD_MIN + age * CLOUD_GROWTH).min(CLOUD_MAX);
                     match e.metadata.get(&RADIUS_INDEX) {
-                        Some(MetaValue::Float(r)) if r.is_finite() => f64::from(*r).max(grown),
-                        Some(_) | None => BREATH_RADIUS.max(grown),
+                        // The flame: shown at 5 from its first ticks, more than a fireball's
+                        // cloud of its age has grown to (wall 55: the flame taken as growing to
+                        // 8.5 held the bot 13 to 15 out through every flaming turn).
+                        Some(MetaValue::Float(r)) if r.is_finite() => {
+                            let r = f64::from(*r);
+                            (r.max(grown), r < FLAME_RADIUS - 0.01 || r <= grown + 0.5)
+                        }
+                        Some(_) | None => (BREATH_RADIUS.max(grown), true),
                     }
                 }
-                EntityKind::DragonFireball => 3.0,
+                EntityKind::DragonFireball => (3.0, true),
                 _ => return None,
             };
             Some(Breath {
                 id: *id,
                 pos: e.pos,
                 radius,
+                grows,
             })
         })
         .collect()

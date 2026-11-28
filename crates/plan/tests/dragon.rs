@@ -426,7 +426,8 @@ fn a_breath_on_the_way_to_the_stand_is_waited_out_where_the_feet_are() {
         vec![Breath {
             id: 50,
             pos: [-7.5, 64.0, 0.5],
-            radius: 3.0
+            radius: 3.0,
+            grows: true,
         }],
         "a cloud's radius from its data (8)"
     );
@@ -630,6 +631,7 @@ fn a_breath_over_the_bunker_or_under_a_pillar_is_not_on_the_body() {
         id: 50,
         pos: [8.5, 64.0, 0.5],
         radius: 3.0,
+        grows: true,
     }];
     assert!(
         dragon::breath_on(&b, [8.5, 64.0, 0.5]).is_some(),
@@ -2735,4 +2737,22 @@ fn recovery_never_stands_in_a_cloud_it_is_pressed_out_away_from_the_dragon() {
     // Off the middle: straight away from it (+z, yaw 0).
     let c = dragon::press_out(&o, open, [12.5, 64.0, -1.5], None);
     assert!(c.yaw.abs() < 1.0, "{c:?}");
+}
+
+#[test]
+fn the_perched_dragons_flame_keeps_its_reach_a_fireballs_cloud_grows() {
+    // Wall 55: dev race 46099602480 lane 1, the flame (radius 5 from its first tick, gone when the
+    // flaming turn ends) taken as growing to 8.5: "walk held clear of a breath's end reach" and
+    // "backs off a breath's growth" held the bot 13 to 15 out through every flaming turn, back at
+    // the head stand only as the attacking turn ended; 33 strikes in 12 perches.
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    cloud(&mut w, 50, [4.5, 64.0, 0.5], 5.0);
+    cloud(&mut w, 51, [20.5, 64.0, 0.5], 3.0);
+    let b = breaths(&w);
+    let flame = b.iter().find(|b| b.id == 50).expect("the flame");
+    let fire = b.iter().find(|b| b.id == 51).expect("the cloud");
+    assert!(!flame.grows);
+    assert!((flame.end_reach() - flame.reach()).abs() < 1e-9);
+    assert!(fire.grows);
+    assert!(fire.end_reach() > flame.end_reach());
 }
