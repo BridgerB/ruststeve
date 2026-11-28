@@ -837,7 +837,32 @@ pub const KNOCK_BEHIND: i32 = 16;
 /// sideways is straight away from the body) and the blocks, else `None`. Never while it sits:
 /// the strike's time, and no knockback then.
 pub fn knock_risk(w: &World, feet: [f64; 3]) -> Option<([f64; 2], f64)> {
+    knock_risk_at(w, feet, 0)
+}
+
+/// Flaming turns a perch holds before its takeoff (`DragonSittingFlamingPhase`: after the 200
+/// ticks of a turn, `flameCount >= 4` takes off, else scans again).
+pub const FLAMES_TO_TAKEOFF: u32 = 4;
+
+/// `knock_risk`, with `flames` the flaming turns begun on this perch: the last of them
+/// (`FLAMES_TO_TAKEOFF`) is taken as the takeoff's own risk, so the bot is out of the wings' reach
+/// before it lifts (wall 58: race 46103123144 lane 7 held in the low stand 8.3 across through the
+/// fourth turn; the takeoff's blow lifted it to 84 and it fell to its death).
+pub fn knock_risk_at(w: &World, feet: [f64; 3], flames: u32) -> Option<([f64; 2], f64)> {
     let (_, v) = view(w)?;
+    let last_flame = flames >= FLAMES_TO_TAKEOFF && v.phase() == Some(Phase::SittingFlaming);
+    if last_flame && flat(v.pos, [FOUNTAIN[0], 0.0, FOUNTAIN[1]]) <= KNOCK_ZONE {
+        let r = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
+        let d = r[0].hypot(r[1]);
+        let (along, across) = ahead(&v, feet);
+        if (0.0..KNOCK_AHEAD).contains(&along) && across.abs() < KNOCK_CLEAR {
+            return Some((facing(v.yaw), d.max(1e-6)));
+        }
+        if (1e-6..KNOCK_CLEAR + 2.0).contains(&d) {
+            return Some(([r[1] / d, -r[0] / d], d));
+        }
+        return None;
+    }
     if !matches!(v.phase(), Some(Phase::Landing | Phase::Takeoff))
         || flat(v.pos, [FOUNTAIN[0], 0.0, FOUNTAIN[1]]) > KNOCK_ZONE
     {
@@ -2186,6 +2211,9 @@ pub struct DragonState {
     /// When the phase last changed, server ticks.
     #[serde(default)]
     pub phase_at: Option<u64>,
+    /// Flaming turns begun on this perch (wall 58): the fourth ends in the takeoff.
+    #[serde(default)]
+    pub flames: u32,
     /// The perched dragon's damage toward its takeoff, as the server counts it, the dragon's health
     /// last seen, and the digs down for a low stand.
     #[serde(default)]
@@ -2443,6 +2471,20 @@ impl Plan {
                         .map_or_else(|| "none".to_owned(), |p| Phase::of(p).name());
                     self.dragon.phase = Some(v.phase);
                     self.dragon.phase_at = Some(now);
+                    match Phase::of(v.phase) {
+                        Phase::SittingFlaming => self.dragon.flames += 1,
+                        Phase::Landing | Phase::LandingApproach | Phase::HoldingPattern => {
+                            self.dragon.flames = 0;
+                        }
+                        Phase::Strafe
+                        | Phase::Takeoff
+                        | Phase::SittingScanning
+                        | Phase::SittingAttacking
+                        | Phase::ChargingPlayer
+                        | Phase::Dying
+                        | Phase::Hover
+                        | Phase::Unknown(_) => {}
+                    }
                     self.note(
                         tick,
                         format!("dragon phase {from} -> {}", Phase::of(v.phase).name()),
@@ -3310,7 +3352,7 @@ impl Plan {
         // rest (no charge, no strafe then).
         if charge.is_none()
             && strafe.is_none()
-            && knock_risk(w, body.pos).is_some()
+            && knock_risk_at(w, body.pos, self.dragon.flames).is_some()
             && world::stage::open_sky(w)
             && !self.spikes_up_high(w)
         {
@@ -3367,7 +3409,7 @@ impl Plan {
         if (charge.is_some()
             || fireball.is_some()
             || fire_imminent(w, body.pos).is_some()
-            || knock_risk(w, body.pos).is_some())
+            || knock_risk_at(w, body.pos, self.dragon.flames).is_some())
             && world::stage::open_sky(w)
         {
             if let Some(c) = self.fireball_dodge_step(w, tick) {
@@ -3734,7 +3776,7 @@ impl Plan {
                     let d = to[0].hypot(to[1]);
                     (d > 1e-6).then(|| ([to[0] / d, to[1] / d], d))
                 })
-                .or_else(|| knock_risk(w, feet))
+                .or_else(|| knock_risk_at(w, feet, self.dragon.flames))
             {
                 Some((dir, d)) => {
                     // At the leg's end with the fire still due: a dodge again from here.

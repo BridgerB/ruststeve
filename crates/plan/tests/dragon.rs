@@ -2808,3 +2808,35 @@ fn recovery_eats_while_food_is_under_eighteen_or_the_health_never_comes_back() {
     assert!(q.recover_step(&w, 0).is_some());
     assert!(matches!(q.task, plan::Task::Idle));
 }
+
+#[test]
+fn the_fourth_flaming_turn_is_left_as_the_takeoff_before_it_lifts() {
+    // Wall 58: race 46103123144 lane 7 held in the low stand 8.3 across the body through the
+    // fourth flaming turn; the takeoff's blow lifted it to 84, and it fell to its death.
+    let feet = [0.5, 64.0, 8.5];
+    let mut w = end_at(feet);
+    // Yaw -90 faces -x: the bot 8 to its side.
+    with_dragon(&mut w, [0.5, 66.0, 0.5], 5, -90.0);
+    assert_eq!(dragon::knock_risk_at(&w, feet, 3), None, "a scan follows");
+    let (_, d) = dragon::knock_risk_at(&w, feet, 4).expect("the takeoff follows");
+    assert!((d - 8.0).abs() < 0.01, "{d}");
+    // Out past the wings' reach: nothing.
+    let far = [0.5, 64.0, 13.5];
+    let mut o = end_at(far);
+    with_dragon(&mut o, [0.5, 66.0, 0.5], 5, -90.0);
+    assert_eq!(dragon::knock_risk_at(&o, far, 4), None);
+    // The count: four flaming turns on one perch, reset at the next landing.
+    let mut p = Plan::new(Aim::Race);
+    let mut t = 0;
+    for phase in [3, 6, 7, 5, 6, 7, 5, 6, 7, 5, 6, 7, 5] {
+        let mut x = end_at(far);
+        with_dragon(&mut x, [0.5, 66.0, 0.5], phase, -90.0);
+        let _ = p.dragon_watch(&x, t);
+        t += 20;
+    }
+    assert_eq!(p.dragon.flames, 4);
+    let mut x = end_at(far);
+    with_dragon(&mut x, [0.5, 66.0, 0.5], 3, -90.0);
+    let _ = p.dragon_watch(&x, t);
+    assert_eq!(p.dragon.flames, 0);
+}
