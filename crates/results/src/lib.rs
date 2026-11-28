@@ -157,6 +157,10 @@ pub struct PlanSummary {
     /// Notes left out of `notes` (collapsed repeats and the dropped middle).
     #[serde(default)]
     pub notes_dropped: u64,
+    /// The server tick the aim was first met (issue 56); `None` when it never was, or in older
+    /// cases.
+    #[serde(default)]
+    pub met_at: Option<u64>,
 }
 
 /// The live stream's counts for one run (schema/snapshot-v1.md).
@@ -184,6 +188,19 @@ impl Case {
     /// The run's End (issue 20b), from its story.
     pub fn end(&self) -> Option<story::EndCounts> {
         self.story.as_ref().and_then(|s| s.end.clone())
+    }
+
+    /// The tick each stage was first reached (issue 56), from its story; empty without one.
+    pub fn stage_ticks(&self) -> Vec<(Stage, u64)> {
+        self.story
+            .as_ref()
+            .map(|s| s.stage_ticks.clone())
+            .unwrap_or_default()
+    }
+
+    /// The tick the aim was first met (issue 56), from the planner's account.
+    pub fn aim_tick(&self) -> Option<u64> {
+        self.plan.as_ref().and_then(|p| p.met_at)
     }
 
     /// `[ending killer doing why]`: what the batch groups endings by.
@@ -335,6 +352,14 @@ pub struct Row {
     /// The run's End (`Case::end`, issue 20b); `None` when it had none or in older rows.
     #[serde(default)]
     pub end: Option<story::EndCounts>,
+    /// The tick each stage was first reached (`Case::stage_ticks`, issue 56), stage order; empty
+    /// in older rows and runs with no ledger.
+    #[serde(default)]
+    pub stage_ticks: Vec<(Stage, u64)>,
+    /// The tick the aim was first met (`Case::aim_tick`, issue 56); `None` when not met or in
+    /// older rows.
+    #[serde(default)]
+    pub aim_tick: Option<u64>,
 }
 
 /// What a batch could see: full sight is every ratio 1.0 and the counts 0 (issue 16e). A column
@@ -823,6 +848,11 @@ pub fn render_summary(
             ));
         }
     }
+    let ticks = stage_tick_lines(batches);
+    if !ticks.is_empty() {
+        lines.push(String::new());
+        lines.extend(ticks);
+    }
     if let Some(line) = pearls_line(batches) {
         lines.push(String::new());
         lines.push(line);
@@ -837,8 +867,9 @@ pub fn render_summary(
         lines.push(String::new());
         lines.extend(end);
     }
-    // The planner's aims, when runs had one: met over counted runs, per aim.
-    let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    // The planner's aims, when runs had one: met over counted runs, per aim, and the tick it was
+    // met at over the runs that kept it (issue 56).
+    let mut aims: BTreeMap<String, (u64, u64, Vec<u64>)> = BTreeMap::new();
     for row in batches
         .iter()
         .flat_map(|b| &b.rows)
@@ -848,11 +879,20 @@ pub fn render_summary(
             let e = aims.entry(aim.clone()).or_default();
             e.1 += 1;
             e.0 += u64::from(*met);
+            e.2.extend(row.aim_tick.filter(|_| *met));
         }
     }
-    for (aim, (k, n)) in &aims {
+    for (aim, (k, n, at)) in &mut aims {
+        at.sort_unstable();
+        let when = match quartiles(at) {
+            Some([p25, median, p75]) => format!(
+                "; met at median tick {median} (p25 {p25}, p75 {p75}, {} runs)",
+                at.len()
+            ),
+            None => String::new(),
+        };
         lines.push(format!(
-            "aim {aim}: met {k}/{n} ({:.1}%)",
+            "aim {aim}: met {k}/{n} ({:.1}%){when}",
             100.0 * ratio(*k, *n)
         ));
     }
@@ -881,6 +921,61 @@ pub fn render_summary(
         ));
     }
     lines.join("\n") + "\n"
+}
+
+/// p25, median and p75 of sorted ticks, nearest rank (the smallest value with at least that share
+/// at or below it); `None` when there are none.
+pub fn quartiles(sorted: &[u64]) -> Option<[u64; 3]> {
+    let n = sorted.len();
+    let at = |pct: usize| sorted.get((pct * n).div_ceil(100).max(1) - 1).copied();
+    Some([at(25)?, at(50)?, at(75)?])
+}
+
+/// The per-stage ticks table (issue 56): for each `(commit, start, source)` group and each stage
+/// some run reached, k runs that reached it of n counted, and the tick it was first reached at
+/// over those k: median, p25 and p75 (`Row::stage_ticks`, the ledger's session ticks). A start
+/// held its own stages at its first tick, so they read near zero. Empty when no row kept ticks
+/// (batches from before issue 56), so an old race prints no table rather than a wrong one.
+pub fn stage_tick_lines(batches: &[Batch]) -> Vec<String> {
+    type Group = (u64, BTreeMap<Stage, Vec<u64>>);
+    let mut groups: BTreeMap<(String, String, Source), Group> = BTreeMap::new();
+    for b in batches {
+        let g = groups
+            .entry((b.commit.clone(), b.start.clone(), b.source))
+            .or_default();
+        for row in b.rows.iter().filter(|r| r.ending.counted()) {
+            g.0 += 1;
+            for (stage, at) in &row.stage_ticks {
+                g.1.entry(*stage).or_default().push(*at);
+            }
+        }
+    }
+    if groups.values().all(|g| g.1.is_empty()) {
+        return Vec::new();
+    }
+    let mut lines = vec![
+        "| commit | start | stage | k/n | median tick | p25 | p75 |".to_owned(),
+        "|---|---|---|---|---|---|---|".to_owned(),
+    ];
+    for ((commit, start, source), (n, stages)) in &mut groups {
+        let short = commit.get(..7).unwrap_or(commit);
+        let start = match source {
+            Source::Real => start.clone(),
+            Source::Sim => format!("{start} (sim)"),
+        };
+        for (stage, at) in stages.iter_mut() {
+            at.sort_unstable();
+            let Some([p25, median, p75]) = quartiles(at) else {
+                continue;
+            };
+            lines.push(format!(
+                "| {short} | {start} | {} | {}/{n} | {median} | {p25} | {p75} |",
+                stage.name(),
+                at.len()
+            ));
+        }
+    }
+    lines
 }
 
 /// The pearls histogram (issue 18b): counted runs by the pearls they gained, fewest first, as
@@ -1048,6 +1143,8 @@ mod end_tests {
             pearls: None,
             eyes: None,
             end,
+            stage_ticks: Vec::new(),
+            aim_tick: None,
         };
         let b = Batch {
             format_version: FORMAT_VERSION,
@@ -1326,6 +1423,8 @@ mod pearls_tests {
             pearls,
             eyes: None,
             end: None,
+            stage_ticks: Vec::new(),
+            aim_tick: None,
         }
     }
 
@@ -1407,5 +1506,176 @@ mod pearls_tests {
         assert!(eyes_lines(&[batch(vec![row(Stage::Forest, Some(1), Ending::Cap)])]).is_empty());
         let text = render_summary(&summarize(std::slice::from_ref(&b)), &[b], None);
         assert!(text.contains("frames seen: 1 of 3 runs"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod stage_tick_tests {
+    use super::*;
+
+    fn row(bot: &str, ticks: &[(Stage, u64)], ending: Ending) -> Row {
+        Row {
+            bot: bot.to_owned(),
+            stage_reached: ticks.last().map(|t| t.0),
+            ending,
+            signature: Default::default(),
+            server_ticks: 0,
+            wall_ms: 0,
+            case: None,
+            recording: None,
+            aim: None,
+            pearls: None,
+            eyes: None,
+            end: None,
+            stage_ticks: ticks.to_vec(),
+            aim_tick: None,
+        }
+    }
+
+    fn batch(rows: Vec<Row>) -> Batch {
+        Batch {
+            format_version: FORMAT_VERSION,
+            run: "r".to_owned(),
+            commit: "abcdef0123".to_owned(),
+            lane: 0,
+            start: "ready".to_owned(),
+            source: Source::Real,
+            config_hash: "0".to_owned(),
+            bots: u32::try_from(rows.len()).unwrap_or(0),
+            server: "s".to_owned(),
+            server_tick_rate: 20.0,
+            coverage: Coverage::default(),
+            rows,
+        }
+    }
+
+    #[test]
+    fn quartiles_are_nearest_rank() {
+        assert_eq!(quartiles(&[]), None);
+        assert_eq!(quartiles(&[7]), Some([7, 7, 7]));
+        assert_eq!(quartiles(&[1, 2, 3, 4]), Some([1, 2, 3]));
+        assert_eq!(quartiles(&[1, 2, 3, 4, 5]), Some([2, 3, 4]));
+        assert_eq!(
+            quartiles(&[10, 20, 30, 40, 50, 60, 70, 80]),
+            Some([20, 40, 60])
+        );
+    }
+
+    /// The table: k is the runs that reached a stage of the n counted, the ticks are over those k
+    /// only, a cut run is in neither, and a stage no run reached has no row.
+    #[test]
+    fn the_table_gives_each_stage_its_median_and_quartiles() {
+        let b = batch(vec![
+            row(
+                "b0",
+                &[(Stage::Ready, 10), (Stage::IronKit, 4000)],
+                Ending::Cap,
+            ),
+            row(
+                "b1",
+                &[(Stage::Ready, 12), (Stage::IronKit, 2000)],
+                Ending::Cap,
+            ),
+            row(
+                "b2",
+                &[(Stage::Ready, 11), (Stage::IronKit, 3000)],
+                Ending::Death {
+                    killer: "creeper".to_owned(),
+                },
+            ),
+            row("b3", &[(Stage::Ready, 9)], Ending::Cap),
+            row("b4", &[(Stage::Ready, 1), (Stage::IronKit, 1)], Ending::Cut),
+        ]);
+        assert_eq!(
+            stage_tick_lines(std::slice::from_ref(&b)),
+            vec![
+                "| commit | start | stage | k/n | median tick | p25 | p75 |".to_owned(),
+                "|---|---|---|---|---|---|---|".to_owned(),
+                "| abcdef0 | ready | ready | 4/4 | 10 | 9 | 11 |".to_owned(),
+                "| abcdef0 | ready | iron_kit | 3/4 | 3000 | 2000 | 4000 |".to_owned(),
+            ]
+        );
+        let text = render_summary(&summarize(std::slice::from_ref(&b)), &[b], None);
+        assert!(
+            text.contains("| abcdef0 | ready | iron_kit | 3/4 | 3000 |"),
+            "{text}"
+        );
+    }
+
+    /// Batches from before issue 56 kept no ticks: no table, not a table of zeros.
+    #[test]
+    fn rows_without_ticks_print_no_table() {
+        let b = batch(vec![row("b0", &[], Ending::Cap)]);
+        assert!(stage_tick_lines(&[b]).is_empty());
+    }
+
+    /// The aim's line carries its met tick over the runs that met it.
+    #[test]
+    fn the_aim_line_gives_the_met_tick() {
+        let with = |bot: &str, met: bool, at: Option<u64>| Row {
+            aim: Some(("iron-kit".to_owned(), met)),
+            aim_tick: at,
+            ..row(bot, &[], Ending::Cap)
+        };
+        let b = batch(vec![
+            with("b0", true, Some(500)),
+            with("b1", true, Some(700)),
+            with("b2", false, None),
+        ]);
+        let text = render_summary(&summarize(std::slice::from_ref(&b)), &[b], None);
+        assert!(
+            text.contains(
+                "aim iron-kit: met 2/3 (66.7%); met at median tick 500 (p25 500, p75 700, 2 runs)"
+            ),
+            "{text}"
+        );
+    }
+
+    /// A row written before issue 56, without its fields, still reads: the ticks empty, no aim
+    /// tick. The old row is the struct as it stood at f2408e5, encoded as the race wrote it.
+    #[test]
+    fn an_old_row_reads_with_no_ticks() {
+        #[derive(Serialize)]
+        struct OldRow {
+            bot: String,
+            stage_reached: Option<Stage>,
+            ending: Ending,
+            signature: [String; 4],
+            server_ticks: u64,
+            wall_ms: u64,
+            case: Option<String>,
+            recording: Option<String>,
+            aim: Option<(String, bool)>,
+            pearls: Option<i64>,
+        }
+        let old = OldRow {
+            bot: "b".to_owned(),
+            stage_reached: Some(Stage::Nether),
+            ending: Ending::Cap,
+            signature: Default::default(),
+            server_ticks: 9,
+            wall_ms: 1,
+            case: None,
+            recording: None,
+            aim: Some(("race".to_owned(), true)),
+            pearls: None,
+        };
+        let bytes = rmp_serde::to_vec_named(&old).unwrap_or_default();
+        let row: Row = rmp_serde::from_slice(&bytes).unwrap_or_else(|e| panic!("{e}"));
+        assert!(row.stage_ticks.is_empty());
+        assert_eq!(row.aim_tick, None);
+        assert_eq!(row.stage_reached, Some(Stage::Nether));
+        // And a new row round-trips its ticks.
+        let new = Row {
+            aim_tick: Some(77),
+            ..row_with_ticks()
+        };
+        let bytes = rmp_serde::to_vec_named(&new).unwrap_or_default();
+        let back: Row = rmp_serde::from_slice(&bytes).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(back, new);
+    }
+
+    fn row_with_ticks() -> Row {
+        row("b", &[(Stage::InWorld, 3), (Stage::Log, 400)], Ending::Cap)
     }
 }

@@ -195,6 +195,8 @@ pub struct Outcome {
     pub facts: Vec<observe::Stamped>,
     pub senses: Vec<observe::Senses>,
     pub moments: Vec<Moment>,
+    /// The server tick the planner first met its aim (issue 56: the aim's median tick).
+    pub aim_met_at: Option<u64>,
 }
 
 /// Notes kept from a run's start, and from its end: a case file read in one screen. A race of
@@ -588,6 +590,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     }
     // <<< E4
     let mut plan_seen: u64 = 0;
+    let mut aim_met_at: Option<u64> = None;
     let mut plan_tick_us: Vec<u64> = Vec::new();
     let mut plan_notes = Notes::default();
     // The task ledger, every record of the run, unsampled (issue 16e).
@@ -789,6 +792,9 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
             if let Some(p) = planner.as_mut()
                 && matches!(start_state, StartState::Taken)
             {
+                if aim_met_at.is_none() && (p.reached.is_some() || p.met) {
+                    aim_met_at = Some(run.world.session.server_ticks);
+                }
                 if p.finished() && !hold_after_aim {
                     break Ending::Cap;
                 }
@@ -1108,6 +1114,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         facts,
         senses: senses_rows,
         moments: moments.into_iter().collect(),
+        aim_met_at,
     })
 }
 
@@ -1132,6 +1139,7 @@ pub fn plan_summary(p: &plan::Plan, tick_us: &[u64], notes: &Notes) -> results::
         tick_us: tick,
         notes: notes.lines(),
         notes_dropped: notes.dropped,
+        met_at: None,
     }
 }
 

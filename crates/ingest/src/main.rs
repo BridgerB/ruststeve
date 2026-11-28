@@ -406,6 +406,8 @@ mod tests {
                     pearls: None,
                     eyes: None,
                     end: None,
+                    stage_ticks: Vec::new(),
+                    aim_tick: None,
                 }
             })
             .collect();

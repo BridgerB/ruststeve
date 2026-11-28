@@ -1,17 +1,19 @@
 ---
 title: The race and its results
-description: How ruststeve is measured - the race binary and race.yml (one server per runner, a lane of bots, caps in server ticks), the shared race config, checkpoint starts as data applied over RCON, the stage ladder, endings, case and batch files, coverage and the k/n summary.
+description: How ruststeve is measured - the race binary and race.yml (one server per runner, a lane of bots, caps in server ticks), the shared race config, checkpoint starts as data applied over RCON, the stage ladder, endings, case and batch files, coverage, the k/n summary and each stage's median tick.
 type: reference
 tags: [race, results, measurement, case-files, starts, stages, coverage]
-aliases: [hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
+aliases: [stage ticks, median tick, per-stage ticks, hold after aim, --hold-after-aim, minutes, wall limit, race binary, race.yml, lane, batch file, case file, batch.rsb, case.rsc, Stage, stage ladder, stage reached, Ending, coverage, k/n, starts.toml, race.toml, checkpoint start, results summary, RCON]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+verifiedAgainst: ruststeve@f2408e5 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/race.rs#fn race(a: &Args) -> Result<bool, String> {"
   - "ruststeve:crates/bot/src/lib.rs#pub fn run(opts: Opts) -> Result<Outcome, String> {"
   - "ruststeve:crates/world/src/stage.rs#pub fn highest(w: &World) -> Option<Stage> {"
   - "ruststeve:crates/results/src/lib.rs#pub fn summarize(batches: &[Batch]) -> Summary {"
+  - "ruststeve:crates/results/src/lib.rs#pub fn stage_tick_lines(batches: &[Batch]) -> Vec<String> {"
+  - "ruststeve:crates/results/src/story.rs#pub fn stage_ticks(l: &Ledger) -> Vec<(world::Stage, u64)> {"
   - "ruststeve:crates/results/src/lib.rs#pub fn signature(&self) -> [String; 4] {"
   - "ruststeve:crates/results/src/config.rs#pub fn start_commands(start: &Start, bot: &str, index: usize) -> Vec<String> {"
   - "ruststeve:config/race.toml#bots_per_server = 14"
@@ -114,6 +116,7 @@ Issue 07a: the measuring machine, built before any gameplay so every later issue
 - A batch row keeps `pearls` (`Case::pearls_gained`); the summary prints `pearls gained: 0 x5, 12 x1 (6 runs)` when a run reached the forest or gained a pearl.
 - Issue 19b: a batch row keeps `eyes` (`Case::eyes`, from the story: eyes held at the end, thrown, dropped, shattered, picked up, frames seen); the summary prints `eyes held at the end: …`, `eye throws per bot: …` and `frames seen: K of N runs, M most` when any run had eyes or saw a frame.
 - Issue 20 part 2 (Bridger, 2026-11-27): checkpoints `crystals_5` and `crystals_1` between `island` and `crystals`, after race 45994686575 had three bots at 1 crystal left and one at 2 with no snapshot past `island`. Between them, not after `win`, so `Ord` stays the ladder: the snapshot taker keeps the highest stage by `Ord`, and the plan reads `stage_reached >= crystals` as every crystal gone. `world::stage::crystals_left` counts memory's destroyed spikes (a removal with its blast at its spot), never the crystals tracked: its first form (alive within 60 of the fountain with every spike loaded) fired `crystals_5` on tick 40 in all 12 lanes of races 46044026128 and 46045482138, the server untracking and re-sending the crystals on a resume. The End row's `left` is the last senses row's `crystals_left` (the stages' count, ` left N` on a senses line; a resume carries it), or on older rows 10 less `struck` and `blast`; `far` and `gone` are untrackings (race 45994686575's lanes 3 and 4 read "1 left" with 6 and 2 standing).
+- Issue 56: **each stage's tick**. `story::stage_ticks` reads the ledger's `Fact::Stage` lines into the tick each stage was first reached: a stage counts as reached when the stage told is at or past it, so a stage jumped over takes the jump's tick (a snapshot start's own stages read its first tick, near zero) and a stage lost and held again keeps its first. The ticks are the ledger's session server ticks (`Stamped::at`, counted from the connect; `Row::server_ticks` counts from play, a few ticks later). They go into `Story::stage_ticks` and the batch row's `stage_ticks` (`Case::stage_ticks`), and the planner's first met tick into `PlanSummary::met_at` (`Outcome::aim_met_at`, set the tick `reached` or `met` turns true) and `Row::aim_tick`; all `#[serde(default)]`, so older files read with none. The summary prints, after the k/n table, `| commit | start | stage | k/n | median tick | p25 | p75 |` per (commit, start, source) for each stage some run reached (k the runs that reached it of n counted, the ticks over those k, nearest rank), and the aim line gains `; met at median tick M (p25, p75, k runs)`. A batch with no ticks (from before issue 56) prints no table. This is the speed measure for #56 ("the median tick of the kit is earlier") and every later speed issue.
 - Issue 20b: a batch row keeps `end` (`Case::end`, from the story's `EndCounts`: eyes placed, the End entered, crystals seen, left and gone by how, pillars, strikes, blows both ways, breath, gaze near misses, the dragon dead, the credits, the dragon's health a point a minute); the summary prints `end <bot>: …` and `dragon health <bot>: …` for each run that had an End.
 
 ## See also

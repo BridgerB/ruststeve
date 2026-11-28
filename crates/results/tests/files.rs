@@ -78,6 +78,8 @@ fn batch(rows: Vec<Case>) -> Batch {
                 pearls: None,
                 eyes: None,
                 end: None,
+                stage_ticks: Vec::new(),
+                aim_tick: None,
             })
             .collect(),
     }
