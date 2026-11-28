@@ -5691,11 +5691,17 @@ impl Plan {
                 ),
                 "a site beside lava seen exposed".to_owned(),
             );
-            return Task::Cast(Box::new(if fresh {
+            let cast = if fresh {
                 cast::Cast::fresh(site, tick)
             } else {
                 cast::Cast::new(site, tick)
-            }));
+            };
+            // Defend's own ranges, for the hold on a feet-level station sight dig (wall 4).
+            let cast = match self.table.as_ref() {
+                Some(t) => cast.with_sight_hold(cast::SightHold::of(&t.survival)),
+                None => cast,
+            };
+            return Task::Cast(Box::new(cast));
         }
         // No site, and over the lava sea's level: down by its own stairs (overworld-leg wall 1),
         // unless a pool of ten sources is known near the feet's height, which is walked to as
