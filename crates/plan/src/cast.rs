@@ -1259,7 +1259,12 @@ impl Cast {
                 if self.note.is_none() {
                     self.note = Some((what, format!("from the stand {:?}", st.stand)));
                 }
-                self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+                // Its drop is not collected: it falls on the lava under the wall or lies beside
+                // it, and a collect walks to it (stepped on lane 0's recording, the collect of
+                // (23, -54, 43) over lava waited its 300 ticks and failed the dig `Uncollected`).
+                let mut dig = Dig::new(w, block, tick);
+                dig.drop = None;
+                self.work = Work::WayDig(Box::new(dig));
                 return Some((still, None, CastStatus::Running));
             };
             self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
