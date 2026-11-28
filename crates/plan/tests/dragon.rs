@@ -2885,3 +2885,31 @@ fn a_recovery_that_cannot_heal_is_given_up_after_its_cap() {
     // Not begun again while it still cannot heal.
     assert_eq!(p.recover_step(&w, dragon::RECOVER_FUTILE_TICKS + 20), None);
 }
+
+#[test]
+fn by_the_perch_no_notch_is_begun_and_no_bunker_gone_into() {
+    // Wall 62: race 46106118478, three of four deaths in a notch or the bunker within about 15
+    // of the fountain with the dragon perched.
+    let feet = [9.5, 64.0, 3.5];
+    let mut w = end_at(feet);
+    with_dragon(&mut w, [0.5, 66.0, 0.5], 5, 180.0);
+    cloud(&mut w, 50, [9.5, 64.0, 3.5], 3.0);
+    assert!(dragon::perch_near(&w, feet));
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([14, 58, 2]);
+    assert_eq!(p.bunker_now(&w), None, "no entry by the perch");
+    let _ = p.breath_step(&w, 0);
+    assert!(
+        p.take_acts().iter().all(|a| !matches!(a, Act::Dig { .. })),
+        "no notch dug"
+    );
+    assert!(!p.dragon.breath_notch);
+    // Far out, the dragon flying: the bunker as before.
+    let far = [30.5, 64.0, 3.5];
+    let mut o = end_at(far);
+    with_dragon(&mut o, [0.5, 90.0, 0.5], 0, 180.0);
+    assert!(!dragon::perch_near(&o, far));
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([14, 58, 2]);
+    assert_eq!(q.bunker_now(&o), Some([14, 58, 2]));
+}

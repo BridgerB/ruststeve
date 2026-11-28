@@ -940,6 +940,30 @@ pub fn in_water(w: &World, c: [i32; 3]) -> bool {
     w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Water)
 }
 
+/// Blocks from the fountain within which no notch is begun and no bunker gone into while the
+/// dragon lands, sits or takes off (wall 62, the coordinator's call: race 46106118478, three of four
+/// deaths in a notch or the bunker within about 15 of the fountain with the dragon perched).
+pub const PERCH_NEAR: f64 = 20.0;
+
+/// Is the dragon down by the fountain (landing, sitting, taking off) with the feet within
+/// `PERCH_NEAR` of it? The flame's answer then is the ring and the open, never cover (wall 62).
+pub fn perch_near(w: &World, feet: [f64; 3]) -> bool {
+    in_end(w)
+        && from_fountain(feet) < PERCH_NEAR
+        && view(w).is_some_and(|(_, v)| {
+            matches!(
+                v.phase(),
+                Some(
+                    Phase::Landing
+                        | Phase::SittingFlaming
+                        | Phase::SittingScanning
+                        | Phase::SittingAttacking
+                        | Phase::Takeoff
+                )
+            )
+        })
+}
+
 /// Controls that press straight out of a cloud centred at `from`, `PRESS_AHEAD` on: away from its
 /// middle, or with the feet on the middle (no way away from it, wall 54: race 46099479836 lane 7,
 /// the cloud 0.1 off), the first of eight ways whose cell `PRESS_AHEAD` out is open at the feet and
@@ -2192,6 +2216,9 @@ pub struct DragonState {
     pub climb_out: bool,
     #[serde(default)]
     pub rise_from: Option<[i32; 3]>,
+    /// The last cell a notch was refused at by the perch (wall 62).
+    #[serde(default)]
+    pub notch_barred_noted: Option<[i32; 3]>,
     /// The last note of recovery's press out of a cloud (wall 54).
     #[serde(default)]
     pub recover_pressed_at: Option<u64>,
@@ -2628,8 +2655,12 @@ impl Plan {
                     .find(|(k, _)| data::generated::item_props::food_of(*k).is_some())
                     .map(|(k, _)| k)
             });
-        // E3's bunker (`Plan.bunker`), the wait while the dragon flies.
-        let bunker = self.bunker;
+        // E3's bunker (`Plan.bunker`), the wait while the dragon flies; never gone into with the
+        // dragon down by the fountain and the feet near it (wall 62).
+        let bunker = self.bunker.filter(|c| {
+            w.body
+                .is_none_or(|b| !perch_near(w, b.pos) || cell_of(b.pos) == *c)
+        });
         // A way round reached: its stand is gone to straight from here.
         if let (Some(wp), Some(b)) = (self.dragon.way, w.body)
             && flat(b.pos, mid(wp)) <= STAND_NEAR
@@ -3151,6 +3182,7 @@ impl Plan {
         // In the bunker with the breath on: a notch down from there (wall 38, as before wall 36).
         if let Some(b) = self.bunker
             && cell_of(feet) == b
+            && !perch_near(w, feet)
         {
             self.dragon.breath_notch = true;
             self.note(
@@ -4005,7 +4037,13 @@ impl Plan {
     /// The bunker as a place to go: none while a crystal is alive (the crystal phase is fought on
     /// the surface, in sight; frontier race 45978279345 lane 7 died walking into it under a cloud).
     pub fn bunker_now(&self, w: &World) -> Option<[i32; 3]> {
-        self.bunker.filter(|_| crate::end::crystals_alive(w) == 0)
+        // Never gone into with the dragon down by the fountain and the feet near it (wall 62); a
+        // bot already in it is in it.
+        let entry_barred = w.body.is_some_and(|b| {
+            perch_near(w, b.pos) && self.bunker.is_some_and(|c| cell_of(b.pos) != c)
+        });
+        self.bunker
+            .filter(|_| crate::end::crystals_alive(w) == 0 && !entry_barred)
     }
 
     /// The columns on the plane of the bunker (its cell and roof) and its stair's cells; none with
@@ -4145,6 +4183,31 @@ impl Plan {
             return crouch;
         };
         let fc = cell_of(body.pos);
+        // By the perch no notch is begun, nor one not yet a block down gone on with (wall 62):
+        // out into the open, away from the nearest cloud, else from the dragon.
+        let begun_down = self.dragon.notch_from.is_some_and(|f| fc[1] < f[1]);
+        if perch_near(w, body.pos) && !begun_down {
+            self.dragon.notch_from = None;
+            self.dragon.breath_notch = false;
+            self.dragon.charge_dig = None;
+            if self.dragon.notch_barred_noted != Some(fc) {
+                self.dragon.notch_barred_noted = Some(fc);
+                self.note(
+                    tick,
+                    format!("{why}: no notch by the perch at {fc:?}"),
+                    format!(
+                        "{:.0} from the fountain with the dragon down; out into the open",
+                        from_fountain(body.pos)
+                    ),
+                );
+            }
+            let dragon_at = view(w).map(|(_, v)| v.pos);
+            let from = breath_on(&clouds_only(w), body.pos)
+                .map(|b| b.pos)
+                .or(dragon_at)
+                .unwrap_or([FOUNTAIN[0], body.pos[1], FOUNTAIN[1]]);
+            return press_out(w, body.pos, from, dragon_at);
+        }
         if self.dragon.notch_from.is_none() {
             self.dragon.notch_from = Some(fc);
             self.dragon.roof_tries = 0;
