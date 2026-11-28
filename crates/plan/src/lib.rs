@@ -4081,6 +4081,20 @@ impl Plan {
                 return t;
             }
             self.refuse(log, tick);
+            // >>> sprint (issue 56): a log the reach walk cannot route to only because it is too
+            // high over every cell in range (`Goal::Reach`'s rise rule) is refused alone: the
+            // logs beside it, lower in the same tree, may be reached. A refused area round it hid
+            // the ground-level log at (191, 72, 25) four blocks off in the planner test (CI
+            // 46128712142; main reached it at tick 1293).
+            if self.too_high_only(w, log, tick) {
+                self.note(
+                    tick,
+                    format!("log too high to reach: {log:?}"),
+                    "a route to within range of it exists, none ends with it at most PICKUP_RISE over the feet; the log alone is refused".to_owned(),
+                );
+                continue;
+            }
+            // <<< sprint
             self.refused_areas.push((log, tick + FAILURE_MEMORY_TICKS));
         }
         // No log in view with a way (none seen, or each down a cave, up a cliff, across water):
@@ -6095,6 +6109,23 @@ impl Plan {
             self.refuse(c, tick);
         }
         None
+    }
+
+    /// Did a reach walk to `log` find no route only for its rise rule: does a walk to within the
+    /// same range, height counted loosely (`Goal::Near`), find one?
+    fn too_high_only(&mut self, w: &World, log: Cell, tick: u64) -> bool {
+        let mut near = Walk::new(
+            log,
+            Goal::Near {
+                pos: log,
+                range: walk::GOAL_RANGE,
+            },
+            Arrive::Goal,
+            tick,
+        );
+        let found = near.route_now(w, tick) && near.route == Some(path::Status::Found);
+        self.expanded += near.expanded;
+        found
     }
 
     /// Is `target` within `EXPLORED_NEAR` of a target explored before? Both explores read it
