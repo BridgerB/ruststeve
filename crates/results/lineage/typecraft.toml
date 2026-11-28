@@ -1,0 +1,155 @@
+# The issue-20 win's lineage (issue 69): every snapshot the winning world went through, spawn
+# first, so `results seeds --lineage` reads one row of game ticks from spawn to each stage.
+# Built from `git log -p -- config/frontier.toml` on main (each frontier's `how` names the
+# snapshot it resumed from), docs/problems/end.md's ladder (the bow line) and the releases'
+# asset lists (2026-11-27). A frontier move that was not resumed from (the fortress of race
+# 44678197603, the first rods_7 and endermen lanes, the crystals_5 of the pillar line) is not
+# in the chain. Links of the same race and lane are one world at different moments.
+seed = "typecraft"
+
+# Race 45128866973, from spawn: lane 6 made the clean ready snapshot.
+[[link]]
+stage = "log"
+tag = "race-45128866973"
+asset = "snapshot-log-45128866973-race-45128866973-lane-6.tar.zst"
+[[link]]
+stage = "table"
+tag = "race-45128866973"
+asset = "snapshot-table-45128866973-race-45128866973-lane-6.tar.zst"
+[[link]]
+stage = "stone_pickaxe"
+tag = "race-45128866973"
+asset = "snapshot-stone_pickaxe-45128866973-race-45128866973-lane-6.tar.zst"
+[[link]]
+stage = "gear"
+tag = "race-45128866973"
+asset = "snapshot-gear-45128866973-race-45128866973-lane-6.tar.zst"
+[[link]]
+stage = "ready"
+tag = "race-45128866973"
+asset = "snapshot-ready-45128866973-race-45128866973-lane-6.tar.zst"
+
+[[link]]
+stage = "nether"
+tag = "race-45194253932"
+asset = "snapshot-nether-45194253932-race-45194253932-lane-5.tar.zst"
+note = "from ready 45128866973 lane 6 (frontier c882a541's how)"
+
+[[link]]
+stage = "fortress"
+tag = "race-45350933958"
+asset = "snapshot-fortress-45350933958-race-45350933958-lane-0.tar.zst"
+[[link]]
+stage = "spawner"
+tag = "race-45350933958"
+asset = "snapshot-spawner-45350933958-race-45350933958-lane-0.tar.zst"
+note = "from nether 45194253932 lane 5 (frontier 8cc927fc's how)"
+
+[[link]]
+stage = "rods_7"
+tag = "race-45363542882"
+asset = "snapshot-rods_7-45363542882-race-45363542882-lane-2.tar.zst"
+note = "from spawner 45350933958 lane 0 (frontier 8c14da5b)"
+
+[[link]]
+stage = "endermen"
+tag = "race-45481633896"
+asset = "snapshot-endermen-45481633896-race-45481633896-lane-2.tar.zst"
+note = "lane 2, not the frontier's lane 3: forest 45537545167 resumed from lane 2 (6f33cc4d's how)"
+
+[[link]]
+stage = "forest"
+tag = "race-45537545167"
+asset = "snapshot-forest-45537545167-race-45537545167-lane-0.tar.zst"
+
+[[link]]
+stage = "forest"
+tag = "race-45578610032"
+asset = "snapshot-stuck-rs-l06-b00-45578610032-race-45578610032-lane-6.tar.zst"
+note = "stuck with 5 pearls (frontier ca92e2c3)"
+
+[[link]]
+stage = "pearls_6"
+tag = "race-45588764709"
+asset = "snapshot-pearls_6-45588764709-race-45588764709-lane-0.tar.zst"
+note = "frontier 129f879f"
+
+[[link]]
+stage = "pearls_9"
+tag = "race-45615781100"
+asset = "snapshot-pearls_9-45615781100-race-45615781100-lane-6.tar.zst"
+
+[[link]]
+stage = "pearls_12"
+tag = "race-45621953332"
+asset = "snapshot-pearls_12-45621953332-race-45621953332-lane-7.tar.zst"
+note = "frontier 91b5146f"
+
+# The trip home (frontier e901686d's how): at-16000, stuck, at-6000, at-5000, then overworld.
+# The last three snap.toml files say stage "fortress", not pearls_12 (probe 46118396226; why is
+# not read yet). An at/stuck link only bounds a cell, never sets one, so the row is unaffected.
+[[link]]
+stage = "pearls_12"
+tag = "race-45722775712"
+asset = "snapshot-at-16000-45722775712-race-45722775712-lane-1.tar.zst"
+[[link]]
+stage = "pearls_12"
+tag = "race-45742350492"
+asset = "snapshot-stuck-rs-l00-b00-45742350492-race-45742350492-lane-0.tar.zst"
+[[link]]
+stage = "pearls_12"
+tag = "race-45768707240"
+asset = "snapshot-at-6000-45768707240-race-45768707240-lane-2.tar.zst"
+[[link]]
+stage = "pearls_12"
+tag = "race-45771610530"
+asset = "snapshot-at-5000-45771610530-race-45771610530-lane-0.tar.zst"
+
+[[link]]
+stage = "overworld"
+tag = "race-45783611857"
+asset = "snapshot-overworld-45783611857-race-45783611857-lane-0.tar.zst"
+
+[[link]]
+stage = "stronghold"
+tag = "race-45800967549"
+asset = "snapshot-stronghold-45800967549-race-45800967549-lane-4.tar.zst"
+note = "lane 4's own stronghold (the frontier's was lane 3)"
+[[link]]
+stage = "portal_room"
+tag = "race-45800967549"
+asset = "snapshot-portal_room-45800967549-race-45800967549-lane-4.tar.zst"
+
+[[link]]
+stage = "armed"
+tag = "race-45882199358"
+asset = "snapshot-armed-45882199358-race-45882199358-lane-0.tar.zst"
+
+# The bow line (docs/problems/end.md): armed, then end and island in race 46072716511 lane 1.
+[[link]]
+stage = "end"
+tag = "race-46072716511"
+asset = "snapshot-end-46072716511-race-46072716511-lane-1.tar.zst"
+[[link]]
+stage = "island"
+tag = "race-46072716511"
+asset = "snapshot-island-46072716511-race-46072716511-lane-1.tar.zst"
+
+[[link]]
+stage = "crystals_5"
+tag = "race-46101740935"
+asset = "snapshot-crystals_5-46101740935-race-46101740935-lane-1.tar.zst"
+[[link]]
+stage = "crystals_1"
+tag = "race-46101740935"
+asset = "snapshot-crystals_1-46101740935-race-46101740935-lane-1.tar.zst"
+[[link]]
+stage = "crystals"
+tag = "race-46101740935"
+asset = "snapshot-crystals-46101740935-race-46101740935-lane-1.tar.zst"
+
+[[link]]
+stage = "win"
+tag = "race-46108868213"
+asset = "snapshot-win-46108868213-race-46108868213-lane-6.tar.zst"
+note = "the frontier (9b5da2e2): Data.Time should read 466,498"
