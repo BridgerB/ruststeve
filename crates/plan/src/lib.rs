@@ -73,6 +73,9 @@ pub mod smelt;
 // >>> E4 (issue 20f): the crystals by pillar and strike.
 pub mod spikes;
 // <<< E4
+// >>> sprint (issue 56): the pace policy.
+pub mod sprint;
+// <<< sprint
 pub mod stairs;
 pub mod station;
 // >>> stronghold (Q4, issue 19f)
@@ -946,6 +949,10 @@ pub struct Plan {
     #[serde(default)]
     pub bow: bow::BowState,
     // <<< E8
+    // >>> sprint (issue 56): the pace gate's state for the task in hand (`sprint::PaceState`).
+    #[serde(default)]
+    pub pace: sprint::PaceState,
+    // <<< sprint
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1094,6 +1101,9 @@ impl Plan {
             // >>> E8
             bow: bow::BowState::default(),
             // <<< E8
+            // >>> sprint
+            pace: sprint::PaceState::default(),
+            // <<< sprint
             acts: Vec::new(),
         }
     }
@@ -1183,7 +1193,10 @@ impl Plan {
         // Never stare (issue 17e): every look the planner sends leaves here, kept off endermen.
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
-        c
+        // >>> sprint (issue 56): the pace gate, last, on the controls as sent. Its notes come after
+        // `track`, so they are never read as a task's reason.
+        self.pace_gate(w, c)
+        // <<< sprint
     }
 
     /// A stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` is

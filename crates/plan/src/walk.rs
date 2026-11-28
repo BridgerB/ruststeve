@@ -195,6 +195,10 @@ pub struct More {
     pub sneak_ticks: u64,
     #[serde(default)]
     pub sneak_said: bool,
+    /// This tick's move was step by step (a bridge laid, a sneak at an edge): it keeps walking,
+    /// and the pace gate says why (`sprint::Step`, issue 56). Cleared each tick.
+    #[serde(default)]
+    pub step: Option<crate::sprint::Step>,
 }
 
 /// A side of `feet` drops to lava: the cell beside its floor is lava, or open with lava within
@@ -295,6 +299,33 @@ impl Walk {
             std::mem::take(&mut self.more.acts),
             std::mem::take(&mut self.more.said),
         )
+    }
+
+    /// The kind of move this tick for the pace gate (`sprint`): a step-by-step move if one was
+    /// made, else `plain` (a walk's or an explore's).
+    pub fn pace(&self, plain: crate::sprint::Pace) -> crate::sprint::Pace {
+        match self.more.step {
+            Some(s) => crate::sprint::Pace::Step(s),
+            None => plain,
+        }
+    }
+
+    /// Blocks still to go along the route from `pos` (straight to the target once it is walked
+    /// out): what the pace gate's food budget is read against.
+    pub fn left(&self, pos: [f64; 3]) -> f64 {
+        let ahead = self
+            .waypoints
+            .as_ref()
+            .and_then(|w| w.get(self.at..))
+            .unwrap_or_default();
+        let mut from = pos;
+        let mut sum = 0.0;
+        for c in ahead.iter().chain(ahead.is_empty().then_some(&self.target)) {
+            let to = centre(*c);
+            sum += horizontal(from, to);
+            from = to;
+        }
+        sum
     }
 
     /// The bridge cells the route still has ahead.
@@ -486,6 +517,7 @@ impl Walk {
             return (Controls::default(), TaskStatus::Failed(Failure::TargetLost));
         };
         let pos = body.pos;
+        self.more.step = None;
         // The progress invariant, every tick.
         let d = horizontal(pos, centre(self.target));
         if d < self.best_distance - PROGRESS_STEP {
@@ -552,9 +584,12 @@ impl Walk {
             return (Controls::default(), TaskStatus::Running);
         }
         if self.more.kinds.get(self.at) == Some(&MoveKind::Bridge)
-            && let Some(out) = self.bridge(w, body, next, tick)
+            && let Some((mut c, status)) = self.bridge(w, body, next, tick)
         {
-            return self.edge_sneak(w, body, next, out);
+            // Bridging is step by step: never a sprint (issue 56).
+            c.sprint = false;
+            self.more.step = Some(crate::sprint::Step::Bridge);
+            return self.edge_sneak(w, body, next, (c, status));
         }
         // Feet resting in soul sand's own cell (y + 0.875): read from the block, never from the
         // fraction of y, which a body mid-jump or a hair under a whole block also shows.
@@ -590,6 +625,11 @@ impl Walk {
             return (c, status);
         }
         c.sneak = true;
+        // A sneak at an edge keeps walking (issue 56): the gate notes why.
+        c.sprint = false;
+        if self.more.step.is_none() {
+            self.more.step = Some(crate::sprint::Step::Sneak);
+        }
         self.more.sneak_ticks += 1;
         if !self.more.sneak_said {
             self.more.sneak_said = true;
@@ -709,7 +749,9 @@ impl Walk {
     }
 }
 
-/// Toward a point, jumping when blocked (clojurecraft's `toward`).
+/// Toward a point, jumping when blocked (clojurecraft's `toward`). The sprint key is the wish
+/// of a plain move (issue 56): the pace gate (`sprint`) keeps it only where the policy allows,
+/// and a bridge or a sneak clears it.
 fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
     Controls {
         forward: true,
@@ -717,7 +759,7 @@ fn toward(body: physics::Body, point: [f64; 3]) -> Controls {
         sneak: false,
         yaw: yaw_to(body.pos, point),
         pitch: None,
-        sprint: false,
+        sprint: true,
     }
 }
 
