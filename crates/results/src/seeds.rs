@@ -377,7 +377,8 @@ impl SeedRow {
 
 /// Fold snapshots into one row a seed: a stage's ticks are the least `Data.Time` among stage
 /// snapshots of it; a stage below the furthest with no snapshot takes the least ticks of any
-/// snapshot holding a higher stage (an upper bound). An `at`/`stuck` snapshot only bounds.
+/// snapshot holding a higher stage (an upper bound), from the seed's lowest snapshot up. An
+/// `at`/`stuck` snapshot only bounds.
 pub fn fold(snaps: &[SnapTime]) -> Vec<SeedRow> {
     let mut by_seed: BTreeMap<&str, Vec<&SnapTime>> = BTreeMap::new();
     for s in snaps {
@@ -391,10 +392,14 @@ pub fn fold(snaps: &[SnapTime]) -> Vec<SeedRow> {
                 .filter_map(|s| Stage::from_name(&s.stage).map(|st| (st, *s)))
                 .collect();
             let top = staged.iter().map(|(st, _)| *st).max();
+            // Bounds only between the seed's own snapshots: below its lowest one every stage
+            // would read the same bound and say nothing (probe 46119985166: one win snapshot
+            // bounded all 26 stages below it).
+            let low = staged.iter().map(|(st, _)| *st).min();
             let mut stages = BTreeMap::new();
             for st in Stage::ALL
                 .into_iter()
-                .filter(|st| top.is_some_and(|t| *st <= t))
+                .filter(|st| top.is_some_and(|t| *st <= t) && low.is_some_and(|l| *st >= l))
             {
                 let exact = staged
                     .iter()
@@ -579,8 +584,13 @@ pub fn stalls(batches: &[(String, PathBuf, crate::Batch)]) -> Vec<Stall> {
             let mut counts: BTreeMap<String, u64> = BTreeMap::new();
             for (_, _, r) in &at {
                 let [ending, killer, doing, why] = &r.signature;
+                let head = if killer.is_empty() {
+                    ending.clone()
+                } else {
+                    format!("{ending} {killer}")
+                };
                 *counts
-                    .entry(format!("{ending} {killer} | {doing} | {why}"))
+                    .entry(format!("{head} | {doing} | {why}"))
                     .or_default() += 1;
             }
             let mut reasons: Vec<Reason> = counts
@@ -899,6 +909,8 @@ mod tests {
             Some(&(50_000, Source::Exact))
         );
         assert!(!tc.stages.contains_key(&Stage::Fortress));
+        // Below the lowest snapshot (log) nothing is bounded.
+        assert!(!tc.stages.contains_key(&Stage::InWorld));
         let md = render(&rows);
         assert!(md.contains("| typecraft | nether |"), "{md}");
         assert!(md.contains("| desert | table |"), "{md}");
