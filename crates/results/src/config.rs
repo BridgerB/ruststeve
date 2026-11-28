@@ -171,6 +171,79 @@ pub fn start_commands(start: &Start, bot: &str, index: usize) -> Vec<String> {
     out
 }
 
+/// A seed's `level-seed`: vanilla takes a string (hashed) or a 64-bit number as it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SeedValue {
+    Number(i64),
+    Text(String),
+}
+
+impl std::fmt::Display for SeedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Number(n) => write!(f, "{n}"),
+            Self::Text(t) => f.write_str(t),
+        }
+    }
+}
+
+/// One `[[seed]]` of `config/seeds.toml` (issue 69): a world the relay races on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seed {
+    /// `[a-z0-9-]+`: a lane's `SEED`, a file name under `config/frontier/`.
+    pub name: String,
+    pub value: SeedValue,
+    /// What this world tests.
+    pub tests: String,
+}
+
+/// `config/seeds.toml`: the fixed list of seeds, in the order the relay runs them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Seeds {
+    pub seed: Vec<Seed>,
+}
+
+impl Seeds {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let s: Seeds = toml::from_str(text).map_err(|e| format!("seeds: {e}"))?;
+        s.check()?;
+        Ok(s)
+    }
+
+    pub fn read(path: &str) -> Result<Self, String> {
+        Self::parse(&std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?)
+    }
+
+    pub fn find(&self, name: &str) -> Option<&Seed> {
+        self.seed.iter().find(|s| s.name == name)
+    }
+
+    /// Names are `[a-z0-9-]+` and unique; a value is never empty (vanilla would pick a random
+    /// world, and the list is meant to be fixed).
+    fn check(&self) -> Result<(), String> {
+        if self.seed.is_empty() {
+            return Err("seeds: no [[seed]]".to_owned());
+        }
+        for (i, s) in self.seed.iter().enumerate() {
+            let well_formed = !s.name.is_empty()
+                && s.name
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !well_formed {
+                return Err(format!("seed {:?}: a name is [a-z0-9-]+", s.name));
+            }
+            if self.seed[..i].iter().any(|t| t.name == s.name) {
+                return Err(format!("seed {}: named twice", s.name));
+            }
+            if matches!(&s.value, SeedValue::Text(t) if t.trim().is_empty()) {
+                return Err(format!("seed {}: an empty value", s.name));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// FNV-1a 64 of the config's bytes: which config a batch ran under.
 pub fn fnv_hex(bytes: &[u8]) -> String {
     let h = bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
@@ -230,5 +303,60 @@ mod snapshot_start {
         let starts = Starts::read("../../config/starts.toml").expect("starts");
         let snap = starts.find("snapshot").expect("a snapshot start");
         assert!(start_commands(snap, "rs-l00-b00", 0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod seeds {
+    use super::*;
+
+    /// Issue 69: the committed list parses, `typecraft` (the issue-20 lineage) first, and its
+    /// value is the race seed.
+    #[test]
+    fn the_committed_seeds_start_with_the_race_seed() {
+        let seeds = Seeds::read("../../config/seeds.toml").expect("seeds");
+        let (race, _) = RaceConfig::read("../../config/race.toml").expect("race config");
+        let first = seeds.seed.first().expect("a seed");
+        assert_eq!(first.name, "typecraft");
+        assert_eq!(first.value.to_string(), race.server.seed);
+    }
+
+    #[test]
+    fn numbers_and_strings_are_values() {
+        let s = Seeds::parse(
+            "[[seed]]\nname = \"a\"\nvalue = -42\ntests = \"x\"\n\
+             [[seed]]\nname = \"b-2\"\nvalue = \"text\"\ntests = \"y\"\n",
+        )
+        .expect("seeds");
+        assert_eq!(
+            s.find("a").map(|x| x.value.to_string()).as_deref(),
+            Some("-42")
+        );
+        assert_eq!(
+            s.find("b-2").map(|x| x.value.to_string()).as_deref(),
+            Some("text")
+        );
+        assert!(s.find("c").is_none());
+    }
+
+    #[test]
+    fn bad_names_twins_and_empty_values_are_refused() {
+        let one = |name: &str, value: &str| {
+            Seeds::parse(&format!(
+                "[[seed]]\nname = \"{name}\"\nvalue = {value}\ntests = \"x\"\n"
+            ))
+        };
+        assert!(one("Upper", "1").is_err());
+        assert!(one("a_b", "1").is_err());
+        assert!(one("", "1").is_err());
+        assert!(one("a", "\" \"").is_err());
+        assert!(Seeds::parse("seed = []\n").is_err());
+        assert!(
+            Seeds::parse(
+                "[[seed]]\nname = \"a\"\nvalue = 1\ntests = \"x\"\n\
+                 [[seed]]\nname = \"a\"\nvalue = 2\ntests = \"y\"\n"
+            )
+            .is_err()
+        );
     }
 }

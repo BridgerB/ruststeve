@@ -1,0 +1,8 @@
+# The frontier of seed `far-stronghold` (issue 69, brain/ruststeve/design/relay.md): the furthest stage a
+# real bot has reached on this world, as a snapshot that race.yml `seed=far-stronghold snapshot=frontier`
+# resumes from. Moved by a commit (by the lead) when a bot first passes a stage on this seed.
+stage = "gear"
+tag = "race-46130984192"
+asset = "snapshot-gear-46130984192-race-46130984192-lane-0.tar.zst"
+commit = "7f1af997"
+how = "the one-hour check (race 46130984192, 2026-11-28) from the stone_pickaxe snapshot of relay leg 1 (race 46124595679 lane 1): the one bot of 14 to gear, at game tick 49,288."

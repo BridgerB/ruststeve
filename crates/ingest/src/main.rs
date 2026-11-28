@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --release --manifest-path crates/ingest/Cargo.toml -- add <store dir> <batch dirs or batch.rsb>...
-//! cargo run --release --manifest-path crates/ingest/Cargo.toml -- query <store dir> kn|deaths|endings|batches|runs
+//! cargo run --release --manifest-path crates/ingest/Cargo.toml -- query <store dir> kn|deaths|endings|batches|runs|seeds|stalls
 //! cargo run --release --manifest-path crates/ingest/Cargo.toml -- case <store dir> <race run id> <bot>
 //! ```
 //!
@@ -73,25 +73,82 @@ fn rank(s: Stage) -> i64 {
         .unwrap_or(-1)
 }
 
-/// Every `batch.rsb` under the paths, sorted.
-fn batches_under(paths: &[String]) -> Vec<PathBuf> {
-    fn walk(p: &Path, out: &mut Vec<PathBuf>) {
+/// Every file under the paths whose name `keep` accepts, sorted.
+fn files_under(paths: &[String], keep: fn(&str) -> bool) -> Vec<PathBuf> {
+    fn walk(p: &Path, keep: fn(&str) -> bool, out: &mut Vec<PathBuf>) {
         if p.is_dir() {
             if let Ok(rd) = std::fs::read_dir(p) {
                 for e in rd.flatten() {
-                    walk(&e.path(), out);
+                    walk(&e.path(), keep, out);
                 }
             }
-        } else if p.file_name().is_some_and(|n| n == "batch.rsb") {
+        } else if p.file_name().and_then(|n| n.to_str()).is_some_and(keep) {
             out.push(p.to_path_buf());
         }
     }
     let mut out = Vec::new();
     for p in paths {
-        walk(Path::new(p), &mut out);
+        walk(Path::new(p), keep, &mut out);
     }
     out.sort();
     out
+}
+
+/// Every `batch.rsb` under the paths, sorted.
+fn batches_under(paths: &[String]) -> Vec<PathBuf> {
+    files_under(paths, |n| n == "batch.rsb")
+}
+
+/// Every seed-rows file (`results seeds --rows`, issue 69) under the paths, sorted.
+fn seed_rows_under(paths: &[String]) -> Vec<PathBuf> {
+    files_under(paths, |n| {
+        n.starts_with("seed-rows") && n.ends_with(".toml")
+    })
+}
+
+/// Upsert one file's seed rows (seed_stage:⟨run/bot/stage⟩: the same snapshot twice is one row).
+/// A row whose stage is not on the ladder is said and left out.
+async fn add_seed_rows(db: &Surreal<Db>, path: &Path) -> Res<u32> {
+    let rows = results::seeds::read_rows(path)?;
+    let mut n = 0;
+    for r in &rows.rows {
+        let Some(stage) = Stage::from_name(&r.stage) else {
+            eprintln!("ingest: {}: {} is not a stage", path.display(), r.stage);
+            continue;
+        };
+        let key = format!("{}/{}/{}", r.run, r.bot, r.stage);
+        let _: Option<Value> = db
+            .upsert(("seed_stage", key.as_str()))
+            .content(json!({
+                "seed": r.seed, "stage": r.stage, "rank": rank(stage), "ticks": r.ticks,
+                "commit": r.commit, "race_run": r.run, "lane": r.lane, "bot": r.bot,
+            }))
+            .await
+            .map_err(err)?;
+        n += 1;
+    }
+    for st in &rows.stall {
+        let Some(stage) = Stage::from_name(&st.stage) else {
+            eprintln!("ingest: {}: {} is not a stage", path.display(), st.stage);
+            continue;
+        };
+        let key = format!("{}/{}", st.seed, st.run);
+        let reasons: Vec<String> = st
+            .reasons
+            .iter()
+            .map(|r| format!("{} x{}", r.signature, r.n))
+            .collect();
+        let _: Option<Value> = db
+            .upsert(("seed_stall", key.as_str()))
+            .content(json!({
+                "seed": st.seed, "stage": st.stage, "rank": rank(stage), "k": st.k, "n": st.n,
+                "reasons": reasons, "bot": st.bot, "race_run": st.run, "lane": st.lane,
+                "last_task": st.last_task,
+            }))
+            .await
+            .map_err(err)?;
+    }
+    Ok(n)
 }
 
 async fn schema(db: &Surreal<Db>) -> Res<()> {
@@ -237,6 +294,20 @@ async fn query(db: &Surreal<Db>, what: &str) -> Res<Vec<String>> {
             )
             .await?
         }
+        "seeds" => {
+            select_all(
+                db,
+                "SELECT seed, stage, rank, commit, ticks, n FROM seed_best ORDER BY seed, rank, commit",
+            )
+            .await?
+        }
+        "stalls" => {
+            select_all(
+                db,
+                "SELECT seed, race_run, stage, k, n, reasons, bot, last_task FROM seed_stall ORDER BY seed, race_run",
+            )
+            .await?
+        }
         "runs" => {
             select_all(
                 db,
@@ -244,7 +315,7 @@ async fn query(db: &Surreal<Db>, what: &str) -> Res<Vec<String>> {
             )
             .await?
         }
-        other => return Err(format!("no query {other}: kn, deaths, endings, batches, runs")),
+        other => return Err(format!("no query {other}: kn, deaths, endings, batches, runs, seeds, stalls")),
     };
     Ok(rows.iter().map(|r| strip_id(r).to_string()).collect())
 }
@@ -271,13 +342,25 @@ fn strip_id(v: &Value) -> Value {
     }
 }
 
-/// Add every batch under the paths: (added, already in the store).
+/// Add every batch under the paths: (added, already in the store). Seed rows under the same
+/// paths are upserted beside them (issue 69).
 async fn add_all(db: &Surreal<Db>, paths: &[String]) -> Res<(u32, u32)> {
     let files = batches_under(paths);
     if files.is_empty() {
         return Err("no batch.rsb found".to_owned());
     }
     schema(db).await?;
+    let seed_files = seed_rows_under(paths);
+    let mut seed_rows = 0;
+    for f in &seed_files {
+        seed_rows += add_seed_rows(db, f).await?;
+    }
+    if !seed_files.is_empty() {
+        println!(
+            "ingest: {seed_rows} seed rows from {} files",
+            seed_files.len()
+        );
+    }
     let (mut added, mut skipped) = (0, 0);
     for f in &files {
         let b = results::read_batch(f)?;
@@ -406,6 +489,8 @@ mod tests {
                     pearls: None,
                     eyes: None,
                     end: None,
+                    stage_ticks: Vec::new(),
+                    aim_tick: None,
                 }
             })
             .collect();
@@ -450,6 +535,43 @@ mod tests {
                 case("c", Some(Stage::End), Ending::Cut),
             ],
         );
+        // Issue 69: two snapshots' seed rows beside the batch, the same win twice by bot.
+        let row = |seed: &str, stage: &str, ticks: i64, bot: &str| results::seeds::SnapTime {
+            seed: seed.to_owned(),
+            stage: stage.to_owned(),
+            ticks,
+            commit: "c0ffee0".to_owned(),
+            run: "r1".to_owned(),
+            lane: 0,
+            bot: bot.to_owned(),
+            kind: None,
+        };
+        std::fs::write(
+            lane.join("seed-rows-r1.toml"),
+            results::seeds::rows_toml(
+                &[
+                    row("typecraft", "win", 466_498, "a"),
+                    row("typecraft", "win", 470_000, "b"),
+                    row("desert", "log", 900, "a"),
+                ],
+                &[results::seeds::Stall {
+                    seed: "desert".to_owned(),
+                    stage: "log".to_owned(),
+                    k: 1,
+                    n: 3,
+                    reasons: vec![results::seeds::Reason {
+                        signature: "cap  | walk | wood".to_owned(),
+                        n: 1,
+                    }],
+                    bot: "a".to_owned(),
+                    run: "r1".to_owned(),
+                    lane: 0,
+                    last_task: "walk: to the log (wood) -> open".to_owned(),
+                }],
+            )
+            .unwrap(),
+        )
+        .unwrap();
         let store = root.join("store");
         let lane_s = vec![lane.to_string_lossy().into_owned()];
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -470,6 +592,22 @@ mod tests {
             assert_eq!(get("in_world"), (2, 2));
             assert_eq!(get("table"), (1, 2));
             assert_eq!(get("end"), (0, 2));
+            let seeds: Vec<Value> = query(&db, "seeds")
+                .await
+                .unwrap()
+                .iter()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            assert_eq!(seeds.len(), 2, "{seeds:?}");
+            let win = seeds.iter().find(|v| v["stage"] == "win").unwrap();
+            // The least ticks, and the re-add upserted rather than doubled.
+            assert_eq!(
+                (win["ticks"].as_i64(), win["n"].as_i64()),
+                (Some(466_498), Some(2))
+            );
+            let stalls = query(&db, "stalls").await.unwrap();
+            assert_eq!(stalls.len(), 1, "{stalls:?}");
+            assert!(stalls[0].contains("cap  | walk | wood x1"), "{stalls:?}");
             let deaths = query(&db, "deaths").await.unwrap();
             assert_eq!(deaths.len(), 1);
             assert!(deaths[0].contains("death.attack.mob zombie"), "{deaths:?}");

@@ -224,6 +224,8 @@ fn simrace(a: &Args) -> Result<bool, String> {
             pearls: Some(c.pearls_gained()),
             eyes: c.eyes(),
             end: c.end(),
+            stage_ticks: c.stage_ticks(),
+            aim_tick: c.aim_tick(),
         });
     }
     rows.sort_by(|x, y| x.bot.cmp(&y.bot));

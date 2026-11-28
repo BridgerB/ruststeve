@@ -1,0 +1,8 @@
+# The frontier of seed `far-fortress` (issue 69, brain/ruststeve/design/relay.md): the furthest stage a
+# real bot has reached on this world, as a snapshot that race.yml `seed=far-fortress snapshot=frontier`
+# resumes from. Moved by a commit (by the lead) when a bot first passes a stage on this seed.
+stage = "spawner"
+tag = "race-46140744043"
+asset = "snapshot-spawner-46140744043-race-46140744043-lane-3.tar.zst"
+commit = "8bc4c0ec"
+how = "issue 77's seeds race (race 46140744043 lane 3, 2026-11-28) from the nether frontier (race 46130812202 lane 0): bot rs-l03-b07 the first at the spawner, 46,260 session ticks in (game tick 129,570); 11 of 14 reached the fortress and 10 of 14 the spawner. The nether stall of leg 4 (race 46134115367, no fortress in view) is passed."

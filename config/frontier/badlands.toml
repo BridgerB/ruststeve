@@ -1,0 +1,8 @@
+# The frontier of seed `badlands` (issue 69, brain/ruststeve/design/relay.md): the furthest stage a
+# real bot has reached on this world, as a snapshot that race.yml `seed=badlands snapshot=frontier`
+# resumes from. Moved by a commit (by the lead) when a bot first passes a stage on this seed.
+stage = "stone_pickaxe"
+tag = "race-46124595679"
+asset = "snapshot-stone_pickaxe-46124595679-race-46124595679-lane-3.tar.zst"
+commit = "4a1bda89"
+how = "the seeds baseline relay leg 1 (race 46124595679 lane 3, from spawn, 2026-11-28): the first of 5 of 14 bots to make a stone pickaxe, at game tick 19,511. A one-hour check from it (race 46130986262) geared 0 of 14."

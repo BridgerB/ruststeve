@@ -468,10 +468,10 @@ fn race(a: &Args) -> Result<bool, String> {
             wall_ms: outcome.stats.wall_ms,
             recording: outcome.recorded.then(|| recording.clone()),
             replay: format!("cargo run -p replay -- verify {recording}"),
-            plan: outcome
-                .plan
-                .as_ref()
-                .map(|p| bot::plan_summary(p, &outcome.plan_tick_us, &outcome.plan_notes)),
+            plan: outcome.plan.as_ref().map(|p| results::PlanSummary {
+                met_at: outcome.aim_met_at,
+                ..bot::plan_summary(p, &outcome.plan_tick_us, &outcome.plan_notes)
+            }),
             stream: outcome.stream.map(|c| results::StreamCounts {
                 sent: c.sent,
                 dropped: c.dropped,
@@ -603,6 +603,8 @@ fn write_case(dir: &Path, case: &Case, coverage: &mut Coverage) -> Result<Row, S
         pearls: Some(case.pearls_gained()),
         eyes: case.eyes(),
         end: case.end(),
+        stage_ticks: case.stage_ticks(),
+        aim_tick: case.aim_tick(),
     })
 }
 
