@@ -174,15 +174,24 @@ fn the_planner_notes_its_held_target() {
     w.inventory.slots.insert(39, (ItemKind::FlintAndSteel, 1));
     w.inventory.slots.insert(40, (ItemKind::Cobblestone, 32));
     w.held = 0;
-    let mut p = plan::Plan::new(plan::Aim::Portal);
+    // The goal table holds the `portal` row whose kit, held, sends the planner to the cast.
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let goals: plan::make::Goals = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let table = Arc::new(plan::make::Table::new(&goals).unwrap());
+    let mut p = plan::Plan::with_table(plan::Aim::Portal, table);
     let _ = p.step(&w);
     let _ = p.step(&w);
+    let all: Vec<String> = p
+        .events_since(0)
+        .iter()
+        .map(|e| format!("{}: {} ({})", e.tick, e.what, e.why))
+        .collect();
     let targets: Vec<String> = p
         .events_since(0)
         .iter()
         .filter(|e| e.what.starts_with("lava target "))
         .map(|e| e.what.clone())
         .collect();
-    assert_eq!(targets, [format!("lava target {P:?}")], "{targets:?}");
+    assert_eq!(targets, [format!("lava target {P:?}")], "{all:#?}");
     assert_eq!(p.lava_hold.map(|h| h.target), Some(P));
 }
