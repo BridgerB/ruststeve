@@ -416,3 +416,106 @@ fn the_home_chest_is_the_one_put_down_never_a_buried_one() {
         Some(16)
     );
 }
+
+/// Wall 5: the chest carried to the portal is never dropped from a full pack, and never
+/// stashed in itself.
+#[test]
+fn a_full_pack_keeps_the_carried_chest() {
+    use plan::keep::{Context, Rank, least_needed};
+    let k = needs();
+    let ctx = [Context::Always];
+    for reached in [
+        None,
+        Some(Stage::Ready),
+        Some(Stage::Nether),
+        Some(Stage::Win),
+    ] {
+        assert_eq!(
+            k.rank(ItemKind::Chest, 1, reached, &ctx),
+            Rank::Unlisted,
+            "{reached:?}"
+        );
+        let junk = k.junk(reached, &ctx);
+        assert!(junk.iter().all(|(j, _)| *j != ItemKind::Chest));
+        // A full pack: the chest, two stacks of stone over the keep, buckets elsewhere.
+        let mut slots: BTreeMap<i16, (ItemKind, i32)> =
+            (9..=44).map(|s| (s, (ItemKind::Bucket, 1))).collect();
+        slots.insert(9, (ItemKind::Chest, 1));
+        slots.insert(10, (ItemKind::Cobblestone, 64));
+        slots.insert(11, (ItemKind::Cobblestone, 64));
+        let rank = |kind: ItemKind, held: i32| k.rank(kind, held, reached, &ctx);
+        let dropped = least_needed(&slots, &junk, &rank).map(|(_, kind, _)| kind);
+        assert_ne!(dropped, Some(ItemKind::Chest), "{reached:?}");
+        // Only the chest and what is never dropped: nothing goes.
+        slots.insert(10, (ItemKind::Bucket, 1));
+        slots.insert(11, (ItemKind::Bucket, 1));
+        assert_eq!(least_needed(&slots, &junk, &rank), None, "{reached:?}");
+    }
+    assert_eq!(k.need_in(ItemKind::Chest, &nether().stages), 1);
+    assert!(
+        stash_list(&counts(&[(ItemKind::Chest, 1)]), &k, &nether()).is_empty(),
+        "never stashed"
+    );
+}
+
+/// The early craft's gate as the planner chooses: a task, or none.
+fn early(pl: &mut Plan, w: &World, t: u64) -> Option<Task> {
+    match pl.stash_gate(w, Task::Idle, t) {
+        Task::Idle => None,
+        other => Some(other),
+    }
+}
+
+/// Wall 5: with wood to spare before `ready` the home chest is crafted early and carried; at
+/// the portal it is put down (no craft there) and the stash follows.
+#[test]
+fn the_home_chest_is_crafted_early_and_put_down_at_the_portal() {
+    let mut p = Pair::new(&[
+        (ItemKind::OakPlanks, 32),
+        (ItemKind::CraftingTable, 1),
+        (ItemKind::Feather, 16),
+    ]);
+    let mut plan = planner();
+    let begun = run(&mut p, &mut plan, early);
+    let log = ledger(&plan);
+    assert!(begun.contains(&"craft"), "{begun:?}\n{log}");
+    assert!(
+        log.contains("home chest crafted early, 16 planks spare"),
+        "{log}"
+    );
+    assert_eq!(p.held(ItemKind::Chest), 1, "{log}");
+    // The table put down for it came along again.
+    assert_eq!(p.held(ItemKind::CraftingTable), 1, "{log}");
+    assert!(plan.stash.home.is_none(), "carried, not put down");
+    // Once: the gate is quiet after.
+    assert!(early(&mut plan, &p.w, p.tick).is_none());
+    // At the portal: the carried chest goes down, no craft, then the stash.
+    let leg = nether();
+    let begun = run(&mut p, &mut plan, |pl, w, t| pl.stash_before(w, &leg, t));
+    let log = ledger(&plan);
+    assert_eq!(begun, vec!["place", "stash"], "{log}");
+    let (_, home) = plan.stash.home.clone().expect("a home chest");
+    assert_eq!(
+        p.sim
+            .survival
+            .chests
+            .get(&home)
+            .map(|c| c.count(ItemKind::Feather)),
+        Some(16),
+        "{log}"
+    );
+    assert_eq!(p.held(ItemKind::Chest), 0);
+}
+
+/// Wall 5: with only the leg's logs the early craft never begins, and says nothing.
+#[test]
+fn the_early_craft_waits_for_wood_to_spare() {
+    let mut p = Pair::new(&[(ItemKind::OakLog, 4), (ItemKind::CraftingTable, 1)]);
+    let mut plan = planner();
+    let begun = run(&mut p, &mut plan, early);
+    let log = ledger(&plan);
+    assert!(begun.is_empty(), "{begun:?}\n{log}");
+    assert!(!log.contains("crafted early"), "{log}");
+    assert_eq!(p.held(ItemKind::Chest), 0);
+    assert_eq!(p.held(ItemKind::OakLog), 4);
+}

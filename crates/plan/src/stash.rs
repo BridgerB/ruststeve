@@ -615,6 +615,9 @@ pub const PLANKS_PER_LOG: i32 = 4;
 /// Tasks begun for one home chest before it is given up: planks, a table put down, the chest
 /// crafted and put down are 4; one failure each besides is 8.
 pub const CHEST_TASKS: u32 = 8;
+/// Early crafts tried that could not be begun (a trip, no table) before it is left to the portal:
+/// each is `FAILURE_MEMORY_TICKS` apart, so 4 cover 2,400 ticks of the run before `ready`.
+pub const EARLY_TRIES: u32 = 4;
 /// Inventory slots of window 0 a chest window shows (main 9..=35, hotbar 36..=44): what can be
 /// stashed. Armour and the off hand are not in a chest's window.
 const PACK: std::ops::RangeInclusive<i16> = 9..=44;
@@ -797,6 +800,16 @@ pub struct StashState {
     /// Stashes and fetches ended, and how many items each way.
     pub stashes: u32,
     pub fetches: u32,
+    /// The early craft (wall 5): the wood spare when it began, over (held, or given up), the
+    /// tries that could not be begun and when the next may be.
+    #[serde(default)]
+    pub early_spare: Option<i32>,
+    #[serde(default)]
+    pub early_over: bool,
+    #[serde(default)]
+    pub early_tries: u32,
+    #[serde(default)]
+    pub early_retry_at: u64,
     /// The development aim `chest-trip`'s next step.
     #[serde(default)]
     pub trip: TripStep,
@@ -873,6 +886,11 @@ impl Plan {
     /// The gate's own choice: a fetch due, or a leg's stash; `None` leaves the chosen task.
     fn stash_choice(&mut self, w: &World, chosen: &Task, tick: u64) -> Option<Task> {
         if let Some(t) = self.fetch_after_revive(w, tick) {
+            return Some(t);
+        }
+        if !matches!(chosen, Task::Enter(_))
+            && let Some(t) = self.early_chest(w, tick)
+        {
             return Some(t);
         }
         let Task::Enter(e) = chosen else {
@@ -1004,20 +1022,118 @@ impl Plan {
         }
     }
 
+    /// The home chest crafted early (wall 5: bots reach the portal under `READY_LOGS`, so a chest
+    /// begun there never had the wood): the first time the wood spares in the overworld before
+    /// the `ready` stage, the `carry-chest` row where the bot stands, never a trip; the chest
+    /// is carried and put down at the portal. Noted when held ("home chest crafted early").
+    fn early_chest(&mut self, w: &World, tick: u64) -> Option<Task> {
+        if self.stash.early_over || self.stash.home.is_some() || tick < self.stash.early_retry_at {
+            return None;
+        }
+        let overworld = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == crate::stronghold::OVERWORLD);
+        let counts = crate::held(w);
+        let held = counts.get(&ItemKind::Chest).copied().unwrap_or(0);
+        if let Some(spare) = self.stash.early_spare
+            && held > 0
+        {
+            self.stash.early_spare = None;
+            self.stash.early_over = true;
+            self.stash.chest_tasks = 0;
+            self.note(
+                tick,
+                format!("home chest crafted early, {spare} planks spare"),
+                "carried to the portal, put down there before the stash".to_owned(),
+            );
+            if std::mem::take(&mut self.stash.table_placed) {
+                return self.carry_table(w, tick);
+            }
+            return None;
+        }
+        let before_ready = w.stage_reached.is_none_or(|s| s < Stage::Ready);
+        let begun = self.stash.early_spare.is_some();
+        if !overworld
+            || held > 0
+            || (!begun && !before_ready)
+            || self.stash.legs.contains(&"nether".to_owned())
+        {
+            return None;
+        }
+        if !begun {
+            let at_table = self
+                .at_hand(w, data::BlockKind::CraftingTable, tick)
+                .is_some()
+                || counts.get(&ItemKind::CraftingTable).is_some_and(|n| *n > 0);
+            let (spare, want) = wood_to_spare(&counts, at_table);
+            if spare < want || self.stash_danger(w).is_some() {
+                return None;
+            }
+            self.stash.early_spare = Some(spare);
+        }
+        match self.chest_row_task(
+            w,
+            tick,
+            "carry-chest",
+            "the wood spares before the portal: the home chest crafted early, carried",
+        ) {
+            Ok(t) => Some(t),
+            Err(why) => {
+                self.stash.early_spare = None;
+                self.stash.table_placed = false;
+                self.stash.chest_tasks = 0;
+                self.stash.early_tries += 1;
+                self.stash.early_retry_at = tick + crate::FAILURE_MEMORY_TICKS;
+                if self.stash.early_tries >= EARLY_TRIES {
+                    self.stash.early_over = true;
+                }
+                self.note(
+                    tick,
+                    "home chest early craft skipped".to_owned(),
+                    format!(
+                        "{why}; try {} of {EARLY_TRIES}, the portal makes one if it can",
+                        self.stash.early_tries
+                    ),
+                );
+                None
+            }
+        }
+    }
+
     /// The next step toward a home chest where the bot stands (the `home-chest` row), or why
     /// none is begun: no wood to spare, a trip, or the tasks' bound.
     fn home_chest_task(&mut self, w: &World, tick: u64) -> Result<Task, String> {
+        self.chest_row_task(
+            w,
+            tick,
+            "home-chest",
+            "something to stash and no chest near",
+        )
+    }
+
+    /// The next step of a chest row (`home-chest`: put down; `carry-chest`: crafted and
+    /// carried) where the bot stands, or why none is begun.
+    fn chest_row_task(
+        &mut self,
+        w: &World,
+        tick: u64,
+        row_id: &str,
+        why: &str,
+    ) -> Result<Task, String> {
         let table = self.table.clone().ok_or("no goal table")?;
         let goal = table
-            .until("home-chest")
-            .ok_or("no home-chest row in the goal table")?;
+            .until(row_id)
+            .ok_or(format!("no {row_id} row in the goal table"))?;
         if self.stash.chest_tasks >= CHEST_TASKS {
             return Err(format!("{CHEST_TASKS} tasks begun for it"));
         }
         let counts = crate::held(w);
         let at_table = self.at_hand(w, data::BlockKind::CraftingTable, tick);
-        // The first step only: once begun, the wood is in planks, a table or the chest.
-        if self.stash.chest_tasks == 0 {
+        // The first step only: once begun, the wood is in planks, a table or the chest. A chest
+        // carried (crafted early) needs no wood.
+        let carried = counts.get(&ItemKind::Chest).is_some_and(|n| *n > 0);
+        if self.stash.chest_tasks == 0 && !carried {
             let has_table =
                 at_table.is_some() || counts.get(&ItemKind::CraftingTable).is_some_and(|n| *n > 0);
             let (spare, want) = wood_to_spare(&counts, has_table);
@@ -1069,7 +1185,7 @@ impl Plan {
             tick,
             format!("home chest: {}", row.id),
             format!(
-                "something to stash and no chest near; task {} of at most {CHEST_TASKS}",
+                "{why}; task {} of at most {CHEST_TASKS}",
                 self.stash.chest_tasks
             ),
         );
