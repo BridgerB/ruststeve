@@ -462,3 +462,9 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - The flame's cloud (radius 5 from its first tick, gone when the turn ends: `DragonSittingFlamingPhase`) was taken by wall 47's end reach as a fireball's cloud growing to 7. "Walk held clear of a breath's end reach (radius 5.0, to grow to 8.5)" and "walk backs off a breath's growth" sent the bot 13 to 15 from the fountain each flaming turn.
   - The walk back to the head stand took the next scan, so the bot reached it as the attacking turn ended: 0 to 6 strikes a perch. `why` at 10,433 shows no cloud within 26 when "no head stand open" was held.
   - **Fix:** a cloud shown at 5 or more, more than a fireball's cloud of its age has grown to, is the flame. `Breath::grows` is false for it, and its end reach is its own reach. The flame's way out is `flame_clear_cell` at `FLAME_CLEAR`, as before wall 47.
+- **Wall 56: no fight without a bunker; waits far out on the edges** (race 46101740935 on c5d0931, the bow frontier).
+  - Lane 1 had every crystal gone at 3,900. E3's `end_task` wanted the bunker first, and "no bunker site from (54, 58, 9) (10 walks; 55 from the fountain)" repeated to 16,840 with the dragon at 190: the fight was never begun.
+  - Lanes 0 and 2 were knocked into the void by charges far out by the edges (lane 0 at 60 out east; lane 2 off to (64, 92, -112)).
+  - **Fix (the coordinator's call):**
+    - With the crystals done and no bunker, the fight begins at once with the dragon down on its perch, or once the site's walks are spent (`end::end_task`, E5 fence).
+    - The fight's wait with no bunker comes in from past `HOME_RING` (25) to the ring at 16 to 20 ("in from the edge to wait on the ring"), on the island's flat middle, where a knock lands on ground.

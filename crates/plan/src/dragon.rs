@@ -2036,6 +2036,9 @@ pub fn decide(w: &World, ask: &Ask) -> Want {
 /// wings' reach of a dragon on the pillar (4.5 across plus 2 plus 4 inflated, 10.5), and of the
 /// landing one coming in over the ring (race 45876898172 lane 1: hit 5 at 11 out, twice).
 pub const WAIT_RING: f64 = 16.0;
+/// Blocks from the fountain the fight's wait keeps within (wall 56, the coordinator's call: the
+/// island's flat middle, a charge's knock onto ground).
+pub const HOME_RING: f64 = 25.0;
 pub const WAIT_FROM: f64 = 15.0;
 
 /// The wait while the dragon flies: the bunker when there is one, else a cell on the ring
@@ -2055,7 +2058,16 @@ fn wait(w: &World, ask: &Ask, feet: [f64; 3], why: &'static str) -> Want {
         };
     }
     // No bunker: out past the wings' reach at takeoff (4.5 across, the box inflated 4, a push
-    // of 4 and 5 damage: E1's jar reading), on the ring, until it perches again.
+    // of 4 and 5 damage: E1's jar reading), on the ring, until it perches again. Never far out
+    // (wall 56): past `HOME_RING` the wait comes in to the ring, on the island's flat middle,
+    // where a charge's knock lands on ground (race 46101740935 lanes 0 and 2, knocked off the
+    // edges into the void; lane 1 waited 55 to 61 out).
+    if from_fountain(feet) > HOME_RING {
+        return match ring_cell(w, None, &[WAIT_RING, WAIT_RING + 4.0]) {
+            Some(c) => Want::Go(c, "in from the edge to wait on the ring"),
+            None => Want::Hold(why),
+        };
+    }
     if from_fountain(feet) >= WAIT_FROM {
         return Want::Hold(why);
     }

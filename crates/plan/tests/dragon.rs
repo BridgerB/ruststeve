@@ -2756,3 +2756,22 @@ fn the_perched_dragons_flame_keeps_its_reach_a_fireballs_cloud_grows() {
     assert!(fire.grows);
     assert!(fire.end_reach() > flame.end_reach());
 }
+
+#[test]
+fn the_wait_between_perches_comes_in_from_the_edge_to_the_ring() {
+    // Wall 56: race 46101740935, lanes 0 and 2 knocked off the edges by charges, lane 1 waiting
+    // 55 to 61 from the fountain with every crystal gone.
+    let mut w = end_at([28.5, 64.0, 0.5]);
+    with_dragon(&mut w, [-30.5, 80.0, 0.5], 0, 0.0);
+    match decide(&w, &ask()) {
+        Want::Go(c, "in from the edge to wait on the ring") => {
+            let d = dragon::flat(feet_of(c), [0.5, 0.0, 0.5]);
+            assert!(d <= dragon::HOME_RING, "{c:?} {d}");
+        }
+        other => panic!("in to the ring, not {other:?}"),
+    }
+    // On the ring already: held there.
+    let mut near = end_at([18.5, 64.0, 0.5]);
+    with_dragon(&mut near, [-30.5, 80.0, 0.5], 0, 0.0);
+    assert!(matches!(decide(&near, &ask()), Want::Hold(_)));
+}
