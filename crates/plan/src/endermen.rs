@@ -245,6 +245,12 @@ pub struct EnderState {
     pub spared: Vec<(u32, u64)>,
     #[serde(default)]
     pub looks_spared: u64,
+    /// Angry endermen watched in the End: whose each is (`Plan::whom_watch`).
+    #[serde(default)]
+    pub whom: Vec<WhomTrack>,
+    /// Answers skipped for an enderman on the dragon, by row (`Skip::name`), in the run.
+    #[serde(default)]
+    pub dragon_skips: std::collections::BTreeMap<String, u64>,
     // <<< pumpkin
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
@@ -1953,3 +1959,342 @@ impl Plan {
         Task::Idle
     }
 }
+
+// >>> pumpkin (issue 80, docs/problems/pumpkin.md): endermen angry at whom, in the End.
+//
+// The jar (probes 46160185304, 46160754145; brain/game/mc-pumpkin.md): an enderman picks a player
+// itself only by a stare (`EndermanLookForPlayerGoal`); otherwise its target is its latest
+// hurter with an entity (`HurtByTargetGoal`, no alert of others), and every hurt of the
+// dragon's (wings, head, breath) is the dragon's. Its creepy flag is set for any target, so
+// creepy is "angry", never "at the bot". One on the dragon turns on the bot only by a stare
+// (the pumpkin and the guard prevent it) or a new hurt from the bot.
+
+/// Why an angry enderman is taken as the bot's. Any of these, or doubt, makes it the bot's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum BotsWhy {
+    /// Its latest hurt with an entity was the bot's (a strike, an arrow, a sweep).
+    StruckByBot,
+    /// An enderman hit the bot lately and this is the nearest angry one in reach of a blow.
+    HitTheBot,
+    /// Its stared-at flag is set: its look goal has the bot.
+    StaredAt,
+    /// The pearl hunt's provoke row stared at it on purpose.
+    Provoked,
+    /// Angry with no hurt with an entity seen: in doubt, the bot's.
+    NoHurtSeen,
+    /// It came at the bot: closer by `whom_close` within `whom_close_ticks`.
+    Closing,
+    /// A teleport landed it within `whom_land_near` of the bot.
+    LandedNear,
+}
+
+impl BotsWhy {
+    pub fn name(self) -> &'static str {
+        match self {
+            BotsWhy::StruckByBot => "struck by the bot",
+            BotsWhy::HitTheBot => "hit the bot",
+            BotsWhy::StaredAt => "stared at",
+            BotsWhy::Provoked => "provoked",
+            BotsWhy::NoHurtSeen => "no hurt seen",
+            BotsWhy::Closing => "closing in",
+            BotsWhy::LandedNear => "landed near",
+        }
+    }
+
+    /// Kept for the rest of its anger once seen (its behaviour said so).
+    fn sticky(self) -> bool {
+        match self {
+            BotsWhy::Closing | BotsWhy::LandedNear | BotsWhy::StruckByBot | BotsWhy::HitTheBot => {
+                true
+            }
+            BotsWhy::StaredAt | BotsWhy::Provoked | BotsWhy::NoHurtSeen => false,
+        }
+    }
+}
+
+/// Whose an angry enderman is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Whose {
+    Bots(BotsWhy),
+    /// On the dragon: its latest hurt with an entity at `at` by `by`, none of it the bot's.
+    Dragons {
+        at: u64,
+        by: Option<i32>,
+    },
+}
+
+/// The answer an enderman on the dragon is left out of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Skip {
+    /// The water against endermen (`ender_water_step`).
+    Pour,
+    /// The hold, the notch and the strike (`end_enderman_step`).
+    Hold,
+    /// "covered from an angry enderman" (`end_covered`).
+    Cover,
+}
+
+impl Skip {
+    pub fn name(self) -> &'static str {
+        match self {
+            Skip::Pour => "pour",
+            Skip::Hold => "hold",
+            Skip::Cover => "cover",
+        }
+    }
+}
+
+/// One angry enderman watched: its last places and distances from the bot (server ticks), what
+/// made it the bot's once its behaviour said so, and its skip notes.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct WhomTrack {
+    pub id: i32,
+    pub seen: Vec<(u64, f64, [f64; 3])>,
+    pub bots: Option<BotsWhy>,
+    pub skips: u64,
+    pub noted_at: Option<u64>,
+}
+
+/// `[end_kit]`'s whom numbers, read where they are used.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WhomRules {
+    pub close: f64,
+    pub close_ticks: u64,
+    pub land_near: f64,
+    pub jump: f64,
+    pub melee: f64,
+}
+
+/// Whether an enderman's creepy flag is set (it has a target).
+pub fn creepy(e: &world::Entity) -> bool {
+    matches!(e.metadata.get(&CREEPY_INDEX), Some(MetaValue::Bool(true)))
+}
+
+/// The behaviour that makes an enderman the bot's, from its track: closer by `close` within
+/// `close_ticks`, or a jump of over `jump` in one sample that lands within `land_near`. Pure.
+pub fn came_at(track: &WhomTrack, r: &WhomRules) -> Option<BotsWhy> {
+    let last = track.seen.last()?;
+    let closing = track
+        .seen
+        .iter()
+        .filter(|s| last.0.saturating_sub(s.0) <= r.close_ticks)
+        .any(|s| s.1 - last.1 >= r.close);
+    if closing {
+        return Some(BotsWhy::Closing);
+    }
+    let landed = track.seen.windows(2).last().is_some_and(|p| {
+        let jump = (0..3)
+            .map(|i| (p[1].2[i] - p[0].2[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        jump > r.jump && p[1].1 <= r.land_near
+    });
+    landed.then_some(BotsWhy::LandedNear)
+}
+
+/// Whose the angry enderman `id` is (see `BotsWhy`); in doubt, the bot's. `nearest_in_melee`
+/// is the nearest angry one within `melee` of the bot. Pure.
+pub fn whose(
+    w: &World,
+    id: i32,
+    track: Option<&WhomTrack>,
+    provoked: &[i32],
+    nearest_in_melee: Option<i32>,
+) -> Whose {
+    let Some(e) = w.entities.get(&id) else {
+        return Whose::Bots(BotsWhy::NoHurtSeen);
+    };
+    if let Some(why) = track.and_then(|t| t.bots) {
+        return Whose::Bots(why);
+    }
+    if matches!(e.metadata.get(&STARED_INDEX), Some(MetaValue::Bool(true))) {
+        return Whose::Bots(BotsWhy::StaredAt);
+    }
+    if provoked.contains(&id) {
+        return Whose::Bots(BotsWhy::Provoked);
+    }
+    if nearest_in_melee == Some(id) && crate::defend::provoked(w, EntityKind::Enderman) {
+        return Whose::Bots(BotsWhy::HitTheBot);
+    }
+    // Its latest hurt with an entity: a hurt with none (our water, a fall) sets no target.
+    let Some(h) = e.hurts.iter().rev().find(|h| h.by_bot || h.cause.is_some()) else {
+        return Whose::Bots(BotsWhy::NoHurtSeen);
+    };
+    if h.by_bot {
+        return Whose::Bots(BotsWhy::StruckByBot);
+    }
+    Whose::Dragons {
+        at: h.at_tick,
+        by: h.cause,
+    }
+}
+
+impl Plan {
+    fn whom_rules(&self) -> WhomRules {
+        let r = self.end_rules();
+        WhomRules {
+            close: r.whom_close,
+            close_ticks: r.whom_close_ticks,
+            land_near: r.whom_land_near,
+            jump: r.whom_jump,
+            melee: r.whom_melee,
+        }
+    }
+
+    /// The angry endermen within `APPROACH_FROM` tracked, once a server tick: each one's place
+    /// and distance kept for `whom_close_ticks`, its behaviour judged, and its track dropped
+    /// once it is calm or gone. A judgement of the bot's is noted once.
+    pub(crate) fn whom_watch(&mut self, w: &World) {
+        let Some(body) = w.body else {
+            return;
+        };
+        let now = w.session.server_ticks;
+        let r = self.whom_rules();
+        let angry: Vec<(i32, f64, [f64; 3])> = w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::Enderman && !e.dead && creepy(e))
+            .map(|(id, e)| (*id, distance(e.pos, body.pos), e.pos))
+            .filter(|x| x.1 <= APPROACH_FROM)
+            .collect();
+        self.ender
+            .whom
+            .retain(|t| angry.iter().any(|(id, _, _)| *id == t.id));
+        let mut said: Vec<(i32, BotsWhy, f64)> = Vec::new();
+        for (id, d, pos) in angry {
+            let i = match self.ender.whom.iter().position(|t| t.id == id) {
+                Some(i) => i,
+                None => {
+                    self.ender.whom.push(WhomTrack {
+                        id,
+                        ..WhomTrack::default()
+                    });
+                    self.ender.whom.len() - 1
+                }
+            };
+            let t = &mut self.ender.whom[i];
+            if t.seen.last().is_some_and(|s| s.0 == now) {
+                continue;
+            }
+            t.seen.push((now, d, pos));
+            t.seen.retain(|s| now.saturating_sub(s.0) <= r.close_ticks);
+            if t.bots.is_none()
+                && let Some(why) = came_at(t, &r)
+            {
+                t.bots = Some(why);
+                said.push((id, why, d));
+            }
+        }
+        for (id, why, d) in said {
+            self.note(
+                w.ticks,
+                format!("enderman {id} taken as the bot's: {}", why.name()),
+                format!("{d:.1} off; every answer for it from now on"),
+            );
+        }
+    }
+
+    /// Whose the angry enderman `id` is now (`whose`), its behaviour's verdict kept, and a
+    /// sticky one remembered.
+    fn whose_now(&mut self, w: &World, id: i32, nearest_in_melee: Option<i32>) -> Whose {
+        let track = self.ender.whom.iter().find(|t| t.id == id);
+        let v = whose(w, id, track, &self.pearls.provoked, nearest_in_melee);
+        if let Whose::Bots(why) = v
+            && why.sticky()
+            && let Some(t) = self.ender.whom.iter_mut().find(|t| t.id == id)
+            && t.bots.is_none()
+        {
+            t.bots = Some(why);
+        }
+        v
+    }
+
+    /// The angry endermen within `reach` of `feet` that are the bot's, nearest first; each on
+    /// the dragon skips `row`, counted and noted (at the first and every `whom_note_every`
+    /// for that enderman). With `row` `None` nothing is noted.
+    pub(crate) fn angry_at_bot_near(
+        &mut self,
+        w: &World,
+        feet: [f64; 3],
+        reach: f64,
+        row: Option<Skip>,
+    ) -> Vec<i32> {
+        self.whom_watch(w);
+        let melee = self.whom_rules().melee;
+        let every = self.end_rules().whom_note_every;
+        let mut near: Vec<(f64, i32)> = w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::Enderman && !e.dead && creepy(e))
+            .map(|(id, e)| (distance(e.pos, feet), *id))
+            .filter(|x| x.0 <= reach)
+            .collect();
+        near.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        let nearest_in_melee = near.first().filter(|x| x.0 <= melee).map(|x| x.1);
+        let now = w.session.server_ticks;
+        let mut out = Vec::new();
+        for (d, id) in near {
+            match self.whose_now(w, id, nearest_in_melee) {
+                Whose::Bots(_) => out.push(id),
+                Whose::Dragons { at, by } => {
+                    let Some(row) = row else {
+                        continue;
+                    };
+                    *self
+                        .ender
+                        .dragon_skips
+                        .entry(row.name().to_owned())
+                        .or_default() += 1;
+                    let total = self
+                        .ender
+                        .dragon_skips
+                        .get(row.name())
+                        .copied()
+                        .unwrap_or(0);
+                    let Some(t) = self.ender.whom.iter_mut().find(|t| t.id == id) else {
+                        continue;
+                    };
+                    t.skips += 1;
+                    let due = t.noted_at.is_none_or(|n| now >= n + every);
+                    if due {
+                        t.noted_at = Some(now);
+                        let n = t.skips;
+                        self.note(
+                            w.ticks,
+                            format!("enderman on the dragon: {} skipped", row.name()),
+                            format!(
+                                "enderman {id} {d:.1} off, its last hurt at {at} by entity {by:?} with no strike of ours; {n} skips of it, {total} {} skips in the run",
+                                row.name()
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// `angry` for the End's rows: the nearest angry enderman within `APPROACH_FROM` that is the
+    /// bot's (those on the dragon skip `row`, noted), else, as `angry`, the nearest one when an
+    /// enderman hit the bot lately. Elsewhere `angry` itself.
+    pub(crate) fn angry_at_bot(&mut self, w: &World, row: Option<Skip>) -> Option<i32> {
+        if !crate::end::in_end(w) {
+            return angry(w);
+        }
+        let feet = w.body?.pos;
+        if let Some(id) = self
+            .angry_at_bot_near(w, feet, APPROACH_FROM, row)
+            .first()
+            .copied()
+        {
+            return Some(id);
+        }
+        // An enderman hit the bot and none angry is judged the bot's: the nearest, as `angry`
+        // (in doubt, the bot's).
+        let near = endermen(w);
+        crate::defend::provoked(w, EntityKind::Enderman)
+            .then(|| near.iter().find(|s| s.dist <= APPROACH_FROM).map(|s| s.id))
+            .flatten()
+    }
+}
+// <<< pumpkin

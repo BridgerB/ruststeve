@@ -1184,4 +1184,19 @@ pumpkin_points = []
 # good (docs/problems/end.md: the 17 stares of races 45994686575 and 45988967677; walls 42 and 48,
 # a single angry enderman beat a full-iron bot). 0.8 a bite is less than one angry enderman.
 dragon_helmet = false
+# Endermen angry at whom, in the End (plan::endermen::whose; the jar, probes 46160185304 and
+# 46160754145: a target is the latest hurter with an entity, or a stare, and every dragon hurt is
+# the dragon's). One on the dragon gets no water, no cover and no hold. The safe side, its
+# behaviour: 4 closer within 40 server ticks (2 s; a walk is 0.3 a tick, so 4 in 40 is a third
+# of its pace held straight at the bot, not a drift), or a jump of over 4 in one tick (a walk
+# cannot; a teleport) landing within 8 (dragon::ENDER_NEAR, the hold's reach) makes it the bot's,
+# for the rest of its anger. After an enderman's blow the nearest angry one within 5 (its 3-block
+# reach and a margin) is the bot's. Each skip is noted per enderman every 200 ticks (look::
+# SPARED_NOTE_EVERY's 10 s).
+whom_close = 4.0
+whom_close_ticks = 40
+whom_land_near = 8.0
+whom_jump = 4.0
+whom_melee = 5.0
+whom_note_every = 200
 # <<< pumpkin

@@ -118,6 +118,16 @@ pub struct EndKitRules {
     pub pumpkin_points: Vec<[i32; 2]>,
     /// In the dragon fight (`Task::Dragon`) the iron helmet goes back on over the pumpkin's place.
     pub dragon_helmet: bool,
+    /// Endermen angry at whom, in the End (`endermen::whose`): one closer to the bot by
+    /// `whom_close` within `whom_close_ticks`, or landing from a jump over `whom_jump` within
+    /// `whom_land_near`, is the bot's; the nearest angry one within `whom_melee` after an
+    /// enderman's blow is too; skips noted per enderman every `whom_note_every` server ticks.
+    pub whom_close: f64,
+    pub whom_close_ticks: u64,
+    pub whom_land_near: f64,
+    pub whom_jump: f64,
+    pub whom_melee: f64,
+    pub whom_note_every: u64,
     // <<< pumpkin
 }
 
@@ -181,6 +191,12 @@ impl Default for EndKitRules {
             pumpkin_walks: 4,
             pumpkin_points: Vec::new(),
             dragon_helmet: false,
+            whom_close: 4.0,
+            whom_close_ticks: 40,
+            whom_land_near: 8.0,
+            whom_jump: 4.0,
+            whom_melee: 5.0,
+            whom_note_every: 200,
         }
     }
 }
@@ -849,7 +865,7 @@ impl Plan {
         );
     }
 
-    fn end_rules(&self) -> EndKitRules {
+    pub(crate) fn end_rules(&self) -> EndKitRules {
         self.table
             .as_ref()
             .map(|t| t.end_kit.clone())
