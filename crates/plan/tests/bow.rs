@@ -200,7 +200,7 @@ fn the_stands_go_toward_the_middle_first() {
     assert_eq!(cols[0], [22, 0], "18 toward the fountain first");
     assert!(cols.iter().all(|c| {
         let d = f64::from(c[0] - 40).hypot(f64::from(c[1]));
-        (16.0..=71.0).contains(&d)
+        (16.0..=61.0).contains(&d)
     }));
     assert!(cols.iter().all(|c| c[0] <= 41), "never behind the spike");
 }

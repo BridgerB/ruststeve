@@ -365,10 +365,12 @@ pub fn lull(w: &World) -> bool {
     dragon(w).is_none_or(|(pos, phase)| phase == Some(0) && dist(pos, body.pos) > STRAFE_RANGE)
 }
 
-/// The calm gate (the coordinator's rule, shared with E4): the dragon holding (phase 0), at least
-/// `CALM_FROM` off, and not closing: its distance not fallen by more than `CALM_CLOSING` over the
-/// last `CALM_TICKS` (holding over 64 off is seldom true for long: race 46071506005).
+/// The calm gate's distance (the coordinator's rule, shared with E4): the dragon holding (phase 0)
+/// at least this far off is calm (`Plan::calm_why`; holding over 64 off is seldom true for long:
+/// race 46071506005).
 pub const CALM_FROM: f64 = 40.0;
+/// Unused since race 46079924222 dropped the closing test (a holding circle closes on part of
+/// every arc); kept so a recorded plan's fields still read.
 pub const CALM_TICKS: u64 = 20;
 pub const CALM_CLOSING: f64 = 1.0;
 
@@ -418,6 +420,8 @@ pub fn dragon_down_or_charging(w: &World) -> bool {
 /// A full air supply (the player's metadata index 1), and how recent a drown hit counts.
 pub const FULL_AIR: i32 = 300;
 pub const DROWN_RECENT: u64 = 40;
+/// The guard acts only under this much air (about a third of the 300: time to swim out yet).
+pub const LOW_AIR: i32 = 100;
 
 /// E4's "too few blocks" notes count this many ticks back.
 pub const WANTED_RECENT: u64 = 200;
@@ -480,6 +484,41 @@ pub const PIT_LOOK: i32 = 2;
 
 /// Runs of wooden pickaxes at a placed table at most (the frontier bot's wood makes two or three).
 pub const WOOD_RUNS: u32 = 3;
+
+/// How deep the feet stand under the ground round them: the highest ground's top within 2
+/// columns over the feet's floor, in blocks (1 a one-deep pit), with the heading toward it; `None`
+/// on open ground (no ground higher than the feet's floor) or on a slope (fewer than three sides
+/// walled two or more over the feet).
+pub fn pit_depth(w: &World, feet: Cell) -> Option<(i32, (i32, i32))> {
+    let mut best: Option<(i32, (i32, i32))> = None;
+    for dx in -2i32..=2 {
+        for dz in -2i32..=2 {
+            if (dx, dz) == (0, 0) {
+                continue;
+            }
+            let Some(top) = surface_y(w, feet.0 + dx, feet.2 + dz, feet.1 + 12) else {
+                continue;
+            };
+            let depth = top + 1 - feet.1;
+            if depth > 0 && best.is_none_or(|(b, _)| depth > b) {
+                let dir = if dx.abs() >= dz.abs() {
+                    (dx.signum(), 0)
+                } else {
+                    (0, dz.signum())
+                };
+                best = Some((depth, dir));
+            }
+        }
+    }
+    // A pit, not a slope: three or more of the four sides walled two or more over the feet.
+    let walled = SIDES
+        .iter()
+        .filter(|(dx, dz)| {
+            surface_y(w, feet.0 + dx, feet.2 + dz, feet.1 + 12).is_some_and(|t| t + 1 - feet.1 >= 2)
+        })
+        .count();
+    best.filter(|(d, _)| *d <= 1 || walled >= 3)
+}
 
 /// A surface dig keeps this far from any void edge (a fall there is a death).
 pub const VOID_KEEP: i32 = 3;
@@ -1738,6 +1777,20 @@ impl Plan {
             return None;
         }
         self.end.out_runs = 0;
+        // In a pit more than one deep (whoever dug it): out by a planned stair first, no dig of
+        // E3's below one (race 46099479836 lane 0 died of breath in a pit 8 deep at (25, 54, -56)).
+        if let Some((depth, dir)) = pit_depth(w, feet)
+            && depth > 1
+        {
+            self.note(
+                tick,
+                format!("end: out of a pit {depth} deep at {feet:?} by stairs"),
+                format!("toward {dir:?}, the ground's top {depth} over the feet"),
+            );
+            let mut st = Stairs::up(dir, tick);
+            st.dry = true;
+            return Some(Task::Stairs(Box::new(st)));
+        }
         // >>> E8 (issue 20, the bow line): with a bow, the open crystals before any end stone
         // stock (the stock is for the caged ones' pillars).
         if let Some(t) = self.bow_task(w, tick) {
@@ -2903,7 +2956,7 @@ impl Plan {
     /// or a drown hit within `DROWN_RECENT` ticks: the head out at once. Up when the cell over the
     /// eye is open (a swim up, pressing into the side whose top is free for the bank's lift); with
     /// it shut, that cell dug. Every task but a live fireball dodge (E5's) waits on it.
-    pub(crate) fn drown_guard(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn drown_guard(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if !in_end(w) || self.dragon.dodge_walk.is_some() {
             return None;
         }
@@ -2919,8 +2972,12 @@ impl Plan {
         let hit = w.hits.iter().any(|h| {
             h.damage_type.contains("drown") && now.saturating_sub(h.at_tick) <= DROWN_RECENT
         });
-        let short = w.player.air.is_some_and(|a| a < FULL_AIR);
-        if !((wet && short) || hit) {
+        // Low air only (race 46103123144 lane 3: fired at 299 of 300 and held the bot in place
+        // through 6.0 breath blows), and never with a cloud's reach on the feet: E5's breath walk
+        // goes first (it presses out and up anyway).
+        let short = w.player.air.is_some_and(|a| a < LOW_AIR);
+        let cloud = cloud_on(w, &[path::stand_cell(w, body.pos)]).is_some();
+        if cloud || !((wet && short) || hit) {
             self.end.drown_dig = None;
             self.end.drowning = false;
             return None;
@@ -2984,17 +3041,31 @@ impl Plan {
         })
     }
 
-    /// The calm gate (the coordinator's rule, shared with E4): no dragon sent, or the dragon holding
-    /// (phase 0) at least `CALM_FROM` off.
+    /// The calm gate (the coordinator's rule, shared with E4): `calm_why` has no reason.
     pub fn calm(&mut self, w: &World, tick: u64) -> bool {
-        // Holding and at least `CALM_FROM` off; no closing test (race 46079924222: a holding
-        // circle closes on part of every arc, and 13 of 14 climbs stopped for it, a holding dragon
-        // 93 and 97 off among them). `tick` is kept for the callers.
+        self.calm_why(w, tick).is_none()
+    }
+
+    /// Why the dragon is not calm (`calm`), `None` when it is: the phase, or the distance. Calm
+    /// is no dragon; the dragon holding (phase 0) at least `CALM_FROM` off; or strafing (phase 1)
+    /// at least `STRAFE_RANGE` off (a strafe fires only within 64 in sight, and a climb has its own
+    /// fireball stop: race 46099479836, five of sixteen stops a strafe 73 to 104 off). No closing
+    /// test (race 46079924222: a holding circle closes on part of every arc).
+    pub fn calm_why(&self, w: &World, tick: u64) -> Option<String> {
         let _ = tick;
-        let Some(body) = w.body else {
-            return true;
-        };
-        dragon(w).is_none_or(|(pos, phase)| phase == Some(0) && dist(pos, body.pos) >= CALM_FROM)
+        let body = w.body?;
+        let (pos, phase) = dragon(w)?;
+        let d = dist(pos, body.pos);
+        match phase {
+            Some(0) if d >= CALM_FROM => None,
+            Some(0) => Some(format!("holding {d:.0} off, under {CALM_FROM:.0}")),
+            Some(STRAFE_PHASE) if d >= STRAFE_RANGE => None,
+            Some(STRAFE_PHASE) => Some(format!("strafing {d:.0} off, under {STRAFE_RANGE:.0}")),
+            Some(p) => Some(format!(
+                "phase {p}, {d:.0} off (neither holding nor strafing)"
+            )),
+            None => Some(format!("phase not sent, {d:.0} off")),
+        }
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes

@@ -656,3 +656,18 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
   - The refill's stand is a dry cell within `LEFT_WATER_STAND` (3) of the water, from a level under to a level over, its eye within reach of the source, the nearest first.
   - A failed walk keeps the record ("no way yet to the water left at"). It is tried again `LEFT_WATER_RETRY` (200) ticks later and dropped only after `LEFT_WATER_TRIES` (5).
   - Unit tests `an_empty_bucket_walks_10_to_left_water_spread_round_and_refills` and `a_failed_walk_to_left_water_keeps_its_record`.
+
+### Wall 49: blocks gone with every water descent (race 46099479836, 14 lanes from crystals_5; fixed)
+- **What happened:**
+  - 0 strikes by about 21,600. 54 climbs began, 24 reached a top (the highest 76 against goals of 91 and more), and 30 stopped.
+  - About 520 "too few blocks (N held, 37 wanted)" with 30 to 36 held. Every stopped climb came down by water and left its stub, so its blocks were gone.
+- **The fix (the orchestrator's call):**
+  - Calm (`Plan::calm`) and no fireball: down by the dig, its blocks back to the stock ("down by the dig, calm"; and "climb stopped: down by the dig, calm" for a climb stopped for health).
+  - The water only when the dragon is not calm (any stop phase is not calm) or a fireball is near.
+  - A stub's wanted is counted from the side column's top now (`pillar_wants`): the stub's top to the stand, plus the side pillar still to put up. A side pillar begun lowers it.
+  - The refill from left water (lanes 2 and 4): the cell was in `left_water`. Lane 2's 5 walks all failed from one stuck cell 22 off, (-70, 61, 11), and the record was dropped. Now a record goes only when its source is gone, a walk failed shut in is not counted, and past `LEFT_WATER_TRIES` the retries come 5 times further apart.
+  - Unit tests: `with_no_landing_water_the_way_down_is_the_clutch_not_the_dig` (calm, the dig; not calm, the clutch), the landing-water test (not calm, the waterfall), and `stubs_of_its_own_on_all_four_axes_are_climbed_back_onto` (the count from the stub's top).
+
+### Wall 50: held for good up a pillar with no water (E9's read of race 46099479836 lane 5; fixed)
+- **What happened:** on a pillar at (-13, 65, 34) with no water bucket, "hold ended by the dragon … (unguarded on a pillar; the way down)" 45 times, no dig, and two dragon blows knocked it off at 34,300. Wall 38's "hold, not the dig, from the charge" held it again each time a charge 40 to 64 off ended a hold.
+- **The fix:** with no water the way down is the dig, at once when calm. When not calm the bot is held crouched for at most `OPEN_HOLD_MAX` (200 ticks), then digs down all the same ("down by the dig, held too long at"). Unit test `with_no_water_a_hold_up_the_pillar_ends_in_the_dig`.
