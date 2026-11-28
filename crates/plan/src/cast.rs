@@ -45,6 +45,51 @@ const WAY_DIGS: u32 = 12;
 const REFILL_TRAIL: usize = 8;
 /// Blocks a cast may dig to open sight lines to lava with no station: a few per refill.
 const SIGHT_DIGS: u32 = 24;
+/// The ranges defend reads (`SurvivalRules`: `defend_radius` for a mob it answers,
+/// `flee_radius` for a kind never fought), held by a cast: a station sight dig level with the
+/// feet opens a hole beside the stand with lava under it, and a hit's knockback could push the
+/// bot in, so none is dug while a mob defend would answer is that near (lava-portal.md wall 4).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SightHold {
+    pub defend_radius: f64,
+    pub flee_radius: f64,
+    /// The never-fought kinds, by protocol id.
+    pub never_fight: Vec<u32>,
+}
+
+impl SightHold {
+    pub fn of(rules: &crate::make::SurvivalRules) -> Self {
+        Self {
+            defend_radius: rules.defend_radius,
+            flee_radius: rules.flee_radius,
+            never_fight: rules.never_fight.iter().map(|k| k.id()).collect(),
+        }
+    }
+
+    /// The nearest live hostile within its range of the feet: a never-fought kind within
+    /// `flee_radius`, any other within `defend_radius`.
+    pub fn near(&self, w: &World) -> Option<(data::EntityKind, f64)> {
+        let body = w.body?;
+        w.entities
+            .values()
+            .filter(|e| !e.dead && crate::defend::hostile(e.kind))
+            .map(|e| (e.kind, dist(body.pos, e.pos)))
+            .filter(|(k, d)| {
+                let r = if self.never_fight.contains(&k.id()) {
+                    self.flee_radius
+                } else {
+                    self.defend_radius
+                };
+                *d <= r
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+}
+
+/// Blocks a station's stand may dig level with the feet or the head to see its sources
+/// (lava-portal.md wall 4): one wall cell opened lane 1's fill in race 46144128199; a few more
+/// for a thicker wall, after which the station is missed.
+const LEVEL_DIGS: u32 = 4;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
 pub const LAVA_RADIUS: f64 = 48.0;
 /// Blocks from the feet lava seen is headed for when none is near (`far-radius`).
@@ -289,6 +334,13 @@ pub struct Cast {
     /// Blocks dug to open a refill's sight to lava with no station (wall 24).
     #[serde(default)]
     sight_digs: u32,
+    /// Blocks a station's stand dug level with the feet or the head to see a source (issue 83,
+    /// lava-portal.md wall 4).
+    #[serde(default)]
+    pub level_digs: u32,
+    /// The ranges a feet-level station sight dig is held within (`SightHold`); none, no hold.
+    #[serde(default)]
+    pub sight_hold: Option<SightHold>,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -436,6 +488,8 @@ impl Cast {
             refill_trail: Vec::new(),
             scoop_uses: [0; 4],
             sight_digs: 0,
+            level_digs: 0,
+            sight_hold: None,
             last_regression: None,
             tunnels: 0,
             refused: Vec::new(),
@@ -456,6 +510,14 @@ impl Cast {
         Self {
             lava_first: LavaFirst::Armed,
             ..Self::new(site, tick)
+        }
+    }
+
+    /// The cast with defend's ranges, for the hold on a feet-level station sight dig.
+    pub fn with_sight_hold(self, hold: SightHold) -> Self {
+        Self {
+            sight_hold: Some(hold),
+            ..self
         }
     }
 
@@ -573,8 +635,9 @@ impl Cast {
         let [fe, fb, ee, eb] = self.scoop_uses;
         // The lava-first state rides on every ending note (the lit one carries only the uses).
         format!(
-            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked; {}",
-            self.lava_first.text()
+            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked; {}; station sight digs {}",
+            self.lava_first.text(),
+            self.level_digs
         )
     }
 
@@ -1146,15 +1209,40 @@ impl Cast {
             .filter(|c| !own.contains(c) && !self.refused.contains(c))
             .collect();
         let print = footprint(&self.plan);
-        let Some(st) =
-            station::station_among(w, &sources, self.site.frame, &print, Some(self.site.h))
-        else {
+        // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
+        // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
+        // cast went back to it 360 times (wall 20).
+        let mut kept = station::kept(self.site.frame);
+        kept.extend(
+            self.plan
+                .iter()
+                .filter(|op| op.kind == OpKind::Place)
+                .filter_map(|op| op.pos),
+        );
+        // Only a stand whose step there can take a source (lava-portal.md wall 4): race
+        // 46144128199 lane 0 walked to a stand whose twelve sources lay behind a wall level with
+        // its feet, found nothing to scoop or dig there, and fell to a tunnel, four times.
+        let (station, blind) = station::serving_station(
+            w,
+            &sources,
+            self.site.frame,
+            &print,
+            Some(self.site.h),
+            &kept,
+        );
+        let Some(st) = station else {
             if self
                 .refill_trail
                 .last()
-                .is_none_or(|t| !t.ends_with("no station"))
+                .is_none_or(|t| !t.contains("no station"))
             {
-                self.trail(tick, format!("{} sources, no station", sources.len()));
+                self.trail(
+                    tick,
+                    format!(
+                        "{} sources, no station ({blind} stands with sources in reach, none in sight)",
+                        sources.len()
+                    ),
+                );
             }
             return None;
         };
@@ -1174,16 +1262,6 @@ impl Cast {
                 ),
             );
         }
-        // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
-        // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
-        // cast went back to it 360 times (wall 20).
-        let mut kept = station::kept(self.site.frame);
-        kept.extend(
-            self.plan
-                .iter()
-                .filter(|op| op.kind == OpKind::Place)
-                .filter_map(|op| op.pos),
-        );
         let from = eye(&body);
         // A station source already in reach with a clear face: scooped from here.
         if body.on_ground
@@ -1206,10 +1284,53 @@ impl Cast {
                 self.last_done = tick;
                 return Some((still, None, CastStatus::Running));
             }
-            let block = st
+            let Some(block) = st
                 .sources
                 .iter()
-                .find_map(|src| station::sight_block(w, from, *src, f.1, &kept))?;
+                .find_map(|src| station::sight_block(w, from, *src, f.1, &kept))
+            else {
+                // No lid under the feet: the block the line meets level with the feet or the head,
+                // dug from the stand (lava-portal.md wall 4: lane 1 of race 46144128199 filled at
+                // the site lane 0 gave up, once its way dig had cut that wall).
+                let level = (self.level_digs < LEVEL_DIGS)
+                    .then(|| {
+                        st.sources.iter().find_map(|src| {
+                            station::level_sight_block(w, from, *src, f.1, &kept, &[])
+                                .map(|(c, l)| (c, l, *src))
+                        })
+                    })
+                    .flatten();
+                let Some((block, level, src)) = level else {
+                    return self.station_miss(tick, "at the stand, no source in sight and no lid");
+                };
+                // A hole beside the stand with lava under it, never opened with a mob near
+                // enough to knock the bot into it.
+                if level == station::Level::Feet
+                    && let Some((kind, d)) = self.sight_hold.as_ref().and_then(|h| h.near(w))
+                {
+                    let what = format!("station sight dig held: hostile {kind:?} at {d:.1}");
+                    if self.note.is_none() {
+                        self.note = Some((what.clone(), format!("the dig at {block:?}")));
+                    }
+                    return self.station_miss(tick, &what);
+                }
+                self.level_digs += 1;
+                let what = format!(
+                    "station sight dig at {block:?} (level with the {}) toward {src:?}",
+                    level.name()
+                );
+                self.trail(tick, what.clone());
+                if self.note.is_none() {
+                    self.note = Some((what, format!("from the stand {:?}", st.stand)));
+                }
+                // Its drop is not collected: it falls on the lava under the wall or lies beside
+                // it, and a collect walks to it (stepped on lane 0's recording, the collect of
+                // (23, -54, 43) over lava waited its 300 ticks and failed the dig `Uncollected`).
+                let mut dig = Dig::new(w, block, tick);
+                dig.drop = None;
+                self.work = Work::WayDig(Box::new(dig));
+                return Some((still, None, CastStatus::Running));
+            };
             self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
             return Some((still, None, CastStatus::Running));
         }
@@ -1227,24 +1348,42 @@ impl Cast {
             // Off the stand's height: to the landing at it first (the room's access steps).
             let landing = self.site.frame.at(crate::build::landing(st.h));
             if landing == f {
-                return None;
+                return self.station_miss(tick, "off its height at the landing, no walk to it");
             }
             let mut walk = Walk::new(landing, Goal::Block { pos: landing }, Arrive::Goal, tick);
             if !walk.route_now(w, tick) || !found(&walk) {
-                return None;
+                return self.station_miss(tick, "off its height, no walk to the landing");
             }
             self.work = Work::ToStation(walk);
             return Some((still, None, CastStatus::Running));
         }
         // At its height: the first block on the straight way, dug when in reach.
-        let station::Way::Dig(block) = station::stance_block(w, f, st.stand, &kept) else {
-            return None;
+        let way = station::stance_block(w, f, st.stand, &kept);
+        let station::Way::Dig(block) = way else {
+            return self.station_miss(tick, &format!("no walk to it, the way {way:?}"));
         };
         if dist(eye(&body), centre(block)) > REACH {
-            return None;
+            return self.station_miss(
+                tick,
+                &format!("no walk to it, its way's {block:?} out of reach"),
+            );
         }
         self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
         Some((still, None, CastStatus::Running))
+    }
+
+    /// A station step that ends in the tick it began: a failed step of the station, counted with
+    /// its walks and digs (`STATION_MISSES`), so the ladder goes on to the sources instead of
+    /// coming back to it every few ticks (lava-portal.md wall 4: four rounds in 46 ticks, none
+    /// counted, then "no route").
+    fn station_miss(
+        &mut self,
+        tick: u64,
+        why: &str,
+    ) -> Option<(Controls, Option<Act>, CastStatus)> {
+        self.station_misses += 1;
+        self.trail(tick, format!("station missed: {why}"));
+        None
     }
 
     fn refill(
@@ -1271,8 +1410,18 @@ impl Cast {
             if status == crate::stairs::StairsStatus::Running {
                 return (c, act, CastStatus::Running);
             }
+            // A tunnel that cut nothing is a failed tunnel, not one more of four: from the same
+            // feet the next one turns off the same lava and fails the same way (lava-portal.md
+            // wall 4: four level tunnels in 46 ticks, each turned away from the pool by "lava
+            // beside" and stopped by a walk onto air, none of them a block dug). One that walked
+            // its steps through open cells to the end (`Done`) went somewhere, and counts as one.
+            let (dug, why) = (st.dug, st.refusals.last().cloned().unwrap_or_default());
             self.work = Work::Idle;
             self.tunnels += 1;
+            if dug == 0 && status != crate::stairs::StairsStatus::Done {
+                self.tunnels = MAX_TUNNELS;
+            }
+            self.trail(tick, format!("tunnel ended {status:?}, {dug} dug: {why}"));
             self.last_done = tick;
             return (c, act, CastStatus::Running);
         }
