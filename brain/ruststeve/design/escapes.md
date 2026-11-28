@@ -6,7 +6,7 @@ tags: [plan, escape, survival, water, lava, fire, always-rows]
 aliases: [always-rows, escape-water, escape-lava, escape-fire, Escape, Traps, TrapKind, swim-out, flee, bank, notch, lid, Aim::Hold, plan:hold, dry land]
 status: verified
 lastUpdated: 2026-11-28
-verifiedAgainst: ruststeve@a9a6129 clojurecraft@be85a92
+verifiedAgainst: ruststeve@11f7722 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {"
   - "ruststeve:crates/plan/src/escape.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>) {"

@@ -6,7 +6,7 @@ tags: [physics, sprint, movement, hunger, packets, jar]
 aliases: [sprinting, sprint-jump, START_SPRINTING, STOP_SPRINTING, player_command, sprint exhaustion, config/sprint.toml]
 status: verified
 lastUpdated: 2026-11-28
-verifiedAgainst: ruststeve@a9a6129
+verifiedAgainst: ruststeve@11f7722
 sourceRefs:
   - "ruststeve:crates/plan/src/sprint.rs#pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict {"
   - "ruststeve:config/sprint.toml#sprint_modifier_amount = 0.30000001192092896"
@@ -55,6 +55,7 @@ Every number is in `config/sprint.toml`, each with the class and method it came 
 - **Food**: a move sprints while one point is left to spend over `hungry_below`, saturation counted first (`points_to_spend`), one point per `metres_per_point` (40) of flat sprint. So a sprint alone never takes the food under the line: at `hungry_below` + 1 it sprints 40 metres and walks on.
 - **`never_fight`**: a retreat from one always asks and skips the budget; the body's floor (food 6, `physics::sprint_allowed`) still holds.
 - **Ground**: refused in lava or water (no swim model), and toward or along a lava edge (`walk::lava_edge`, the walk's own sneak rule), a missing floor, the End's void edge, water, footing the physics cannot simulate or an unloaded cell, read `look_ahead` (2) blocks along the facing. In the air the last answer holds.
+- **Hold**: a wall walked into (a collision that is not minor) refuses too, and any refusal holds `hold_ticks` (20) before the sprint is asked again, so a straight walk sends one start and at most one stop.
 - **Path**: a bridge, a sneak at an edge and `Task::Stairs` (stairs and travel tunnels) keep walking; a fight's close-in never asks (a sprinting blow is never a critical).
 - **A swing ends a sprint**; the wish is held, so the body starts it again the next tick.
 - **Ledger**: "sprint begun, <pace>" once a task, "sprint refused, <reason>" once a task for each reason, counted in the race summary's notes by kind.

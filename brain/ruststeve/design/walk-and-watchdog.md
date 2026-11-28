@@ -6,7 +6,7 @@ tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
 lastUpdated: 2026-11-28
-verifiedAgainst: ruststeve@a9a6129 clojurecraft@be85a92
+verifiedAgainst: ruststeve@11f7722 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -54,6 +54,7 @@ In the End a side whose floor neighbour and every cell under it to the dimension
 
 ## Issue 56: the walk asks to sprint
 - `toward` (and so `follow`) holds the sprint key; the pace gate ([[sprint]], `plan::sprint`) keeps it where the food and the ground allow. A bridge or a sneak at an edge clears it and sets `More.step`, which `Walk::pace` hands the gate for its "sprint refused" note. `Walk::left` is the route still to go.
+- A waypoint reached is a tick with no key held, except while the body sprints: then the walk steers on to the next waypoint the same tick, since a release ends the sprint (CI 46120536785: a stop and a start every few ticks).
 
 ## See also
 - [[pathfinding]] - the routes.
