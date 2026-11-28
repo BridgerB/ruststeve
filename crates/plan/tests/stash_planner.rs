@@ -123,7 +123,11 @@ struct Pair {
 
 impl Pair {
     fn new(give: &[(ItemKind, i32)]) -> Self {
-        let mut sim = Sim::new(CONFIG, flat_world(3, 63).unwrap()).seeded(7);
+        Self::on(flat_world(3, 63).unwrap(), give)
+    }
+
+    fn on(world: sim::ModelWorld, give: &[(ItemKind, i32)]) -> Self {
+        let mut sim = Sim::new(CONFIG, world).seeded(7);
         for g in give {
             assert_eq!(sim.survival.give(*g), 0);
         }
@@ -369,4 +373,46 @@ fn the_chest_trip_aim_places_stashes_and_fetches_back() {
     let model = p.sim.survival.chests.get(&home).unwrap();
     assert_eq!(model.count(ItemKind::Cobblestone), 0);
     assert!(p.sim.violations.is_empty(), "{:?}", p.sim.violations);
+}
+
+/// The home chest is the one the bot put down, found in memory from the block update: a chest
+/// buried under the bot (stone round it, grass over it, no face exposed) is never seen, never
+/// remembered and never taken for the home chest, though it is the nearest chest there is.
+#[test]
+fn the_home_chest_is_the_one_put_down_never_a_buried_one() {
+    const BURIED: (i32, i32, i32) = (1, 62, 0);
+    let mut world = flat_world(3, 63).unwrap();
+    let chest = data::BlockKind::Chest.info().unwrap().default_state;
+    world
+        .set_block(BURIED.0, BURIED.1, BURIED.2, chest)
+        .unwrap();
+    let mut p = Pair::on(
+        world,
+        &[
+            (ItemKind::OakPlanks, 32),
+            (ItemKind::CraftingTable, 1),
+            (ItemKind::Feather, 16),
+        ],
+    );
+    let dim = p.w.dimension.as_ref().unwrap().name.clone();
+    assert!(p.w.memory.chest(&dim, BURIED).is_none(), "never seen");
+    let mut plan = planner();
+    let leg = nether();
+    let begun = run(&mut p, &mut plan, |pl, w, t| pl.stash_before(w, &leg, t));
+    let log = ledger(&plan);
+    assert_eq!(begun.last(), Some(&"stash"), "{begun:?}\n{log}");
+    let (_, home) = plan.stash.home.clone().expect("a home chest");
+    assert_ne!(home, BURIED, "{log}");
+    assert!(p.w.memory.chest(&dim, BURIED).is_none(), "still never seen");
+    // On the ground, where the place put it: its floor seen under an open cell.
+    assert_eq!(home.1, 64, "{log}");
+    assert!(p.w.memory.chest(&dim, home).is_some());
+    assert_eq!(
+        p.sim
+            .survival
+            .chests
+            .get(&home)
+            .map(|c| c.count(ItemKind::Feather)),
+        Some(16)
+    );
 }

@@ -1271,3 +1271,206 @@ impl Plan {
     }
 }
 // <<< stash
+
+// >>> stash (issue 77): the trigger at a real leg's portal, on the server model.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use protocol::decode;
+    use sim::{Config, In, Sim, flat_world};
+    use world::{Effect, Event};
+
+    const CONFIG: Config = Config {
+        view_distance: 2,
+        simulation_distance: 2,
+        peaceful: true,
+    };
+
+    /// The bot and the model joined on a flat world with a nether portal block at `PORTAL`.
+    struct Pair {
+        w: World,
+        sim: Sim,
+        tick: u64,
+    }
+
+    const PORTAL: Cell = (3, 64, 0);
+
+    impl Pair {
+        fn new(give: &[(ItemKind, i32)]) -> Self {
+            let mut m = flat_world(3, 63).unwrap();
+            let portal = data::BlockKind::NetherPortal.info().unwrap().default_state;
+            m.set_block(PORTAL.0, PORTAL.1, PORTAL.2, portal).unwrap();
+            let mut sim = Sim::new(CONFIG, m).seeded(11);
+            for g in give {
+                assert_eq!(sim.survival.give(*g), 0);
+            }
+            let mut p = Self {
+                w: World::new(),
+                sim,
+                tick: 0,
+            };
+            let protocol = i32::try_from(data::VERSION.protocol).unwrap();
+            let mut first = Vec::new();
+            for c in protocol::session::opening(protocol, "model", 0, "rs-gate") {
+                first.extend(p.sim.step(&In::Packet(c)).unwrap());
+            }
+            p.deliver(first);
+            for _ in 0..40 {
+                p.step(Vec::new());
+            }
+            assert!(p.w.body.is_some(), "joined and placed");
+            p
+        }
+
+        fn deliver(&mut self, mut to_bot: Vec<sim::Wire>) {
+            for _ in 0..64 {
+                if to_bot.is_empty() {
+                    return;
+                }
+                let mut to_model = Vec::new();
+                for wire in to_bot.drain(..) {
+                    if let Ok(p) = decode(wire.state, wire.id, &wire.body) {
+                        to_model.extend(self.w.step(&Event::Packet(p)));
+                    }
+                }
+                for e in to_model {
+                    if let Effect::Send(c) = e {
+                        to_bot.extend(self.sim.step(&In::Packet(c)).unwrap());
+                    }
+                }
+            }
+        }
+
+        fn step(&mut self, acts: Vec<Act>) {
+            let mut to_bot = self.sim.step(&In::Tick).unwrap();
+            for a in acts {
+                for e in self.w.step(&Event::Act(a)) {
+                    if let Effect::Send(c) = e {
+                        to_bot.extend(self.sim.step(&In::Packet(c)).unwrap());
+                    }
+                }
+            }
+            for e in self.w.step(&Event::Tick {
+                now_ms: self.tick * 50,
+                seed: self.tick | 1,
+            }) {
+                if let Effect::Send(c) = e {
+                    to_bot.extend(self.sim.step(&In::Packet(c)).unwrap());
+                }
+            }
+            self.deliver(to_bot);
+            self.tick += 1;
+        }
+    }
+
+    fn planner() -> Plan {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+        let goals: crate::make::Goals =
+            toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let table = crate::make::Table::new(&goals).unwrap();
+        Plan::with_table(crate::Aim::Race, std::sync::Arc::new(table))
+    }
+
+    /// The walk into the portal, as `nether_task` makes it (its note first).
+    fn enter(plan: &mut Plan, w: &World, tick: u64) -> Task {
+        let mut walk = Walk::new(
+            PORTAL,
+            crate::path::Goal::Block { pos: PORTAL },
+            crate::walk::Arrive::Goal,
+            tick,
+        );
+        assert!(walk.route_now(w, tick), "a way to the portal");
+        plan.note(
+            tick,
+            format!("enter the portal at {PORTAL:?}"),
+            "a lit portal seen".to_owned(),
+        );
+        Task::Enter(Box::new(crate::Enter {
+            walk,
+            cell: PORTAL,
+            inside_since: None,
+            from: w.dimension.as_ref().map(|d| d.name.clone()),
+        }))
+    }
+
+    fn whats(plan: &Plan) -> Vec<String> {
+        plan.events.iter().map(|e| e.what.clone()).collect()
+    }
+
+    /// A bot at the Nether portal with the bow's feathers to stash and only the leg's 4 logs:
+    /// no home chest was ever placed and none can be, so the stash is skipped with a note, the
+    /// walk in goes ahead with its own reason, and the trigger never runs again for the leg.
+    #[test]
+    fn at_the_portal_without_a_home_chest_the_stash_is_skipped_and_the_run_goes_on() {
+        let mut p = Pair::new(&[(ItemKind::OakLog, 4), (ItemKind::Feather, 16)]);
+        let mut plan = planner();
+        let t = enter(&mut plan, &p.w, p.tick);
+        let out = plan.stash_gate(&p.w, t, p.tick);
+        assert!(matches!(out, Task::Enter(_)), "the walk in goes ahead");
+        let what = whats(&plan);
+        assert!(
+            what.iter()
+                .any(|x| x == "stash before the nether skipped: no home chest"),
+            "{what:?}"
+        );
+        let why = plan
+            .events
+            .iter()
+            .map(|e| e.why.clone())
+            .collect::<Vec<_>>();
+        assert!(
+            why.iter()
+                .any(|x| x.contains("wood to spare 0 planks of 12") && x.contains("16 feather")),
+            "{why:?}"
+        );
+        // The tick's last note is the walk's own again: the task ledger's reason for it.
+        assert_eq!(
+            what.last().map(String::as_str),
+            Some("enter the portal at (3, 64, 0)")
+        );
+        assert_eq!(plan.stash.legs, vec!["nether".to_owned()]);
+        assert!(plan.stash.home.is_none());
+        // The run goes on: the walk runs, no chest task is begun, the gate is quiet after.
+        plan.begin(out);
+        let notes = plan.event_count;
+        for _ in 0..20 {
+            plan.step(&p.w);
+            let acts = plan.take_acts();
+            p.step(acts);
+            assert!(
+                !matches!(
+                    plan.task,
+                    Task::Craft(_) | Task::Place(_) | Task::Stash(_) | Task::Fetch(_)
+                ),
+                "{}",
+                plan.task.name()
+            );
+        }
+        let again = enter(&mut plan, &p.w, p.tick);
+        let before = plan.event_count;
+        assert!(matches!(
+            plan.stash_gate(&p.w, again, p.tick),
+            Task::Enter(_)
+        ));
+        assert_eq!(plan.event_count, before, "no note the second time");
+        assert!(plan.event_count >= notes);
+        assert_eq!(crate::craft::count(&p.w, ItemKind::Feather), 16);
+    }
+
+    /// The same portal with nothing to stash: noted as such, no chest begun.
+    #[test]
+    fn at_the_portal_with_nothing_to_stash_no_chest_is_begun() {
+        let p = Pair::new(&[(ItemKind::OakPlanks, 64), (ItemKind::CraftingTable, 1)]);
+        let mut plan = planner();
+        let t = enter(&mut plan, &p.w, p.tick);
+        assert!(matches!(plan.stash_gate(&p.w, t, p.tick), Task::Enter(_)));
+        let what = whats(&plan);
+        assert!(
+            what.iter()
+                .any(|x| x == "stash before the nether: nothing to put away"),
+            "{what:?}"
+        );
+        assert!(plan.stash.home.is_none());
+    }
+}
+// <<< stash
