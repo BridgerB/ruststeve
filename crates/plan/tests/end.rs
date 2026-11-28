@@ -1754,5 +1754,51 @@ fn calm_is_holding_forty_off() {
         e.pos = [110.5, 70.0, 0.5];
         e.metadata.insert(16, MetaValue::Int(1));
     }
-    assert!(!p.calm(&w, 120), "strafing");
+    assert!(!p.calm(&w, 120), "strafing 60 off");
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.pos = [130.5, 70.0, 0.5];
+    }
+    assert!(
+        p.calm(&w, 140),
+        "strafing 80 off: calm (a strafe fires only within 64)"
+    );
+    assert!(p.calm_why(&w, 140).is_none());
+    if let Some(e) = w.entities.get_mut(&7) {
+        e.pos = [100.5, 70.0, 0.5];
+    }
+    assert!(
+        p.calm_why(&w, 150)
+            .is_some_and(|why| why.starts_with("strafing")),
+        "{:?}",
+        p.calm_why(&w, 150)
+    );
+}
+
+#[test]
+fn in_a_pit_more_than_one_deep_the_bot_climbs_out_by_stairs_and_digs_nothing() {
+    // Race 46099479836 lane 0: died of breath in a pit 8 deep at (25, 54, -56).
+    let mut w = world(4, 0..=7, [50.5, 58.0, 0.5]);
+    surface_kit(&mut w);
+    w.stage_reached = Some(world::stage::Stage::Island);
+    with_entity(&mut w, 12, EntityKind::EndCrystal, [42.5, 83.0, 0.5]);
+    for y in 58..=63 {
+        set(&mut w, (50, y, 0), BlockKind::Air);
+    }
+    assert_eq!(
+        plan::end::pit_depth(&w, (50, 58, 0)).map(|(d, _)| d),
+        Some(6)
+    );
+    let mut p = racer();
+    p.end.bridged = true;
+    let t = p.end_task(&w, 0);
+    assert_eq!(
+        t.as_ref().map(plan::Task::name),
+        Some("stairs"),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(noted(&p, "end: out of a pit 6 deep"), "{:?}", notes(&p));
+    assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
+    // A pit one deep: mining goes on.
+    assert_eq!(plan::end::pit_depth(&w, (51, 64, 0)), None);
 }

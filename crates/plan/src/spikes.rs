@@ -3954,12 +3954,14 @@ impl Plan {
         tick: u64,
         d: Option<&DragonNear>,
     ) -> Option<String> {
-        (!self.calm(w, tick)).then(|| {
+        // >>> E3 (the note says which test failed: the phase or the distance)
+        self.calm_why(w, tick).map(|why| {
             format!(
-                "the dragon not calm: {:?} (holding {CLIMB_NEAR:.0} off or more, not closing)",
+                "the dragon not calm: {:?} ({why})",
                 d.map(|d| (d.dist, d.phase))
             )
         })
+        // <<< E3
     }
 
     fn spikes_hold(&mut self, tick: u64) -> Task {
