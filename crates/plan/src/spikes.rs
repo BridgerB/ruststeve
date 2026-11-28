@@ -416,6 +416,9 @@ pub fn clutch_water(w: &World, feet: Cell) -> Option<Cell> {
 pub const LEFT_WATER_STAND: i32 = 3;
 pub const LEFT_WATER_TRIES: u32 = 5;
 pub const LEFT_WATER_RETRY: u64 = 200;
+/// Ticks a bot up an open pillar with no water way down is held crouched for the dragon before
+/// it digs down all the same (a charge passes in about 100).
+pub const OPEN_HOLD_MAX: u64 = 200;
 
 /// Blocks on the plane round the landed feet the clutch's water is looked for in.
 pub const CLUTCH_WATER_REACH: i32 = 2;
@@ -893,6 +896,14 @@ pub struct PillarRec {
 /// The block under the feet is one of a pillar: a pillar the bot put up there (recorded, the
 /// feet over its base), or a placed block no End ground is made of.
 pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
+    on_marked_pillar(w, feet, pillars)
+        || (full(kind(w, (feet.0, feet.1 - 1, feet.2))) && tower(w, feet))
+}
+
+/// `on_pillar` without the bare tower: a pillar of record, or of placed blocks standing free.
+/// What the dragon's rows yield to (`spikes_up_high`): a tower of no record is the crystals'
+/// once their task has adopted it.
+pub fn on_marked_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
     let under = kind(w, (feet.0, feet.1 - 1, feet.2));
     let recorded = pillars
         .iter()
@@ -912,6 +923,29 @@ pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
     };
     let placed = under.is_some_and(|k| PLACED.contains(&k)) && free();
     full(under) && (recorded || placed)
+}
+
+/// Blocks of a free-standing column under the feet that make it a pillar with no record.
+pub const TOWER_HEIGHT: i32 = 3;
+
+/// The feet on a free-standing column of full blocks at least `TOWER_HEIGHT` high, three sides
+/// of each open: a pillar whatever its block and record (the crystals frontier, race 46103123144:
+/// the bow line's snapshot stands on its own end stone pillar at (42, 82, 3), no record after the
+/// resume, end stone no `PLACED` block, and with every crystal gone the crystals' task handed
+/// the bot to the fight 20 up).
+pub fn tower(w: &World, feet: Cell) -> bool {
+    (1..=TOWER_HEIGHT).all(|d| {
+        let y = feet.1 - d;
+        full(kind(w, (feet.0, y, feet.2)))
+            && Axis::ALL
+                .iter()
+                .filter(|a| {
+                    let (dx, dz) = a.step();
+                    !full(kind(w, (feet.0 + dx, y, feet.2 + dz)))
+                })
+                .count()
+                >= 3
+    })
 }
 
 /// The feet up on a spike: on its top (`on_spike`), or on its cage's bars or its bedrock.
@@ -999,15 +1033,14 @@ pub fn chosen_approach(w: &World, st: &SpikeState, pos: [f64; 3], tick: u64) -> 
 
 /// The blocks a pillar wants held before its walk and its climb begin: from its foot to its
 /// stand, plus `PILLAR_SPARE` (the stand's two wall blocks and two for a lost click).
-pub fn pillar_wants(st: &SpikeState, a: &Approach) -> i32 {
-    // A stub of the bot's own: the whole pillar from its base (the side pillar to its top and the
-    // rest from there).
-    let base = st
-        .stubs
-        .iter()
-        .find(|r| (r.x, r.z) == a.plan.column)
-        .map_or(a.foot.1, |r| r.base);
-    a.plan.stand.1 - base + PILLAR_SPARE
+pub fn pillar_wants(w: &World, st: &SpikeState, a: &Approach) -> i32 {
+    // A stub of the bot's own: from the stub's top to the stand, plus the side pillar's height
+    // still to put up to reach that top (from the side column's top now: a side pillar begun
+    // lowers it; the orchestrator, after race 46099479836: ~520 "too few blocks").
+    let floor = stub_side(w, st, a).map_or(a.foot.1, |side| {
+        ground(w, side.0, side.2, a.foot.1).map_or(side.1, |g| g.max(side.1))
+    });
+    a.plan.stand.1 - floor + PILLAR_SPARE
 }
 
 /// The foot of the side pillar a stub of the bot's own is climbed back onto: a column beside the
@@ -1042,7 +1075,7 @@ pub fn stub_side(w: &World, st: &SpikeState, a: &Approach) -> Option<Cell> {
 pub fn blocks_wanted(plan: &crate::Plan, w: &World) -> Option<i32> {
     let body = w.body?;
     chosen_approach(w, &plan.spikes, body.pos, plan.spikes.now)
-        .map(|(_, (_, a))| pillar_wants(&plan.spikes, &a))
+        .map(|(_, (_, a))| pillar_wants(w, &plan.spikes, &a))
 }
 
 /// The crystals' next step from where the world says the bot is (clojurecraft's
@@ -1171,6 +1204,9 @@ pub struct SpikeState {
     /// Failed walks to each left water cell and the last one's tick (dropped at
     /// `LEFT_WATER_TRIES`, tried again `LEFT_WATER_RETRY` ticks after a failure).
     pub left_water_fails: Vec<(Cell, u32, u64)>,
+    /// The tick a hold up an open pillar with no water way down began (capped by
+    /// `OPEN_HOLD_MAX`).
+    pub open_hold_since: Option<u64>,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -1238,6 +1274,7 @@ impl Default for SpikeState {
             stubs: Vec::new(),
             left_water: Vec::new(),
             left_water_fails: Vec::new(),
+            open_hold_since: None,
         }
     }
 }
@@ -1976,7 +2013,7 @@ impl Plan {
             return false;
         };
         let feet = path::stand_cell(w, body.pos);
-        on_pillar(w, feet, &self.spikes.pillars)
+        on_marked_pillar(w, feet, &self.spikes.pillars)
             || on_spike(w, feet)
             || matches!(
                 self.spikes.doing,
@@ -2054,7 +2091,48 @@ impl Plan {
         let danger = self.spikes_danger();
         let health = w.player.health;
         let d = dragon_near(w, body.pos);
+        // A pillar of no record under the feet (a resume, the bow line's own): adopted, its base
+        // where the free-standing column begins, so its way down is the crystals' own.
+        if body.on_ground
+            && !self
+                .spikes
+                .pillars
+                .iter()
+                .any(|r| (r.x, r.z) == (feet.0, feet.2))
+            && tower(w, feet)
+        {
+            let height = (1..=GROUND_SEARCH)
+                .take_while(|d| {
+                    let y = feet.1 - d;
+                    full(kind(w, (feet.0, y, feet.2)))
+                        && Axis::ALL
+                            .iter()
+                            .filter(|a| {
+                                let (dx, dz) = a.step();
+                                !full(kind(w, (feet.0 + dx, y, feet.2 + dz)))
+                            })
+                            .count()
+                            >= 3
+                })
+                .count();
+            let base = feet.1 - i32::try_from(height).unwrap_or(0);
+            self.spikes.pillars.push(PillarRec {
+                x: feet.0,
+                z: feet.2,
+                base,
+            });
+            self.note(
+                tick,
+                format!("spikes: a pillar of no record at {feet:?}"),
+                format!(
+                    "{height} free-standing blocks under the feet; its base {base}, the way down"
+                ),
+            );
+        }
         let n = next(w, &self.spikes, tick);
+        if !on_pillar(w, feet, &self.spikes.pillars) {
+            self.spikes.open_hold_since = None;
+        }
         let climbing = self
             .spikes
             .pillars
@@ -2463,7 +2541,7 @@ impl Plan {
                     && (to == a.foot || stub_side(w, &self.spikes, &a) == Some(to))
                     && to.1 < a.plan.stand.1
                 {
-                    let need = pillar_wants(&self.spikes, &a);
+                    let need = pillar_wants(w, &self.spikes, &a);
                     let held = pillar_blocks(w);
                     if held < need {
                         self.spikes_note(
@@ -2538,7 +2616,7 @@ impl Plan {
                             || stub_side(w, &self.spikes, a).is_some_and(|s| (s.0, s.2) == column)
                     })
                     .map_or(top - feet.1 + PILLAR_SPARE, |(_, (_, a))| {
-                        pillar_wants(&self.spikes, &a)
+                        pillar_wants(w, &self.spikes, &a)
                     });
                 let held = pillar_blocks(w);
                 if !climbing && held < need {
@@ -2673,6 +2751,17 @@ impl Plan {
                             format!("{why}; at {feet:?}, {} under {top}", top - feet.1),
                         );
                     } else {
+                        // Calm (the refusal health's) and no fireball: down by the dig, the blocks
+                        // back; the water only when the dragon is not calm.
+                        if self.calm(w, tick) && fireball_near(w, body.pos).is_none() {
+                            let c = (feet.0, feet.1 - 1, feet.2);
+                            self.spikes_note(
+                                tick,
+                                "spikes: climb stopped: down by the dig, calm".to_owned(),
+                                format!("{why}; at {feet:?}"),
+                            );
+                            return Some(Task::Dig(dig_down(w, c, tick)));
+                        }
                         if let Some(rec) = self
                             .spikes
                             .pillars
@@ -2852,16 +2941,31 @@ impl Plan {
                     && let Some(dd) =
                         d.filter(|dd| dd.phase == Some(CHARGE_PHASE) && dd.dist <= THREAT_NEAR)
                 {
-                    self.spikes_note(
+                    // Never held for good: past `OPEN_HOLD_MAX` the dig goes on all the same (E9's
+                    // read of race 46099479836 lane 5: "hold ended by the dragon … the way down"
+                    // 45 times with no water, no dig, knocked off by two blows at 34,300).
+                    let since = *self.spikes.open_hold_since.get_or_insert(tick);
+                    if tick.saturating_sub(since) <= OPEN_HOLD_MAX {
+                        self.spikes_note(
+                            tick,
+                            "spikes: hold, not the dig, from the charge".to_owned(),
+                            format!(
+                                "the dragon {:.0} off charging; up the open pillar at {feet:?}",
+                                dd.dist
+                            ),
+                        );
+                        return Some(self.spikes_hold(tick));
+                    }
+                    self.note(
                         tick,
-                        "spikes: hold, not the dig, from the charge".to_owned(),
+                        format!("spikes: down by the dig, held too long at {feet:?}"),
                         format!(
-                            "the dragon {:.0} off charging; up the open pillar at {feet:?}",
-                            dd.dist
+                            "held {} ticks, over {OPEN_HOLD_MAX}; no water way down",
+                            tick.saturating_sub(since)
                         ),
                     );
-                    return Some(self.spikes_hold(tick));
                 }
+                self.spikes.open_hold_since = None;
                 // Centred over the column first: a body over its edge stays on the cell beside
                 // when the block goes (race 45885217441 lane 0).
                 let off = (f64::from(feet.0) + 0.5 - body.pos[0])
@@ -3297,6 +3401,21 @@ impl Plan {
         // slow to ride, 10 blocks in 400 ticks, and the bot drowned in it): at the top with the
         // crystal gone, a step off the side over the landing water poured at the pillar's foot
         // before the climb, a free fall into it (water at the landing cancels the fall).
+        // Calm and no fireball: the way down is the dig, its blocks back to the stock (the
+        // orchestrator, after race 46099479836: every stop came down by water and left its stub,
+        // ~520 "too few blocks"); the water only when the dragon is not calm or a fireball near.
+        if let Next::DigDown(_) = n
+            && body.on_ground
+            && self.calm(w, tick)
+            && fireball_near(w, body.pos).is_none()
+        {
+            self.spikes_note(
+                tick,
+                "spikes: down by the dig, calm".to_owned(),
+                format!("at {feet:?}: the blocks back to the stock"),
+            );
+            return None;
+        }
         // No drop while the dragon would knock the bot out of it: held crouched until it passes.
         if let Next::DigDown(_) = n
             && body.on_ground
@@ -3673,11 +3792,14 @@ impl Plan {
                 .iter()
                 .copied()
                 .filter(|c| {
-                    !self
-                        .spikes
-                        .left_water_fails
-                        .iter()
-                        .any(|(x, _, at)| x == c && tick.saturating_sub(*at) < LEFT_WATER_RETRY)
+                    !self.spikes.left_water_fails.iter().any(|(x, n, at)| {
+                        let wait = if *n >= LEFT_WATER_TRIES {
+                            LEFT_WATER_RETRY * 5
+                        } else {
+                            LEFT_WATER_RETRY
+                        };
+                        x == c && tick.saturating_sub(*at) < wait
+                    })
                 })
                 .min_by_key(|c| (c.0 - feet.0).abs() + (c.1 - feet.1).abs() + (c.2 - feet.2).abs())
         {
@@ -3752,6 +3874,11 @@ impl Plan {
                 self.expanded += walk.expanded;
             }
             // Kept for a later try; dropped only after `LEFT_WATER_TRIES` failed walks.
+            // A walk failed shut in (a notch, a pit) is no count against the water (race
+            // 46099479836 lane 2: 5 walks from one stuck cell 22 off, then dropped, then "no
+            // climb: no water" from 17,060); and the record is never dropped for walks, only
+            // when its source is gone.
+            let pocket = shut_in(w, feet);
             let n = match self
                 .spikes
                 .left_water_fails
@@ -3759,30 +3886,32 @@ impl Plan {
                 .find(|(x, _, _)| *x == c)
             {
                 Some((_, n, at)) => {
-                    *n += 1;
+                    if !pocket {
+                        *n += 1;
+                    }
                     *at = tick;
                     *n
                 }
                 None => {
-                    self.spikes.left_water_fails.push((c, 1, tick));
-                    1
+                    self.spikes
+                        .left_water_fails
+                        .push((c, u32::from(!pocket), tick));
+                    u32::from(!pocket)
                 }
             };
-            if n >= LEFT_WATER_TRIES {
-                self.spikes.left_water.retain(|x| *x != c);
-                self.spikes.left_water_fails.retain(|(x, _, _)| *x != c);
-                self.note(
-                    tick,
-                    format!("spikes: no way to the water left at {c:?}"),
-                    format!("from {feet:?}; {n} walks failed, dropped from the record"),
-                );
-            } else {
-                self.spikes_note(
-                    tick,
-                    format!("spikes: no way yet to the water left at {c:?}"),
-                    format!("from {feet:?}; walk {n} of {LEFT_WATER_TRIES} failed, kept"),
-                );
-            }
+            // Past `LEFT_WATER_TRIES` the retries come further apart, never stop.
+            self.spikes_note(
+                tick,
+                format!("spikes: no way yet to the water left at {c:?}"),
+                format!(
+                    "from {feet:?}; {n} walks failed{}, kept",
+                    if pocket {
+                        " (this one shut in, not counted)"
+                    } else {
+                        ""
+                    }
+                ),
+            );
         }
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
