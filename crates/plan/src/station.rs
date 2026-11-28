@@ -130,6 +130,49 @@ pub fn station_among(
     footprint: &[Cell],
     prefer: Option<i32>,
 ) -> Option<Station> {
+    search(w, sources, frame, footprint, prefer, |_, srcs| srcs).0
+}
+
+/// The station a refill works from (docs/problems/lava-portal.md wall 4): `station_among`'s
+/// search, a stand counting only the sources its step there can take, the test that step makes
+/// judged from the stand's middle with the stand and its head open (`serves`). With it, the
+/// stands passed over for sources in reach but none served. The site chooser keeps
+/// `station_among`: a site's station is the room's shape, the refill's is the bucket's work.
+pub fn serving_station(
+    w: &World,
+    sources: &[Cell],
+    frame: Frame,
+    footprint: &[Cell],
+    prefer: Option<i32>,
+    kept: &[Cell],
+) -> (Option<Station>, usize) {
+    search(w, sources, frame, footprint, prefer, |stand, srcs| {
+        srcs.into_iter()
+            .filter(|s| serves(w, stand, *s, kept))
+            .collect()
+    })
+}
+
+/// Whether the step at `stand` can take `src`: a face of it in the exact line from the stand's
+/// eye, or the first block on the eye's line to it a sight dig may open (below the feet), the
+/// stand and its head counted open (they are dug on the way in).
+pub fn serves(w: &World, stand: Cell, src: Cell, kept: &[Cell]) -> bool {
+    let opened = [stand, (stand.0, stand.1 + 1, stand.2)];
+    let eye = eye_of(stand);
+    crate::scoop::aim_opened(w, eye, src, crate::scoop::REACH, &opened).is_some()
+        || sight_block_opened(w, eye, src, stand.1, kept, &opened).is_some()
+}
+
+/// The search of `station_among`: `take` keeps the sources a stand counts.
+fn search(
+    w: &World,
+    sources: &[Cell],
+    frame: Frame,
+    footprint: &[Cell],
+    prefer: Option<i32>,
+    take: impl Fn(Cell, Vec<Cell>) -> Vec<Cell>,
+) -> (Option<Station>, usize) {
+    let mut blind = 0;
     let heights = prefer
         .into_iter()
         .chain(1..=MAX_ACCESS)
@@ -156,18 +199,27 @@ pub fn station_among(
                 {
                     continue;
                 }
-                let srcs = reach_sources(sources, stand);
-                if !srcs.is_empty() {
-                    return Some(Station {
+                let near = reach_sources(sources, stand);
+                if near.is_empty() {
+                    continue;
+                }
+                let srcs = take(stand, near);
+                if srcs.is_empty() {
+                    blind += 1;
+                    continue;
+                }
+                return (
+                    Some(Station {
                         stand,
                         h,
                         sources: srcs,
-                    });
-                }
+                    }),
+                    blind,
+                );
             }
         }
     }
-    None
+    (None, blind)
 }
 
 /// The cells beside the cell over lava source `src` the feet can stand in once opened, the source
@@ -304,6 +356,18 @@ pub fn sight_block(
     feet_y: i32,
     kept: &[Cell],
 ) -> Option<Cell> {
+    sight_block_opened(w, eye, src, feet_y, kept, &[])
+}
+
+/// `sight_block` with the cells of `opened` passed as open (a stand not dug yet).
+fn sight_block_opened(
+    w: &World,
+    eye: [f64; 3],
+    src: Cell,
+    feet_y: i32,
+    kept: &[Cell],
+    opened: &[Cell],
+) -> Option<Cell> {
     let to = centre(src);
     let steps = 40;
     let mut last = None;
@@ -319,7 +383,7 @@ pub fn sight_block(
             p[1].floor() as i32,
             p[2].floor() as i32,
         );
-        if c == src || Some(c) == last {
+        if c == src || Some(c) == last || opened.contains(&c) {
             continue;
         }
         last = Some(c);

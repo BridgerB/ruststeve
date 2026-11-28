@@ -171,6 +171,48 @@ pub fn aim_at_use(w: &World, eye: [f64; 3], target: Cell, reach: f64) -> Option<
     aim_with(w, eye, target, reach, exact_ray)
 }
 
+/// `aim_at_use` from a stand not yet opened: the cells of `opened` (the stand and its head, in
+/// the rock) count open. A station is a stand whose step there finds a source in sight or a
+/// lid to dig, judged before it is walked to: race 46144128199 lane 0 walked to a stand whose
+/// twelve sources lay behind a wall level with its feet, gave the station up there in a tick and
+/// did so four times (docs/problems/lava-portal.md wall 4).
+pub fn aim_opened(
+    w: &World,
+    eye: [f64; 3],
+    target: Cell,
+    reach: f64,
+    opened: &[Cell],
+) -> Option<[f64; 3]> {
+    face_points(target)
+        .into_iter()
+        .filter(|p| (0..3).map(|i| (eye[i] - p[i]).powi(2)).sum::<f64>().sqrt() <= reach)
+        .find(|p| {
+            ray_cells(eye, *p)
+                .into_iter()
+                .all(|c| c == target || opened.contains(&c) || open(w, c))
+        })
+}
+
+/// The points on a source's faces a bucket is aimed at: the surface, the four sides, the
+/// underside, each a little inside.
+fn face_points((x, y, z): Cell) -> [[f64; 3]; 6] {
+    [
+        [0.5, SURFACE_HEIGHT, 0.5],
+        [0.1, 0.45, 0.5],
+        [0.9, 0.45, 0.5],
+        [0.5, 0.45, 0.1],
+        [0.5, 0.45, 0.9],
+        [0.5, 0.1, 0.5],
+    ]
+    .map(|o| {
+        [
+            f64::from(x) + o[0],
+            f64::from(y) + o[1],
+            f64::from(z) + o[2],
+        ]
+    })
+}
+
 fn aim_with(
     w: &World,
     eye: [f64; 3],
@@ -178,23 +220,8 @@ fn aim_with(
     reach: f64,
     clear: fn(&World, [f64; 3], [f64; 3], Cell) -> bool,
 ) -> Option<[f64; 3]> {
-    const FACES: [[f64; 3]; 6] = [
-        [0.5, SURFACE_HEIGHT, 0.5],
-        [0.1, 0.45, 0.5],
-        [0.9, 0.45, 0.5],
-        [0.5, 0.45, 0.1],
-        [0.5, 0.45, 0.9],
-        [0.5, 0.1, 0.5],
-    ];
-    FACES
-        .iter()
-        .map(|o| {
-            [
-                f64::from(x) + o[0],
-                f64::from(y) + o[1],
-                f64::from(z) + o[2],
-            ]
-        })
+    face_points((x, y, z))
+        .into_iter()
         .filter(|p| (0..3).map(|i| (eye[i] - p[i]).powi(2)).sum::<f64>().sqrt() <= reach)
         .find(|p| clear(w, eye, *p, (x, y, z)))
 }

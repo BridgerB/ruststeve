@@ -1146,15 +1146,40 @@ impl Cast {
             .filter(|c| !own.contains(c) && !self.refused.contains(c))
             .collect();
         let print = footprint(&self.plan);
-        let Some(st) =
-            station::station_among(w, &sources, self.site.frame, &print, Some(self.site.h))
-        else {
+        // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
+        // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
+        // cast went back to it 360 times (wall 20).
+        let mut kept = station::kept(self.site.frame);
+        kept.extend(
+            self.plan
+                .iter()
+                .filter(|op| op.kind == OpKind::Place)
+                .filter_map(|op| op.pos),
+        );
+        // Only a stand whose step there can take a source (lava-portal.md wall 4): race
+        // 46144128199 lane 0 walked to a stand whose twelve sources lay behind a wall level with
+        // its feet, found nothing to scoop or dig there, and fell to a tunnel, four times.
+        let (station, blind) = station::serving_station(
+            w,
+            &sources,
+            self.site.frame,
+            &print,
+            Some(self.site.h),
+            &kept,
+        );
+        let Some(st) = station else {
             if self
                 .refill_trail
                 .last()
-                .is_none_or(|t| !t.ends_with("no station"))
+                .is_none_or(|t| !t.contains("no station"))
             {
-                self.trail(tick, format!("{} sources, no station", sources.len()));
+                self.trail(
+                    tick,
+                    format!(
+                        "{} sources, no station ({blind} stands with sources in reach, none in sight)",
+                        sources.len()
+                    ),
+                );
             }
             return None;
         };
@@ -1174,16 +1199,6 @@ impl Cast {
                 ),
             );
         }
-        // The frame's rock and every cell the plan places, which a way never digs (clojurecraft's
-        // `kept` and `placed?`): a way dug through the room's floor undid its place op, and the
-        // cast went back to it 360 times (wall 20).
-        let mut kept = station::kept(self.site.frame);
-        kept.extend(
-            self.plan
-                .iter()
-                .filter(|op| op.kind == OpKind::Place)
-                .filter_map(|op| op.pos),
-        );
         let from = eye(&body);
         // A station source already in reach with a clear face: scooped from here.
         if body.on_ground
@@ -1206,10 +1221,13 @@ impl Cast {
                 self.last_done = tick;
                 return Some((still, None, CastStatus::Running));
             }
-            let block = st
+            let Some(block) = st
                 .sources
                 .iter()
-                .find_map(|src| station::sight_block(w, from, *src, f.1, &kept))?;
+                .find_map(|src| station::sight_block(w, from, *src, f.1, &kept))
+            else {
+                return self.station_miss(tick, "at the stand, no source in sight and no lid");
+            };
             self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
             return Some((still, None, CastStatus::Running));
         }
@@ -1227,24 +1245,42 @@ impl Cast {
             // Off the stand's height: to the landing at it first (the room's access steps).
             let landing = self.site.frame.at(crate::build::landing(st.h));
             if landing == f {
-                return None;
+                return self.station_miss(tick, "off its height at the landing, no walk to it");
             }
             let mut walk = Walk::new(landing, Goal::Block { pos: landing }, Arrive::Goal, tick);
             if !walk.route_now(w, tick) || !found(&walk) {
-                return None;
+                return self.station_miss(tick, "off its height, no walk to the landing");
             }
             self.work = Work::ToStation(walk);
             return Some((still, None, CastStatus::Running));
         }
         // At its height: the first block on the straight way, dug when in reach.
-        let station::Way::Dig(block) = station::stance_block(w, f, st.stand, &kept) else {
-            return None;
+        let way = station::stance_block(w, f, st.stand, &kept);
+        let station::Way::Dig(block) = way else {
+            return self.station_miss(tick, &format!("no walk to it, the way {way:?}"));
         };
         if dist(eye(&body), centre(block)) > REACH {
-            return None;
+            return self.station_miss(
+                tick,
+                &format!("no walk to it, its way's {block:?} out of reach"),
+            );
         }
         self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
         Some((still, None, CastStatus::Running))
+    }
+
+    /// A station step that ends in the tick it began: a failed step of the station, counted with
+    /// its walks and digs (`STATION_MISSES`), so the ladder goes on to the sources instead of
+    /// coming back to it every few ticks (lava-portal.md wall 4: four rounds in 46 ticks, none
+    /// counted, then "no route").
+    fn station_miss(
+        &mut self,
+        tick: u64,
+        why: &str,
+    ) -> Option<(Controls, Option<Act>, CastStatus)> {
+        self.station_misses += 1;
+        self.trail(tick, format!("station missed: {why}"));
+        None
     }
 
     fn refill(
@@ -1271,8 +1307,18 @@ impl Cast {
             if status == crate::stairs::StairsStatus::Running {
                 return (c, act, CastStatus::Running);
             }
+            // A tunnel that cut nothing is a failed tunnel, not one more of four: from the same
+            // feet the next one turns off the same lava and fails the same way (lava-portal.md
+            // wall 4: four level tunnels in 46 ticks, each turned away from the pool by "lava
+            // beside" and stopped by a walk onto air, none of them a block dug). One that walked
+            // its steps through open cells to the end (`Done`) went somewhere, and counts as one.
+            let (dug, why) = (st.dug, st.refusals.last().cloned().unwrap_or_default());
             self.work = Work::Idle;
             self.tunnels += 1;
+            if dug == 0 && status != crate::stairs::StairsStatus::Done {
+                self.tunnels = MAX_TUNNELS;
+            }
+            self.trail(tick, format!("tunnel ended {status:?}, {dug} dug: {why}"));
             self.last_done = tick;
             return (c, act, CastStatus::Running);
         }
