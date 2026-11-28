@@ -4,15 +4,34 @@
 # commit into the job summary and a release. Runners never stream to steve (the live view is
 # local only). Dispatch only:
 #   gh workflow run race.yml --ref <branch> -f lanes=4 -f bots=14 -f start=spawn -f cap=6000
+# Seeds and the relay (issue 69, brain/ruststeve/design/relay.md): `seed` picks worlds from
+# config/seeds.toml and `lanes` is then per seed; `relay=true` chains legs, each seed resuming
+# from its own furthest snapshot, until every seed wins or stalls or `legs` is reached. The
+# choices are made by the seed-relay binary (crates/xtask/src/bin/seed-relay.rs).
 name: race
-run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}, goal ${{ inputs.goal }}, hold ${{ inputs.hold }}"
+run-name: "race: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, ${{ inputs.start }}, cap ${{ inputs.cap }}, goal ${{ inputs.goal }}, hold ${{ inputs.hold }}${{ inputs.seed != '' && format(', seed {0}', inputs.seed) || '' }}${{ inputs.relay == 'true' && format(', relay leg {0}/{1}', inputs.leg, inputs.legs) || '' }}"
 
 on:
   workflow_dispatch:
     inputs:
       lanes:
-        description: Lanes, one runner each (at most 20)
+        description: Lanes per seed, one runner each (at most 20 in all)
         default: "4"
+      seed:
+        description: Seeds from config/seeds.toml - a name, names joined by commas, or all - or empty for config/race.toml's seed
+        default: ""
+      relay:
+        description: Relay - after this race, race each seed again from its furthest snapshot until it wins or stalls (true or false)
+        default: "false"
+      legs:
+        description: The relay's most legs
+        default: "6"
+      leg:
+        description: This leg of the relay (the relay sets it)
+        default: "1"
+      relay_from:
+        description: The previous leg's release tag (race-<run>); the relay sets it
+        default: ""
       bots:
         description: Bots per lane (config/race.toml says 14)
         default: "14"
@@ -61,13 +80,39 @@ jobs:
       contents: write
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      total: ${{ steps.m.outputs.total }}
       race_minutes: ${{ steps.m.outputs.race_minutes }}
     steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: race
+          save-if: false
+      - name: Build the seed tools
+        run: cargo build -q --locked --release -p xtask
+
+      # The previous leg's relay-<seed>.toml files (issue 69): each seed's furthest snapshot.
+      - name: The previous leg
+        if: inputs.relay == 'true' && inputs.relay_from != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELAY_FROM: ${{ inputs.relay_from }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELAY_FROM" -p 'relay-*.toml' -D prev
+          for f in prev/relay-*.toml; do echo "== $f"; cat "$f"; done
+
       - id: m
         env:
           LANES: ${{ inputs.lanes }}
           CAP: ${{ inputs.cap }}
           MINUTES: ${{ inputs.minutes }}
+          SEED: ${{ inputs.seed }}
+          START: ${{ inputs.start }}
+          SNAPSHOT: ${{ inputs.snapshot }}
+          RELAY: ${{ inputs.relay }}
         run: |
           set -euo pipefail
           if ! [[ "$LANES" =~ ^[0-9]+$ ]] || [ "$LANES" -lt 1 ] || [ "$LANES" -gt 20 ]; then
@@ -80,10 +125,23 @@ jobs:
           if [ "$MINUTES" -lt "$need" ]; then
             echo "cap $CAP needs minutes >= $need (got $MINUTES): every bot would be cut"; exit 1
           fi
-          echo "matrix=$(seq 0 $((LANES - 1)) | paste -sd, | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
+          # Seeds x lanes (issue 69): every lane's seed, start and snapshot, at most 20 lanes in
+          # all, refused when another seed is asked for a place on the race seed's world.
+          from=""
+          if [ "$RELAY" = true ] && [ -d prev ]; then from=prev; fi
+          ./target/release/seed-relay lanes --names "$(./target/release/xtask seeds)" \
+            --seed "$SEED" --lanes "$LANES" --start "$START" --snapshot "$SNAPSHOT" \
+            --from "$from" --lanes-toml lanes.toml >> "$GITHUB_OUTPUT"
+          cat lanes.toml
           # The race step's own limit (expressions cannot subtract): 9 minutes under the job's,
           # so the steps after it (the lane's files, the replay) always get their time.
           echo "race_minutes=$(( MINUTES - 9 ))" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: race-${{ github.run_id }}-lanes-toml
+          path: lanes.toml
+          retention-days: 30
 
       # The release opens now, so each lane's progress is readable while the race runs (16e).
       # Its tag points at the default branch: the workflow token may not tag a commit that changes
@@ -97,7 +155,8 @@ jobs:
         run: |
           gh release create "race-${{ github.run_id }}" --target "${{ github.event.repository.default_branch }}" --prerelease \
             --title "race ${{ github.run_id }} (running)" \
-            --notes "Running. Every 5 minutes (10 with more than 8 lanes) each lane uploads progress-lane-N.txt, a line per bot (stage, health, food, held item and uses, task and reason, ticks without progress), and evidence-lane-N.tar.zst, each bot's ledger, senses and story so far as text. A snapshot is uploaded within a minute of its stage being reached."
+            --notes "Running. Every 5 minutes (10 with more than 8 lanes) each lane uploads progress-lane-N.txt, a line per bot (stage, health, food, held item and uses, task and reason, ticks without progress), and evidence-lane-N.tar.zst, each bot's ledger, senses and story so far as text. A snapshot is uploaded within a minute of its stage being reached. lanes.toml says each lane's seed."
+          gh release upload "race-${{ github.run_id }}" lanes.toml --clobber
 
   lane:
     needs: lanes
@@ -107,8 +166,12 @@ jobs:
     timeout-minutes: ${{ fromJSON(inputs.minutes) }}
     strategy:
       fail-fast: false
+      # One row a lane (issue 69): lane (numbered on through the seeds), seed, start, snapshot
+      # (tag/asset or empty) and source (frontier, relay, given or empty), from seed-relay.
       matrix:
-        lane: ${{ fromJSON(needs.lanes.outputs.matrix) }}
+        include: ${{ fromJSON(needs.lanes.outputs.matrix) }}
+    env:
+      SEED: ${{ matrix.seed }}
     steps:
       - name: Mark the job's start
         run: echo "JOB_START=$(date +%s)" >> "$GITHUB_ENV"
@@ -149,9 +212,10 @@ jobs:
         run: cargo build -q --locked --release -p xtask -p bot -p results -p replay -p rcon
 
       - name: Restore the snapshot into the server's world
-        if: inputs.snapshot != ''
+        if: matrix.snapshot != ''
         env:
-          SNAPSHOT: ${{ inputs.snapshot }}
+          SNAPSHOT: ${{ matrix.snapshot }}
+          SOURCE: ${{ matrix.source }}
           LANE: ${{ matrix.lane }}
           BOTS: ${{ inputs.bots }}
           GH_TOKEN: ${{ github.token }}
@@ -160,28 +224,31 @@ jobs:
         # health) under its own offline UUID; the race seeds each with the snapshot's memory.
         run: |
           set -euo pipefail
-          if [ "$SNAPSHOT" = frontier ]; then
-            tag="$(sed -n 's/^tag = "\(.*\)"$/\1/p' config/frontier.toml)"
-            asset="$(sed -n 's/^asset = "\(.*\)"$/\1/p' config/frontier.toml)"
-          else
-            tag="${SNAPSHOT%%/*}"
-            asset="${SNAPSHOT#*/}"
-          fi
-          echo "snapshot: $tag $asset"
+          # seed-relay resolved the frontier (config/frontier.toml, or config/frontier/<seed>.toml)
+          # or the relay's last leg to tag/asset; SOURCE says which.
+          tag="${SNAPSHOT%%/*}"
+          asset="${SNAPSHOT#*/}"
+          echo "snapshot ($SOURCE, seed $SEED): $tag $asset"
           mkdir -p snap target/server
           gh release download "$tag" -p "$asset" -D snap
           tar --zstd -xf "snap/$asset" -C snap
           dir="$(dirname "$(find snap -name snap.toml | head -n 1)")"
           cat "$dir/snap.toml"
-          # The frontier is never a development snapshot (bot::devstart): one made by a race from
-          # a made-up start, marked dev in its snap.toml and dev- in its asset name.
-          if [ "$SNAPSHOT" = frontier ] && { grep -q '^dev = true' "$dir/snap.toml" || [[ "$asset" == dev-* ]]; }; then
-            echo "::error::the frontier ($tag/$asset) is a development snapshot: refused"
+          # A snapshot of another seed's world is refused (race.yml prepends seed = to each).
+          snap_seed="$(sed -n 's/^seed = "\(.*\)"$/\1/p' "$dir/snap.toml" | head -n 1)"
+          if [ -n "$snap_seed" ] && [ "$snap_seed" != "$SEED" ]; then
+            echo "::error::lane $LANE races seed $SEED but $tag/$asset is a snapshot of seed $snap_seed: refused"
+            exit 1
+          fi
+          # The frontier (or a relay leg) is never a development snapshot (bot::devstart): one
+          # made by a race from a made-up start, marked dev in its snap.toml and dev- in its name.
+          if [ "$SOURCE" != given ] && { grep -q '^dev = true' "$dir/snap.toml" || [[ "$asset" == dev-* ]]; }; then
+            echo "::error::the $SOURCE snapshot ($tag/$asset) is a development snapshot: refused"
             exit 1
           fi
           # Nor a snapshot on request or of a stuck spot (kind = "at" or "stuck"): not a stage's.
-          if [ "$SNAPSHOT" = frontier ] && grep -q '^kind = ' "$dir/snap.toml"; then
-            echo "::error::the frontier ($tag/$asset) is not a stage's snapshot: refused"
+          if [ "$SOURCE" != given ] && grep -q '^kind = ' "$dir/snap.toml"; then
+            echo "::error::the $SOURCE snapshot ($tag/$asset) is not a stage's snapshot: refused"
             exit 1
           fi
           if grep -q '^dev = true' "$dir/snap.toml"; then
@@ -201,12 +268,19 @@ jobs:
           echo "SNAP_MEMORY=$dir/memory.rsw" >> "$GITHUB_ENV"
 
       - name: Start the server (RCON on, a password for this run only)
+        env:
+          SEED_INPUT: ${{ inputs.seed }}
         run: |
           set -euo pipefail
+          # A named seed's level-seed from config/seeds.toml (issue 69); no seed input is
+          # config/race.toml's, as before. A restored world keeps the seed it was made with.
+          seed=()
+          if [ -n "$SEED_INPUT" ]; then seed=(--seed "$(./target/release/xtask seed "$SEED")"); fi
+          echo "lane seed: $SEED ${seed[*]}"
           pw="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')"
           echo "::add-mask::$pw"
           echo "RUSTSTEVE_RCON_PASSWORD=$pw" >> "$GITHUB_ENV"
-          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" > server.log 2>&1 &
+          RUSTSTEVE_RCON_PASSWORD="$pw" nohup ./target/release/xtask server --jar "$DATAGEN_WORK/server.jar" "${seed[@]}" > server.log 2>&1 &
           for _ in $(seq 1 180); do
             if grep -q 'Done (' server.log; then exit 0; fi
             sleep 2
@@ -245,9 +319,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           LANE: ${{ matrix.lane }}
-          LANES: ${{ inputs.lanes }}
+          LANES: ${{ needs.lanes.outputs.total }}
           BOTS: ${{ inputs.bots }}
-          START: ${{ inputs.start }}
+          START: ${{ matrix.start }}
           CAP: ${{ inputs.cap }}
           GOAL: ${{ inputs.goal }}
           HOLD: ${{ inputs.hold }}
@@ -290,6 +364,11 @@ jobs:
               [ -f "$d/snap.toml" ] || continue
               stage="$(basename "$d")"
               [ -e ".sent-$stage" ] && continue
+              # The world's seed name goes first (issue 69): a key after the [items] table would
+              # land in it. Once only, since a refused upload is packed again.
+              if ! grep -q '^seed = ' "$d/snap.toml"; then
+                { echo "seed = \"$SEED\""; cat "$d/snap.toml"; } > "$d/snap.toml.seed" && mv "$d/snap.toml.seed" "$d/snap.toml"
+              fi
               prefix=""
               if grep -q '^dev = true' "$d/snap.toml"; then prefix="dev-"; fi
               f="${prefix}snapshot-$stage-${{ github.run_id }}-race-${{ github.run_id }}-lane-$LANE.tar.zst"
@@ -429,11 +508,12 @@ jobs:
         if: always()
         env:
           LANE: ${{ matrix.lane }}
+          START: ${{ matrix.start }}
         run: |
           now="$(date +%s)"
           rs="${RACE_START:-$now}"
           re="${RACE_END:-$now}"
-          echo "lane $LANE: setup $(( rs - JOB_START )) s, race $(( re - rs )) s (exit ${RACE_EXIT:-none}), after the race $(( now - re )) s, job $(( now - JOB_START )) s" \
+          echo "lane $LANE (seed $SEED, start $START): setup $(( rs - JOB_START )) s, race $(( re - rs )) s (exit ${RACE_EXIT:-none}), after the race $(( now - re )) s, job $(( now - JOB_START )) s" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
   publish:
@@ -454,15 +534,30 @@ jobs:
         with:
           pattern: race-${{ github.run_id }}-lane-*
           path: lanes
+      # Each lane's seed (issue 69).
+      - uses: actions/download-artifact@v4
+        with:
+          name: race-${{ github.run_id }}-lanes-toml
+          path: .
 
       - name: k/n per stage and commit
+        env:
+          SEED_INPUT: ${{ inputs.seed }}
         run: |
           set -euo pipefail
           cargo run -q --locked --release -p results -- summary lanes | tee summary.md
           # The race's own diagnosis: by place, cast failures, note kinds (results::diagnose).
           cargo run -q --locked --release -p results -- diagnose lanes | tee -a summary.md
           {
-            echo "## race ${{ github.run_id }}: ${{ inputs.lanes }} lanes x ${{ inputs.bots }} bots, start ${{ inputs.start }}, cap ${{ inputs.cap }}"
+            echo
+            echo "### lanes (lanes.toml)"
+            echo
+            echo '```toml'
+            cat lanes.toml
+            echo '```'
+          } | tee -a summary.md
+          {
+            echo "## race ${{ github.run_id }}: ${{ needs.lanes.outputs.total }} lanes (${{ inputs.lanes }} per seed, seed '$SEED_INPUT') x ${{ inputs.bots }} bots, start ${{ inputs.start }}, cap ${{ inputs.cap }}"
             echo
             cat summary.md
           } >> "$GITHUB_STEP_SUMMARY"
@@ -493,9 +588,105 @@ jobs:
           if ! gh release view "$tag" > /dev/null 2>&1; then
             gh release create "$tag" --target "${{ github.event.repository.default_branch }}" --prerelease --notes "publishing"
           fi
-          gh release upload "$tag" "batches-${{ github.run_id }}.tar.zst" summary.md "${snaps[@]}" --clobber
+          gh release upload "$tag" "batches-${{ github.run_id }}.tar.zst" summary.md lanes.toml "${snaps[@]}" --clobber
           gh release edit "$tag" --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
             --notes-file summary.md
+
+      # The relay reads only each snapshot's snap.toml: a small artifact, not every lane's world.
+      - name: The leg's snapshot list
+        if: inputs.relay == 'true'
+        run: |
+          mkdir -p snaps
+          find lanes -path '*/snapshots/*/snap.toml' -exec cp --parents -t snaps {} +
+          find snaps -name snap.toml | sort
+      - uses: actions/upload-artifact@v4
+        if: inputs.relay == 'true'
+        with:
+          name: race-${{ github.run_id }}-snaps
+          path: snaps
+          if-no-files-found: warn
+          retention-days: 30
+
+  # The relay (issue 69, brain/ruststeve/design/relay.md): each seed's furthest stage so far as
+  # relay-<seed>.toml on this release, then the next leg on the same ref while any seed is still
+  # going and legs are left. A seed leaves the relay when it wins or a leg adds no stage.
+  relay:
+    needs: publish
+    if: always() && inputs.relay == 'true' && needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: race
+          save-if: false
+      - name: Build the seed tools
+        run: cargo build -q --locked --release -p xtask
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: race-${{ github.run_id }}-snaps
+          path: snaps
+      - name: The previous leg
+        if: inputs.relay_from != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELAY_FROM: ${{ inputs.relay_from }}
+        run: gh release download "$RELAY_FROM" -p 'relay-*.toml' -D prev
+
+      - id: r
+        name: Each seed's furthest stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SEED: ${{ inputs.seed }}
+          LEG: ${{ inputs.leg }}
+          LEGS: ${{ inputs.legs }}
+        run: |
+          set -euo pipefail
+          from=""
+          if [ -d prev ]; then from=prev; fi
+          ./target/release/seed-relay record --names "$(./target/release/xtask seeds)" \
+            --seed "$SEED" --run "${{ github.run_id }}" --leg "$LEG" --legs "$LEGS" \
+            --snaps snaps/lanes --from "$from" --out relay --output "$GITHUB_OUTPUT" | tee relay.md
+          cat relay.md >> "$GITHUB_STEP_SUMMARY"
+          for f in relay/relay-*.toml; do echo "== $f"; cat "$f"; done
+          gh release upload "race-${{ github.run_id }}" relay/relay-*.toml relay.md --clobber
+
+      - name: The next leg
+        if: steps.r.outputs.next == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          LEG: ${{ inputs.leg }}
+          # Every other input carried over as it was.
+          LANES: ${{ inputs.lanes }}
+          BOTS: ${{ inputs.bots }}
+          START: ${{ inputs.start }}
+          CAP: ${{ inputs.cap }}
+          GOAL: ${{ inputs.goal }}
+          HOLD: ${{ inputs.hold }}
+          SNAPSHOT: ${{ inputs.snapshot }}
+          REVIVE: ${{ inputs.revive }}
+          SNAPSHOT_AT: ${{ inputs.snapshot_at }}
+          MINUTES: ${{ inputs.minutes }}
+          SEED: ${{ inputs.seed }}
+          LEGS: ${{ inputs.legs }}
+        run: |
+          set -euo pipefail
+          NEXT=$(( LEG + 1 ))
+          gh workflow run race.yml --ref "$REF" \
+            -f lanes="$LANES" -f bots="$BOTS" -f start="$START" -f cap="$CAP" -f goal="$GOAL" \
+            -f hold="$HOLD" -f snapshot="$SNAPSHOT" -f revive="$REVIVE" -f snapshot_at="$SNAPSHOT_AT" \
+            -f minutes="$MINUTES" -f seed="$SEED" -f relay=true -f legs="$LEGS" \
+            -f leg="$NEXT" -f relay_from="race-${{ github.run_id }}"
+          echo "dispatched leg $NEXT on $REF from race-${{ github.run_id }}" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The insight store: add this race to the published store (ingest.yml).
   insight:
