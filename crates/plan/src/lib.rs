@@ -1901,6 +1901,7 @@ impl Plan {
             Task::Cast(k) => {
                 let (c, act, status) = k.step(w, tick);
                 self.acts.extend(act);
+                let first = k.take_note();
                 let site = k.site;
                 let ops = k.done_ops;
                 let uses = k.uses_text();
@@ -1920,6 +1921,9 @@ impl Plan {
                 let refused = k.refused_sources().to_vec();
                 let water = held(data::ItemKind::WaterBucket);
                 let lava = held(data::ItemKind::LavaBucket);
+                if let Some((what, why)) = first {
+                    self.note(tick, what, why);
+                }
                 // A source the cast's scoop failed at is refused for the fetch too: the fetch
                 // took the very source the refill had failed at four times (cast.md wall 1).
                 if !matches!(status, cast::CastStatus::Running) {
@@ -5559,6 +5563,9 @@ impl Plan {
                 }
             }
         }
+        // A site kept from an earlier cast (a fetch, a pause) resumes as before; a newly chosen
+        // one fills its lava bucket before its room is cut (issue 83 wall 1).
+        let fresh = self.site.is_none();
         let site = self
             .site
             .or_else(|| choice.filter(|c| c.routed).map(|c| c.site));
@@ -5574,7 +5581,11 @@ impl Plan {
                 ),
                 "a site beside lava seen exposed".to_owned(),
             );
-            return Task::Cast(Box::new(cast::Cast::new(site, tick)));
+            return Task::Cast(Box::new(if fresh {
+                cast::Cast::fresh(site, tick)
+            } else {
+                cast::Cast::new(site, tick)
+            }));
         }
         // No site, and over the lava sea's level: down by its own stairs (overworld-leg wall 1),
         // unless a pool of ten sources is known near the feet's height, which is walked to as
