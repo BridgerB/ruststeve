@@ -124,3 +124,28 @@ Sprint race 46132613146 had 4 drownings: rs-l00-b03, rs-l04-b00, rs-l04-b04 and 
   - rs-l00-b03 and rs-l04-b04: `escape-water` that never reached a bank.
   - rs-l04-b00 and rs-l04-b08 (the same lane, so the same world): boxed stairs at (-29, 22, 70), then `swim to (-37, 19, 58)` to relocate, then drowned. That is the swim wall that #71 owns.
 - So the policy's water refusal held. These count as noise for #56; the swim walls belong to #71.
+
+### The second world: cold (seed `cold`, `start=spawn`, 6 × 14 per arm)
+Retreats are counted from the ledgers (probe 46151117711). The baseline is origin/stack 201dfcfe: the bot before #56, with the old inertia and no sprint.
+
+| race | arm | iron_kit | median kit tick | creeper retreats | fuse lit during | died in retreat | creeper deaths |
+|---|---|---|---|---|---|---|---|
+| 46142641530 | baseline | 13/84 | 16960 | 103 | 26 (25.2%) | 13 | 16 |
+| 46142638883 | sprint (865a088b) | 27/84 | 18120 | 244 (202 sprinted) | 29 (11.9%) | 3 | 5 |
+
+A supporting read from one stone_pickaxe snapshot (race-46124595679 lane-4). Every bot in a lane starts in the same spot of the same world, so these runs are correlated, far fewer than 84 independent trials:
+
+| race | arm | iron_kit | median kit tick | creeper retreats | fuse lit during | died in retreat | creeper deaths |
+|---|---|---|---|---|---|---|---|
+| 46146696830 | baseline | 25/84 | 15560 | 226 | 24 (10.6%) | 8 | 8 |
+| 46146694949 | sprint | 19/84 | 12100 | 115 (108 sprinted) | 24 (20.9%) | 8 | 9 |
+
+The spawn pair agrees with typecraft: twice the kits, and creeper deaths 16 → 5. The snapshot pair goes the other way on kits and on lit fuses per retreat. It is recorded as it is.
+
+### Arrow deaths per alive minute rose with sprint on cold (open, for #76 / #70)
+Arrow deaths per alive minute, from the summaries' counts and the ledgers' last ticks:
+- the spawn pair: 19 in 1,062 minutes (0.018) against 35 in 1,460 (0.024);
+- the snapshot pair: 35 in 1,088 (0.032) against 39 in 985 (0.040).
+That is about 1.3× higher with sprint on both, so living longer does not explain all of it. On typecraft the pooled counts are 21 against 25.
+
+Four sprint-arm deaths were read (rs-l00-b01, rs-l00-b08, rs-l00-b12 and rs-l01-b02 of 46142638883, probe 46146771476). All four were in one skeleton-dense place, with the bot at 1 to 5 health and 3 to 5 skeletons shooting. None sprinted toward a skeleton. The retreats asked to sprint and were refused (drop) or released, and twice the sprint went on and off in the same tick. The cause is not established. The retreat from shooters is #70's and #76's to redesign.
