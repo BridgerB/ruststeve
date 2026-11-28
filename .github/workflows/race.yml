@@ -549,8 +549,9 @@ jobs:
           # The race's own diagnosis: by place, cast failures, note kinds (results::diagnose).
           cargo run -q --locked --release -p results -- diagnose lanes | tee -a summary.md
           # Per seed the game ticks from spawn to each stage, from each snapshot's level.dat
-          # (issue 69, results::seeds). Best-effort: a failure here never costs the summary.
-          if ! cargo run -q --locked --release -p results -- seeds lanes > seeds.md; then
+          # (issue 69, results::seeds), and the rows for the insight store (ingest.yml reads
+          # seed-rows-*.toml from the release). Best-effort: a failure never costs the summary.
+          if ! cargo run -q --locked --release -p results -- seeds --rows "seed-rows-${{ github.run_id }}.toml" lanes > seeds.md; then
             echo "::warning::results seeds failed; the per-seed table is missing"
             echo "(results seeds failed)" > seeds.md
           fi
@@ -595,7 +596,9 @@ jobs:
           if ! gh release view "$tag" > /dev/null 2>&1; then
             gh release create "$tag" --target "${{ github.event.repository.default_branch }}" --prerelease --notes "publishing"
           fi
-          gh release upload "$tag" "batches-${{ github.run_id }}.tar.zst" summary.md lanes.toml "${snaps[@]}" --clobber
+          rows=()
+          if [ -f "seed-rows-${{ github.run_id }}.toml" ]; then rows=("seed-rows-${{ github.run_id }}.toml"); fi
+          gh release upload "$tag" "batches-${{ github.run_id }}.tar.zst" summary.md lanes.toml "${rows[@]}" "${snaps[@]}" --clobber
           gh release edit "$tag" --title "race ${{ github.run_id }} (${{ inputs.start }}, $(git rev-parse --short HEAD))" \
             --notes-file summary.md
 
