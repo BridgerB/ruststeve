@@ -945,6 +945,14 @@ pub fn in_water(w: &World, c: [i32; 3]) -> bool {
 /// deaths in a notch or the bunker within about 15 of the fountain with the dragon perched).
 pub const PERCH_NEAR: f64 = 20.0;
 
+/// Is a bunker at `c` barred to the fight's own waits: within `PERCH_NEAR` of the fountain (wall
+/// 63: every bunker is dug 8 to 15 from it, and its shaft and stair are a pit no fireball is dodged
+/// from; dev race 46108869796 lane 1 went "to the bunker" through a strafe and died in a fireball's
+/// cloud in its stair)?
+pub fn bunker_barred(c: [i32; 3]) -> bool {
+    from_fountain(mid(c)) < PERCH_NEAR
+}
+
 /// Is the dragon down by the fountain (landing, sitting, taking off) with the feet within
 /// `PERCH_NEAR` of it? The flame's answer then is the ring and the open, never cover (wall 62).
 pub fn perch_near(w: &World, feet: [f64; 3]) -> bool {
@@ -1395,11 +1403,22 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
     let clouds = breaths(w);
     let fy = feet[1].floor() as i32;
     let mut best: Option<(f64, [i32; 3])> = None;
-    for r in [FLAME_CLEAR, FLAME_CLEAR + 1.0, FLAME_CLEAR + 2.0] {
+    // Round the head point out of the flame, and round the body at the head stand's own distance
+    // (wall 64): the next scan turns the head onto the bot, so a wait there is already a head stand
+    // when the attacking turn comes (race 46108868213: 1.4 strikes a perch, the walk to the stand
+    // eating the scan and the attack's first ticks).
+    let rings = [
+        (h, FLAME_CLEAR),
+        (h, FLAME_CLEAR + 1.0),
+        (h, FLAME_CLEAR + 2.0),
+        (v.pos, HEAD_RING),
+        (v.pos, HEAD_RING + 1.0),
+    ];
+    for (centre, r) in rings {
         for k in 0..ESCAPE_WAYS {
             let a = f64::from(k) * std::f64::consts::TAU / f64::from(ESCAPE_WAYS);
-            let x = (h[0] + r * a.cos()).floor() as i32;
-            let z = (h[2] + r * a.sin()).floor() as i32;
+            let x = (centre[0] + r * a.cos()).floor() as i32;
+            let z = (centre[2] + r * a.sin()).floor() as i32;
             let Some(c) = ground(w, x, z, fy) else {
                 continue;
             };
@@ -1414,7 +1433,8 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
             {
                 continue;
             }
-            let d = flat(feet, p);
+            // Nearest the head stand's distance from the body first, then nearest the feet.
+            let d = (flat(p, v.pos) - HEAD_RING).abs() * RING_WEIGHT + flat(feet, p);
             if best.is_none_or(|(bd, bc)| d < bd || (d == bd && c < bc)) {
                 best = Some((d, c));
             }
@@ -1422,6 +1442,12 @@ pub fn flame_clear_cell(w: &World, v: &DragonView, feet: [f64; 3]) -> Option<[i3
     }
     best.map(|(_, c)| c)
 }
+
+/// Blocks from the body the flame's wait keeps to: the head stand's own distance
+/// (`HEAD_OUT + HEAD_HALF + HEAD_STAND_OFF`, 9) and a block past the bite's (wall 64); and the weight
+/// of a block off it against a block more to walk.
+pub const HEAD_RING: f64 = 10.0;
+pub const RING_WEIGHT: f64 = 3.0;
 
 /// Server ticks after a blow a takeoff counts as the blow's: the server resets its count then.
 pub const TAKEOFF_AFTER_BLOW: u64 = 20;
@@ -2658,8 +2684,9 @@ impl Plan {
         // E3's bunker (`Plan.bunker`), the wait while the dragon flies; never gone into with the
         // dragon down by the fountain and the feet near it (wall 62).
         let bunker = self.bunker.filter(|c| {
-            w.body
-                .is_none_or(|b| !perch_near(w, b.pos) || cell_of(b.pos) == *c)
+            w.body.is_none_or(|b| {
+                (!perch_near(w, b.pos) && !bunker_barred(*c)) || cell_of(b.pos) == *c
+            })
         });
         // A way round reached: its stand is gone to straight from here.
         if let (Some(wp), Some(b)) = (self.dragon.way, w.body)
