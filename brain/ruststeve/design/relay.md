@@ -6,7 +6,7 @@ tags: [race, seeds, relay, frontier, snapshots, workflow]
 aliases: [seed input, seed=all, relay mode, relay=true, legs, relay_from, relay-<seed>.toml, lanes.toml, seed-relay, per-seed frontier, config/frontier/, stalled seed]
 status: verified
 lastUpdated: 2026-11-28
-verifiedAgainst: ruststeve@f2408e5
+verifiedAgainst: ruststeve@0689e5f
 sourceRefs:
   - "ruststeve:crates/xtask/src/bin/seed-relay.rs#fn plan(ask: &Ask, config: &Path, from: Option<&Path>) -> Result<Vec<Lane>, String> {"
   - "ruststeve:crates/xtask/src/bin/seed-relay.rs#fn advance(seed: &str, prev: Option<Relay>, found: &[Found], run: &str) -> Relay {"
