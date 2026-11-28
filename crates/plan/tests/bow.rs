@@ -175,10 +175,22 @@ fn the_aim_meets_the_crystals_box_from_the_ground() {
     let mut wall = |c: (i32, i32, i32)| c.2 == -5 && c.1 < 75;
     assert!(
         matches!(
-            bow::aim(FEET, CRYSTAL_AT, &mut wall),
+            bow::aim_with(FEET, CRYSTAL_AT, &mut wall, false),
             Err(Miss::Blocked((_, _, -5)))
         ),
-        "a wall across the way"
+        "a wall across the way: no low arc"
+    );
+    assert!(
+        bow::aim(FEET, CRYSTAL_AT, &mut wall).is_ok_and(|a| a.high),
+        "the high arc over it"
+    );
+    let mut tall = |c: (i32, i32, i32)| c.2 == -5 && c.1 < 200;
+    assert!(
+        matches!(
+            bow::aim(FEET, CRYSTAL_AT, &mut tall),
+            Err(Miss::Blocked((_, _, -5)))
+        ),
+        "a wall too tall for either arc"
     );
 }
 
