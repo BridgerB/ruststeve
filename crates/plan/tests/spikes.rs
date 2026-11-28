@@ -2969,3 +2969,42 @@ fn with_no_water_a_hold_up_the_pillar_ends_in_the_dig() {
         notes(&p)
     );
 }
+
+#[test]
+fn a_resumed_bot_on_a_pillar_of_no_record_comes_down() {
+    // The crystals frontier (race 46103123144): the bow line's snapshot on its own end stone
+    // pillar at the stand of [42, 0], no record after the resume, every crystal gone.
+    let mut w = world(2, [20.5, 70.0, 20.5]);
+    pillar(&mut w, (20, 20), 64, 69, BlockKind::EndStone);
+    water(&mut w);
+    gone(&mut w);
+    assert!(
+        spikes::on_pillar(&w, (20, 70, 20), &[]),
+        "a tower is a pillar"
+    );
+    // Calm: the dig.
+    let mut p = Plan::new(Aim::Race);
+    match p.spikes_task(&w, 100) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (20, 69, 20)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: a pillar of no record at (20, 70, 20)"),
+        "{:?}",
+        notes(&p)
+    );
+    assert_eq!(p.spikes.pillars[0].base, 64);
+    // Not calm (holding 30 off): off the side onto the clutch.
+    dragon(&mut w, [20.5, 70.0, 50.5], 0);
+    let mut p = Plan::new(Aim::Race);
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n.starts_with("spikes: clutch down from (20, 70, 20)")),
+        "{:?}",
+        notes(&p)
+    );
+}

@@ -914,7 +914,30 @@ pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
             >= 3
     };
     let placed = under.is_some_and(|k| PLACED.contains(&k)) && free();
-    full(under) && (recorded || placed)
+    full(under) && (recorded || placed || tower(w, feet))
+}
+
+/// Blocks of a free-standing column under the feet that make it a pillar with no record.
+pub const TOWER_HEIGHT: i32 = 3;
+
+/// The feet on a free-standing column of full blocks at least `TOWER_HEIGHT` high, three sides
+/// of each open: a pillar whatever its block and record (the crystals frontier, race 46103123144:
+/// the bow line's snapshot stands on its own end stone pillar at (42, 82, 3), no record after the
+/// resume, end stone no `PLACED` block, and with every crystal gone the crystals' task handed
+/// the bot to the fight 20 up).
+pub fn tower(w: &World, feet: Cell) -> bool {
+    (1..=TOWER_HEIGHT).all(|d| {
+        let y = feet.1 - d;
+        full(kind(w, (feet.0, y, feet.2)))
+            && Axis::ALL
+                .iter()
+                .filter(|a| {
+                    let (dx, dz) = a.step();
+                    !full(kind(w, (feet.0 + dx, y, feet.2 + dz)))
+                })
+                .count()
+                >= 3
+    })
 }
 
 /// The feet up on a spike: on its top (`on_spike`), or on its cage's bars or its bedrock.
@@ -2060,6 +2083,44 @@ impl Plan {
         let danger = self.spikes_danger();
         let health = w.player.health;
         let d = dragon_near(w, body.pos);
+        // A pillar of no record under the feet (a resume, the bow line's own): adopted, its base
+        // where the free-standing column begins, so its way down is the crystals' own.
+        if body.on_ground
+            && !self
+                .spikes
+                .pillars
+                .iter()
+                .any(|r| (r.x, r.z) == (feet.0, feet.2))
+            && tower(w, feet)
+        {
+            let height = (1..=GROUND_SEARCH)
+                .take_while(|d| {
+                    let y = feet.1 - d;
+                    full(kind(w, (feet.0, y, feet.2)))
+                        && Axis::ALL
+                            .iter()
+                            .filter(|a| {
+                                let (dx, dz) = a.step();
+                                !full(kind(w, (feet.0 + dx, y, feet.2 + dz)))
+                            })
+                            .count()
+                            >= 3
+                })
+                .count();
+            let base = feet.1 - i32::try_from(height).unwrap_or(0);
+            self.spikes.pillars.push(PillarRec {
+                x: feet.0,
+                z: feet.2,
+                base,
+            });
+            self.note(
+                tick,
+                format!("spikes: a pillar of no record at {feet:?}"),
+                format!(
+                    "{height} free-standing blocks under the feet; its base {base}, the way down"
+                ),
+            );
+        }
         let n = next(w, &self.spikes, tick);
         if !on_pillar(w, feet, &self.spikes.pillars) {
             self.spikes.open_hold_since = None;
