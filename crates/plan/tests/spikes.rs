@@ -1208,6 +1208,8 @@ fn the_landing_water_is_poured_from_the_first_block_up_and_dropped_into_from_the
     w.inventory.slots.insert(37, (ItemKind::Bucket, 1));
     gone(&mut w);
     at(&mut w, [8.5, 70.0, 5.5]);
+    // The water way down when the dragon is not calm (holding 30 off); calm, the dig (part 2).
+    dragon(&mut w, [8.5, 70.0, 35.5], 0);
     p.spikes.pillars.clear();
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -2110,11 +2112,31 @@ fn any_carried_full_block_builds_a_pillar_with_end_stone_at_its_top() {
 #[test]
 fn with_no_landing_water_the_way_down_is_the_clutch_not_the_dig() {
     // Part 2: the dig back wore out the pickaxe, and race 45994686575 lane 3 dug from 91 to 65
-    // in 1,800 ticks and was caught on its pillar by the charge.
+    // in 1,800 ticks and was caught on its pillar by the charge. Calm, the dig (its blocks back,
+    // after race 46099479836); not calm (holding 30 off), the clutch.
     let mut w = world(2, [8.5, 70.0, 5.5]);
     pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
     water(&mut w);
     gone(&mut w);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert!(
+        matches!(p.spikes_task(&w, 100), Some(Task::Dig(_))),
+        "{:?}",
+        notes(&p)
+    );
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: down by the dig, calm"),
+        "{:?}",
+        notes(&p)
+    );
+    dragon(&mut w, [8.5, 70.0, 35.5], 0);
     let mut p = Plan::new(Aim::Race);
     p.spikes.pillars.push(PillarRec {
         x: 8,
@@ -2910,4 +2932,40 @@ fn a_failed_walk_to_left_water_keeps_its_record() {
 fn kind_at(w: &World, c: (i32, i32, i32)) -> Option<BlockKind> {
     w.state_at(world::BlockPos::new(c.0, c.1, c.2))
         .and_then(data::block_of_state)
+}
+
+#[test]
+fn with_no_water_a_hold_up_the_pillar_ends_in_the_dig() {
+    // E9's read of race 46099479836 lane 5: no water bucket, "hold ended by the dragon … the
+    // way down" 45 times, no dig, knocked off by two blows at 34,300.
+    let mut w = world(2, [8.5, 70.0, 5.5]);
+    pillar(&mut w, (8, 5), 64, 69, BlockKind::EndStone);
+    gone(&mut w);
+    dragon(&mut w, [8.5, 70.0, 55.5], 8);
+    let mut p = Plan::new(Aim::Race);
+    p.spikes.pillars.push(PillarRec {
+        x: 8,
+        z: 5,
+        base: 64,
+    });
+    assert_eq!(p.spikes_task(&w, 100), Some(Task::Idle));
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: hold, not the dig, from the charge"),
+        "{:?}",
+        notes(&p)
+    );
+    p.spikes.doing = None;
+    match p.spikes_task(&w, 100 + spikes::OPEN_HOLD_MAX + 50) {
+        Some(Task::Dig(d)) => assert_eq!(d.target, (8, 69, 5)),
+        t => panic!("{t:?} {:?}", notes(&p)),
+    }
+    assert!(
+        notes(&p)
+            .iter()
+            .any(|n| n == "spikes: down by the dig, held too long at (8, 70, 5)"),
+        "{:?}",
+        notes(&p)
+    );
 }

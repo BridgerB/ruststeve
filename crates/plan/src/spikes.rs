@@ -416,6 +416,9 @@ pub fn clutch_water(w: &World, feet: Cell) -> Option<Cell> {
 pub const LEFT_WATER_STAND: i32 = 3;
 pub const LEFT_WATER_TRIES: u32 = 5;
 pub const LEFT_WATER_RETRY: u64 = 200;
+/// Ticks a bot up an open pillar with no water way down is held crouched for the dragon before
+/// it digs down all the same (a charge passes in about 100).
+pub const OPEN_HOLD_MAX: u64 = 200;
 
 /// Blocks on the plane round the landed feet the clutch's water is looked for in.
 pub const CLUTCH_WATER_REACH: i32 = 2;
@@ -1170,6 +1173,9 @@ pub struct SpikeState {
     /// Failed walks to each left water cell and the last one's tick (dropped at
     /// `LEFT_WATER_TRIES`, tried again `LEFT_WATER_RETRY` ticks after a failure).
     pub left_water_fails: Vec<(Cell, u32, u64)>,
+    /// The tick a hold up an open pillar with no water way down began (capped by
+    /// `OPEN_HOLD_MAX`).
+    pub open_hold_since: Option<u64>,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -1237,6 +1243,7 @@ impl Default for SpikeState {
             stubs: Vec::new(),
             left_water: Vec::new(),
             left_water_fails: Vec::new(),
+            open_hold_since: None,
         }
     }
 }
@@ -2054,6 +2061,9 @@ impl Plan {
         let health = w.player.health;
         let d = dragon_near(w, body.pos);
         let n = next(w, &self.spikes, tick);
+        if !on_pillar(w, feet, &self.spikes.pillars) {
+            self.spikes.open_hold_since = None;
+        }
         let climbing = self
             .spikes
             .pillars
@@ -2862,16 +2872,31 @@ impl Plan {
                     && let Some(dd) =
                         d.filter(|dd| dd.phase == Some(CHARGE_PHASE) && dd.dist <= THREAT_NEAR)
                 {
-                    self.spikes_note(
+                    // Never held for good: past `OPEN_HOLD_MAX` the dig goes on all the same (E9's
+                    // read of race 46099479836 lane 5: "hold ended by the dragon … the way down"
+                    // 45 times with no water, no dig, knocked off by two blows at 34,300).
+                    let since = *self.spikes.open_hold_since.get_or_insert(tick);
+                    if tick.saturating_sub(since) <= OPEN_HOLD_MAX {
+                        self.spikes_note(
+                            tick,
+                            "spikes: hold, not the dig, from the charge".to_owned(),
+                            format!(
+                                "the dragon {:.0} off charging; up the open pillar at {feet:?}",
+                                dd.dist
+                            ),
+                        );
+                        return Some(self.spikes_hold(tick));
+                    }
+                    self.note(
                         tick,
-                        "spikes: hold, not the dig, from the charge".to_owned(),
+                        format!("spikes: down by the dig, held too long at {feet:?}"),
                         format!(
-                            "the dragon {:.0} off charging; up the open pillar at {feet:?}",
-                            dd.dist
+                            "held {} ticks, over {OPEN_HOLD_MAX}; no water way down",
+                            tick.saturating_sub(since)
                         ),
                     );
-                    return Some(self.spikes_hold(tick));
                 }
+                self.spikes.open_hold_since = None;
                 // Centred over the column first: a body over its edge stays on the cell beside
                 // when the block goes (race 45885217441 lane 0).
                 let off = (f64::from(feet.0) + 0.5 - body.pos[0])
