@@ -5,7 +5,7 @@ type: how-to
 tags: [ci, runners, github-actions, probe, caching]
 aliases: [ci.yml, probe.yml, how to run code, rust-cache, nextest, workflow_dispatch, deps-boundary, xtask]
 status: verified
-lastUpdated: 2026-11-24
+lastUpdated: 2026-11-28
 verifiedAgainst: ruststeve@adfcb00
 sourceRefs:
   - "ruststeve:.github/workflows/ci.yml## Incremental compilation only adds overhead and cache churn on a fresh runner."
@@ -19,6 +19,7 @@ related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[runners-not-the-mac]]"
   - "[[workspace-crates]]"
+  - "[[relay]]"
 ---
 
 # CI and the probe on the runners
@@ -40,7 +41,7 @@ The Mac never runs code ([[runners-not-the-mac]]). Two workflows are how it runs
 
 ## The race's caches (issue 16, `docs/problems/race-tooling.md` wall 3)
 - **The server jar** lives at `/home/runner/work/datagen-work` (`DATAGEN_WORK`, key `datagen-work-26.1.2-v2`) in every workflow. The path must be absolute with no `..`: `actions/cache` refuses to save one with relative parts ("Relative pathing '.' and '..' is not allowed"), so the first path (`workspace/../datagen-work`) was never saved by any run and every lane fetched the jar. race.yml saves it from lane 0 on a miss.
-- **The race's build** has its own rust-cache key (`shared-key: race`), saved by lane 0 and restored by the other lanes, by `publish` and by later races of the branch. Measured: 152 s from a lane's start to its race before, 129 s cold, 77 s warm (jar 0 s, build 42 s: workspace crates are not cached).
+- **The race's build** has its own rust-cache key (`shared-key: race`), saved by lane 0 and restored by the other lanes, by `lanes` and `relay` (issue 69: they build xtask's `seed-relay` and `xtask seeds`, [[relay]]), by `publish` and by later races of the branch. Measured: 152 s from a lane's start to its race before, 129 s cold, 77 s warm (jar 0 s, build 42 s: workspace crates are not cached).
 - **A cache is per branch**: one saved on a branch is restored there only; one saved on `main` everywhere. A new branch pays the cold start once.
 
 ## Running code on a runner (the probe)
