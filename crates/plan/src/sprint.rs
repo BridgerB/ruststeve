@@ -52,6 +52,12 @@ pub const MAX_DOUBLINGS: u32 = 3;
 /// this or less is no drop: a walk down a slope or a cave floor sprints on (probe 46153338301:
 /// "drop" refused walk-to-log 1,289 to 4,159 ticks a race at every one-block step).
 pub const SAFE_DROP: i32 = 3;
+/// With nothing edible held, a sprint never takes the food under this (`[policy] regen_floor`):
+/// `FoodData.tick` heals a point every 80 ticks only at food 18 or more, so food spent under it
+/// with nothing to eat ends healing for the rest of the run (probe 46154734789: on cold the
+/// sprint arm had 29 of 84 runs at food 13 or under against the walk's 2, and most of its arrow
+/// deaths came after "sprint refused, food budget"). The walk's own `eat::HEALS_FROM`.
+pub const REGEN_FLOOR: i32 = 18;
 
 /// Every pace note's `what` begins with this ("sprint begun, walk", "sprint refused, lava",
 /// "sprint restarted, 2"). The notes are counted in the ledger, but they are about a task's
@@ -116,6 +122,8 @@ pub enum Refusal {
     /// Walking into a wall (a collision that is not minor), which stops a sprint
     /// (`LocalPlayer.shouldStopRunSprinting`): not asked again until the hold is out.
     Wall,
+    /// Nothing edible held and no point left over `REGEN_FLOOR`: healing would stop.
+    Regen,
     /// A step-by-step move.
     Path(Step),
 }
@@ -134,6 +142,7 @@ impl Refusal {
             Refusal::Footing => "footing",
             Refusal::Unseen => "unseen",
             Refusal::Wall => "wall",
+            Refusal::Regen => "regen",
             Refusal::Path(Step::Bridge) => "bridge",
             Refusal::Path(Step::Sneak) => "sneak",
             Refusal::Path(Step::Stairs) => "stairs",
@@ -177,9 +186,16 @@ pub fn points_to_spend(food: Option<i32>, saturation: Option<f32>, hungry_below:
     (f - hungry_below).max(0) + sat
 }
 
-/// The policy: does this tick's move sprint? `c` is the controls the task made, its `sprint`
-/// the wish.
+/// The policy with something edible held (the budget down to `hungry_below`, eating restores it):
+/// `judge_fed` with `edible` true.
 pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict {
+    judge_fed(w, hungry_below, true, pace, c)
+}
+
+/// The policy: does this tick's move sprint? `c` is the controls the task made, its `sprint`
+/// the wish; `edible`, whether safe food is held. With none, the budget stops at `REGEN_FLOOR`.
+/// Retreats from a `never_fight` kind and escapes are safety, not travel: no budget.
+pub fn judge_fed(w: &World, hungry_below: i32, edible: bool, pace: Pace, c: &Controls) -> Verdict {
     let Some(body) = w.body else {
         return Verdict::NotAsked;
     };
@@ -189,11 +205,17 @@ pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict 
     let budgeted = match pace {
         Pace::Still | Pace::Fight => return Verdict::NotAsked,
         Pace::Step(s) => return Verdict::Refused(Refusal::Path(s)),
-        Pace::Walk | Pace::Explore | Pace::Escape => {
+        Pace::Walk | Pace::Explore => {
             if !c.sprint {
                 return Verdict::NotAsked;
             }
             true
+        }
+        Pace::Escape => {
+            if !c.sprint {
+                return Verdict::NotAsked;
+            }
+            false
         }
         // A retreat from a `never_fight` kind always asks.
         Pace::Retreat { never_fight } => {
@@ -223,6 +245,9 @@ pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict 
     }
     if points_to_spend(w.player.food, w.player.saturation, hungry_below) < 1 {
         return Verdict::Refused(Refusal::Budget);
+    }
+    if !edible && points_to_spend(w.player.food, w.player.saturation, REGEN_FLOOR) < 1 {
+        return Verdict::Refused(Refusal::Regen);
     }
     Verdict::Sprint
 }
@@ -436,7 +461,14 @@ impl Plan {
             |t| t.survival.hungry_below,
         );
         let airborne = w.body.is_some_and(|b| !b.on_ground && !b.in_water);
-        let verdict = match judge(w, hungry_below, pace, &c) {
+        // Safe food held (the goal table's unsafe foods left out; with no table, any food).
+        let edible = match self.table.as_ref() {
+            Some(t) => crate::eat::best_food(w, &t.survival).is_some(),
+            None => crate::held(w)
+                .iter()
+                .any(|(k, n)| *n > 0 && data::generated::item_props::food_of(*k).is_some()),
+        };
+        let verdict = match judge_fed(w, hungry_below, edible, pace, &c) {
             // The ground ahead is read from the ground; in a jump the last answer holds.
             Verdict::Refused(Refusal::Drop) if airborne && self.pace.last => Verdict::Sprint,
             // Into a wall: the body stops the sprint; asking again would start it each tick.
@@ -1025,6 +1057,86 @@ mod tests {
         assert!(plan.events.iter().any(|e| e.what == "sprint refused, wall"));
     }
 
+    /// Probe 46154734789: with nothing edible held a walk keeps food at the regen line (18);
+    /// with bread held the old budget applies; a creeper retreat and an escape sprint anyway.
+    #[test]
+    fn with_nothing_to_eat_a_walk_keeps_food_at_the_regen_line() {
+        let mut w = flat();
+        w.player.saturation = Some(0.0);
+        w.player.food = Some(REGEN_FLOOR);
+        assert_eq!(
+            judge_fed(&w, HUNGRY, false, Pace::Walk, &ahead()),
+            Verdict::Refused(Refusal::Regen)
+        );
+        assert_eq!(
+            judge_fed(&w, HUNGRY, true, Pace::Walk, &ahead()),
+            Verdict::Sprint
+        );
+        w.player.food = Some(17);
+        assert_eq!(
+            judge_fed(
+                &w,
+                HUNGRY,
+                false,
+                Pace::Retreat { never_fight: true },
+                &ahead()
+            ),
+            Verdict::Sprint
+        );
+        assert_eq!(
+            judge_fed(&w, HUNGRY, false, Pace::Escape, &ahead()),
+            Verdict::Sprint
+        );
+        // From 20 with nothing to eat: the FoodData model, about 2 points' 80 metres sprinted,
+        // and the food never under 18.
+        w.player.food = Some(20);
+        let step = 0.280_617;
+        let (mut exhaustion, mut sprinted) = (0.0f64, 0.0f64);
+        for _ in 0..4000 {
+            if judge_fed(&w, HUNGRY, false, Pace::Walk, &ahead()) == Verdict::Sprint {
+                sprinted += step;
+                exhaustion += 0.1 * step;
+            }
+            if exhaustion > 4.0 {
+                exhaustion -= 4.0;
+                w.player.food = w.player.food.map(|f| f - 1);
+            }
+            assert!(w.player.food.is_some_and(|f| f >= REGEN_FLOOR));
+        }
+        let budget = f64::from(20 - REGEN_FLOOR) * METRES_PER_POINT;
+        assert!((sprinted - budget).abs() <= step, "sprinted {sprinted}");
+    }
+
+    /// The gate reads what is held: no food, then bread.
+    #[test]
+    fn the_gate_reads_whether_food_is_held() {
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        let mut w = flat();
+        w.player.food = Some(REGEN_FLOOR);
+        w.player.saturation = Some(0.0);
+        assert!(!plan.pace_gate(&w, ahead()).sprint);
+        assert!(
+            plan.events
+                .iter()
+                .any(|e| e.what == "sprint refused, regen")
+        );
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        w.inventory.slots.insert(36, (data::ItemKind::Bread, 3));
+        assert!(plan.pace_gate(&w, ahead()).sprint);
+    }
+
     /// The gate only ever writes `sprint`: every other key, the look and the pitch are the
     /// task's own, whatever the verdict (lead-56 on the planner test's walk under the log).
     #[test]
@@ -1129,6 +1241,8 @@ mod tests {
         assert_eq!(get("policy", "hold_ticks"), Some(HOLD_TICKS as f64));
         assert_eq!(get("policy", "clear_blocks"), Some(CLEAR_BLOCKS));
         assert_eq!(get("policy", "safe_drop"), Some(f64::from(SAFE_DROP)));
+        assert_eq!(get("policy", "regen_floor"), Some(f64::from(REGEN_FLOOR)));
+        assert_eq!(REGEN_FLOOR, crate::eat::HEALS_FROM);
         assert_eq!(
             get("policy", "max_doublings"),
             Some(f64::from(MAX_DOUBLINGS))

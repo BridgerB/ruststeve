@@ -180,3 +180,9 @@ max_doublings = 3
 # ceil(fallDistance - safeFallDistance) with the safe_fall_distance attribute's 3. A step down of
 # this or less is no drop for the sprint (probe 46153338301: every one-block step refused "drop").
 safe_drop = 3
+# With nothing edible held, a sprint never takes the food under this: FoodData.tick heals by
+# itself (a point every 80 ticks) only while the food level is 18 or more, vanilla natural
+# regeneration, so food spent under it with nothing to eat ends healing for the run (probe
+# 46154734789; the javap read of FoodData.tick is probe 46155272822). With food held the floor
+# is goals.toml's hungry_below: eating restores it. The walk's own eat::HEALS_FROM.
+regen_floor = 18
