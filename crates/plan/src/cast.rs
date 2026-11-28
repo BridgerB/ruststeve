@@ -269,23 +269,39 @@ enum Work {
 /// The lava bucket filled before the room is cut (issue 83, docs/problems/lava-portal.md wall 1:
 /// race 46139640077 lane 0 cut two rooms, 68 and 50 ops, and lost both at their first lava pour
 /// with 0 fills; 6,040 ticks). A fresh cast holding no lava bucket, with a lava pour still to
-/// do, fills one by the refill ladder before its first op; a failed fill fails it at 0 ops.
+/// do, fills one by the refill ladder before the room is cut.
+///
+/// Wall 7 (fix arm race 46160462536: "lava first failed" 5 times in 4 bots against 2 fills, each
+/// site given up at 0 ops, where the room-first baseline filled 9 or 10 a cast): the ladder's
+/// rungs (the station, its way digs, the landing at the stand's height) are built for a bot in
+/// the room, so the fill runs only once the landing's ops are done and the bot stands on it,
+/// with the cheap rungs alone and `LAVA_FIRST_TICKS` at most; a failed fill falls back to the
+/// room-first cast instead of failing it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LavaFirst {
     /// Not asked: a cast resumed at a kept site works as before.
     #[default]
     Off,
-    /// A fresh cast, not yet looked at.
+    /// A fresh cast, not yet looked at, or working its landing's ops.
     Armed,
     /// A fresh cast that held a lava bucket, or had no lava pour left: nothing to fill.
     Held,
-    /// Filling since this tick.
+    /// Filling from the landing since this tick.
     Filling { since: u64 },
     /// Filled at this tick, after this many ticks.
     Filled { at: u64, ticks: u64 },
-    /// The fill failed at this tick: the cast failed at 0 ops.
+    /// The fill failed at this tick (or no walk reached the landing): the cast went on room
+    /// first, the refill when a pour needs it (wall 7).
     Failed { at: u64 },
+    /// The landing's ops done, walking onto the landing since this tick to fill from it.
+    ToLanding { since: u64 },
 }
+
+/// Ticks lava first may fill for at the landing before the cast goes on room first (wall 7):
+/// ten answers (`ANSWER_TICKS`). The station step on race 46144128199 lane 0's recording (probe
+/// 46152347194) dug two sight cells and used the bucket 19 ticks after reaching the stand; the
+/// fix arm's lane 3 (race 46160462536) spent 2,200 ticks on tunnels inside lava first.
+pub const LAVA_FIRST_TICKS: u64 = 10 * ANSWER_TICKS;
 
 impl LavaFirst {
     pub fn text(&self) -> String {
@@ -297,7 +313,8 @@ impl LavaFirst {
             LavaFirst::Filled { at, ticks } => {
                 format!("lava first filled at {at} after {ticks} ticks")
             }
-            LavaFirst::Failed { at } => format!("lava first failed at {at}"),
+            LavaFirst::Failed { at } => format!("lava first failed at {at}, room first"),
+            LavaFirst::ToLanding { since } => format!("lava first to the landing since {since}"),
         }
     }
 }
@@ -564,8 +581,9 @@ impl Cast {
     }
 
     /// The lava bucket filled first: `None` once nothing is left to fill (the op worked as
-    /// before), else the refill's step. A failed fill fails the cast `NoRefill` at 0 ops, the
-    /// refill failure the planner already handles (the fetch, then the site given up).
+    /// before), else the lava-first step. The fill waits for the landing's ops and is worked from
+    /// the landing (wall 7); a failed fill, a rung past the cheap ones, the budget spent or no
+    /// walk onto the landing sends the cast on room first (`room_first`), never fails it.
     fn lava_first_step(
         &mut self,
         w: &World,
@@ -581,17 +599,17 @@ impl Cast {
                 self.lava_first = LavaFirst::Held;
                 return None;
             }
+            // The landing's own ops come first in the plan and are worked as any op.
+            LavaFirst::Armed if !self.landing_done(w) => return None,
             LavaFirst::Armed => {
-                self.lava_first = LavaFirst::Filling { since: tick };
+                self.lava_first = LavaFirst::ToLanding { since: tick };
+                self.restart(tick);
             }
-            LavaFirst::Filling { since } if held => {
+            LavaFirst::ToLanding { since } | LavaFirst::Filling { since } if held => {
                 let ticks = tick.saturating_sub(since);
                 self.lava_first = LavaFirst::Filled { at: tick, ticks };
                 // The refill's failed scoops spent tries of the first op: it starts afresh.
-                self.tries = 0;
-                self.op_trail.clear();
-                self.work = Work::Idle;
-                self.last_done = tick;
+                self.restart(tick);
                 let feet = w.body.map(|b| feet(&b));
                 self.note = Some((
                     format!(
@@ -599,27 +617,91 @@ impl Cast {
                         self.last_fill
                     ),
                     format!(
-                        "cast at {:?}: the lava bucket filled before the room is cut",
+                        "cast at {:?}: the lava bucket filled from the landing before the room is cut",
                         self.site.frame.origin
                     ),
                 ));
                 return None;
             }
-            LavaFirst::Filling { .. } => {}
+            LavaFirst::ToLanding { .. } | LavaFirst::Filling { .. } => {}
+        }
+        if let LavaFirst::ToLanding { since } = self.lava_first {
+            let body = w.body?;
+            let landing = self.landing();
+            if feet(&body) != landing || !body.on_ground {
+                let r = self.go_to(w, &body, landing, tick);
+                if let CastStatus::Failed(f) = r.2 {
+                    let why = format!("no walk onto the landing {landing:?}: {f:?}");
+                    return Some(self.room_first(tick, since, &why));
+                }
+                return Some(r);
+            }
+            self.lava_first = LavaFirst::Filling { since: tick };
+            self.restart(tick);
+        }
+        let LavaFirst::Filling { since } = self.lava_first else {
+            return None;
+        };
+        if tick.saturating_sub(since) > LAVA_FIRST_TICKS {
+            return Some(self.room_first(tick, since, "its budget spent"));
         }
         let r = self.refill(w, ItemKind::LavaBucket, tick);
         if let CastStatus::Failed(f) = r.2 {
-            self.lava_first = LavaFirst::Failed { at: tick };
-            self.note = Some((
-                format!("lava first failed: {f:?} at 0 ops"),
-                format!(
-                    "cast at {:?}, no lava bucket filled before the room; {}",
-                    self.site.frame.origin,
-                    self.refill_text()
-                ),
-            ));
+            return Some(self.room_first(tick, since, &format!("{f:?}")));
+        }
+        // Only the cheap rungs (the station, the nearest sources, the sight digs): a tunnel the
+        // ladder just began is not cut (lane 3 of race 46160462536 spent 2,200 ticks on them).
+        if matches!(self.work, Work::Tunnel(_)) {
+            return Some(self.room_first(tick, since, "a tunnel rung"));
         }
         Some(r)
+    }
+
+    /// The room's landing cell, where the bot stands for the lava-first fill.
+    fn landing(&self) -> Cell {
+        self.site.frame.at(crate::build::landing(self.site.h))
+    }
+
+    /// Whether every op of the landing is done (its cells dug out).
+    fn landing_done(&self, w: &World) -> bool {
+        self.plan
+            .iter()
+            .filter(|o| o.step == crate::build::Step::Landing)
+            .all(|o| holds(w, &o.done))
+    }
+
+    /// The op in hand starts afresh: lava first's walks and scoops spent none of its tries.
+    fn restart(&mut self, tick: u64) {
+        self.tries = 0;
+        self.op_trail.clear();
+        self.work = Work::Idle;
+        self.last_done = tick;
+    }
+
+    /// Lava first given up, the cast on room first (wall 7): the refill's ladder starts afresh
+    /// when a pour needs it (its tunnels and station misses back to none; the sources whose scoop
+    /// failed stay refused), noted with the ticks spent and the trail.
+    fn room_first(
+        &mut self,
+        tick: u64,
+        since: u64,
+        why: &str,
+    ) -> (Controls, Option<Act>, CastStatus) {
+        let ticks = tick.saturating_sub(since);
+        self.lava_first = LavaFirst::Failed { at: tick };
+        self.restart(tick);
+        self.tunnels = 0;
+        self.tunnel_floor = None;
+        self.station_misses = 0;
+        self.note = Some((
+            format!("lava first failed: room first ({ticks} ticks, {why})"),
+            format!(
+                "cast at {:?}, no lava bucket filled from the landing; {}",
+                self.site.frame.origin,
+                self.refill_text()
+            ),
+        ));
+        (Controls::default(), None, CastStatus::Running)
     }
 
     fn trail(&mut self, tick: u64, what: String) {

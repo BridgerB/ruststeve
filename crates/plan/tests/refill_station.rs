@@ -247,6 +247,9 @@ fn a_stand_in_the_rock_serves_once_opened() {
 fn the_read_s_refill_digs_the_wall_and_fills() {
     let mut w = world(BlockKind::Stone);
     let mut k = Cast::fresh(site(), 0);
+    // The fill from the stand where the bot is (the station's step), not the walk onto the
+    // landing first (wall 7).
+    k.lava_first = LavaFirst::Filling { since: 0 };
     let mut notes = Vec::new();
     let mut filled_at = None;
     for t in 0..400 {
@@ -350,6 +353,8 @@ fn a_feet_level_sight_dig_is_held_while_a_hostile_is_near() {
         velocity: [0.0; 3],
     }));
     let mut k = Cast::fresh(site(), 0).with_sight_hold(SightHold::of(&rules));
+    // The fill from the stand, as above (wall 7's walk onto the landing skipped).
+    k.lava_first = LavaFirst::Filling { since: 0 };
     let mut notes = Vec::new();
     for t in 0..60 {
         let (_, act, status) = k.step(&w, t);

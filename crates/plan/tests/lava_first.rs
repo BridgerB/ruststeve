@@ -1,7 +1,7 @@
 //! Issue 83 wall 1 (docs/problems/lava-portal.md): a fresh cast that holds no lava bucket fills
-//! one by the refill ladder before its first room op; with no lava a scoop reaches, it fails
-//! `NoRefill` at 0 ops, and the planner's fetch and give-up apply as before. A cast resumed at a
-//! kept site (`Cast::new`) works its first op as before. On a hand-built world: stone to y 63,
+//! one by the refill ladder before its room is cut, from the landing once the landing's ops are
+//! done (wall 7); with no lava a scoop reaches it goes on room first, never failed. A cast
+//! resumed at a kept site (`Cast::new`) works its first op as before. On a hand-built world: stone to y 63,
 //! air from y 64, a frame at (0, 64, 0) facing south, a pool of four lava sources at x 20 to 21,
 //! z 20 to 21 in the stone's top layer.
 
@@ -83,6 +83,17 @@ fn world(pool: bool) -> World {
     w
 }
 
+/// The feet put on the site's landing (2, 64, 2): the walk's arrival, by hand.
+fn on_landing(w: &mut World) {
+    let pos = [2.5, 64.0, 2.5];
+    w.body = Some(physics::Body {
+        pos,
+        on_ground: true,
+        ..physics::Body::default()
+    });
+    w.player.pos = Some(pos);
+}
+
 fn site() -> Site {
     Site {
         frame: Frame {
@@ -107,47 +118,49 @@ fn a_fresh_cast_with_no_lava_bucket_fills_one_first() {
     let mut k = Cast::fresh(site(), 0);
     let (_, _, status) = k.step(&w, 0);
     assert_eq!(status, CastStatus::Running);
-    // The first work is the fill, not the room's first op.
-    assert_eq!(k.lava_first, LavaFirst::Filling { since: 0 });
+    // The landing's cells are open: the first work is the walk onto it, not the room's first op.
+    assert_eq!(k.lava_first, LavaFirst::ToLanding { since: 0 });
     assert_eq!(k.done_ops, 0);
     assert!(k.take_note().is_none());
-    for t in 1..20 {
-        let (_, _, status) = k.step(&w, t);
-        assert_eq!(status, CastStatus::Running, "tick {t}");
-        assert!(
-            matches!(k.lava_first, LavaFirst::Filling { .. }),
-            "tick {t}"
-        );
-    }
+    on_landing(&mut w);
+    let (_, _, status) = k.step(&w, 1);
+    assert_eq!(status, CastStatus::Running, "{}", k.refill_text());
+    assert_eq!(k.lava_first, LavaFirst::Filling { since: 1 });
+    assert!(k.take_note().is_none());
     // The bucket shows filled: the fill is noted once and the room's ops come next.
     w.inventory.slots.insert(38, (ItemKind::LavaBucket, 1));
     let (_, _, status) = k.step(&w, 40);
     assert_eq!(status, CastStatus::Running);
-    assert_eq!(k.lava_first, LavaFirst::Filled { at: 40, ticks: 40 });
+    assert_eq!(k.lava_first, LavaFirst::Filled { at: 40, ticks: 39 });
     let (what, _) = k.take_note().expect("the lava-first note");
     assert!(what.starts_with("lava first: filled at "), "{what}");
-    assert!(what.ends_with("after 40 ticks"), "{what}");
+    assert!(what.ends_with("after 39 ticks"), "{what}");
+    assert!(what.contains("(2, 64, 2)"), "filled on the landing: {what}");
     assert!(k.take_note().is_none());
     assert!(k.uses_text().contains("lava first filled at 40"));
     let _ = k.step(&w, 41);
-    assert_eq!(k.lava_first, LavaFirst::Filled { at: 40, ticks: 40 });
+    assert_eq!(k.lava_first, LavaFirst::Filled { at: 40, ticks: 39 });
 }
 
 #[test]
-fn a_site_with_no_lava_to_reach_is_given_up_at_0_ops() {
-    // No lava seen anywhere: the refill ladder has no source, no station and no tunnel's aim.
-    let w = world(false);
+fn a_site_with_no_lava_to_reach_goes_room_first() {
+    // No lava seen anywhere: from the landing the refill ladder has no source, no station and no
+    // tunnel's aim, and the cast goes on room first (wall 7) instead of failing at 0 ops.
+    let mut w = world(false);
     let mut k = Cast::fresh(site(), 0);
     let (_, _, status) = k.step(&w, 0);
-    assert_eq!(status, CastStatus::Failed(CastFailure::NoRefill));
+    assert_eq!(status, CastStatus::Running);
+    on_landing(&mut w);
+    let (_, _, status) = k.step(&w, 1);
+    assert_eq!(status, CastStatus::Running, "{}", k.refill_text());
     assert_eq!(k.done_ops, 0);
-    assert_eq!(k.lava_first, LavaFirst::Failed { at: 0 });
+    assert_eq!(k.lava_first, LavaFirst::Failed { at: 1 });
     let (what, why) = k.take_note().expect("the lava-first failed note");
-    assert!(
-        what.starts_with("lava first failed: NoRefill at 0 ops"),
-        "{what}"
-    );
+    assert_eq!(what, "lava first failed: room first (0 ticks, NoRefill)");
     assert!(why.contains("refill:"), "the refill trail: {why}");
+    let (_, _, status) = k.step(&w, 2);
+    assert_eq!(status, CastStatus::Running);
+    assert_ne!(status, CastStatus::Failed(CastFailure::NoRefill));
 }
 
 #[test]
