@@ -560,6 +560,7 @@ impl Script {
                     sneak: false,
                     yaw: [0.0, 90.0, 0.0, 90.0][side as usize],
                     pitch: None,
+                    sprint: false,
                 }
             }
             Script::Straight { yaw } => Controls {
@@ -568,6 +569,7 @@ impl Script {
                 sneak: false,
                 yaw,
                 pitch: None,
+                sprint: false,
             },
             Script::JumpForward { yaw } => Controls {
                 forward: true,
@@ -575,6 +577,7 @@ impl Script {
                 sneak: false,
                 yaw,
                 pitch: None,
+                sprint: false,
             },
             Script::SneakForward { yaw } => Controls {
                 forward: true,
@@ -582,6 +585,7 @@ impl Script {
                 sneak: true,
                 yaw,
                 pitch: None,
+                sprint: false,
             },
             Script::Crouch => Controls {
                 sneak: true,
@@ -632,6 +636,7 @@ impl Script {
                 sneak: false,
                 yaw,
                 pitch: None,
+                sprint: false,
             },
         }
     }

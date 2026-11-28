@@ -809,6 +809,7 @@ pub fn step_to(pos: [f64; 3], c: [i32; 3]) -> (Controls, bool) {
             yaw: yaw_to(pos, t),
             pitch: Some(0.0),
             jump: false,
+            sprint: false,
         },
         false,
     )
@@ -822,6 +823,7 @@ pub fn run_to(pos: [f64; 3], c: [i32; 3]) -> Controls {
         yaw: yaw_to(pos, Burrow::centre(c)),
         pitch: Some(0.0),
         jump: false,
+        sprint: false,
     }
 }
 
@@ -854,6 +856,7 @@ pub fn press_back(w: &World, pos: [f64; 3], b: Burrow, c: Controls) -> Controls 
         yaw: b.out_yaw() + 180.0,
         pitch: Some(0.0),
         jump: false,
+        sprint: false,
     }
 }
 

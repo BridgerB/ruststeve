@@ -752,6 +752,7 @@ impl Escape {
                     sneak: false,
                     yaw: self.yaw,
                     pitch: None,
+                    sprint: false,
                 },
                 None,
             );
@@ -803,6 +804,7 @@ impl Escape {
                 sneak: false,
                 yaw: self.yaw,
                 pitch: None,
+                sprint: false,
             },
             None,
         )
