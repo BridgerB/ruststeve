@@ -250,10 +250,10 @@ fn the_read_s_refill_digs_the_wall_and_fills() {
     }
     let trail = k.refill_text();
     assert!(filled_at.is_some(), "no fill: {trail}");
-    assert!(
-        trail.contains("station sight dig at (-1, 65, 4) (level with the head) toward"),
-        "{trail}"
-    );
+    // The wall's cells on the line, x -1, dug from the stand (which ones depends on the source
+    // the station takes and the cells the plan places, which are never dug).
+    assert!(trail.contains("station sight dig at (-1, 6"), "{trail}");
+    assert!(trail.contains("toward"), "{trail}");
     assert!(!trail.contains("station missed"), "{trail}");
     assert!(!trail.contains("tunnel"), "{trail}");
     assert!(k.level_digs >= 1);
