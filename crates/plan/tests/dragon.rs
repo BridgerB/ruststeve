@@ -2599,3 +2599,69 @@ fn a_rise_with_a_block_over_the_head_or_jumps_for_nothing_is_given_up() {
     );
     assert!(q.dragon.rise_failed.contains(&[12, 62, 0]));
 }
+
+#[test]
+fn a_pour_gone_a_block_under_is_found_and_a_take_back_is_sent_only_from_the_ground_in_reach() {
+    // Wall 52: race 46099479836 lane 4, the water went in a block under the feet's cell and was
+    // never found (E4's refill sent to the dry cell over it); lane 2, knocked off by a charge,
+    // the take-back's 3 uses went from the air in 40 ticks.
+    let feet = [12.5, 64.0, 0.5];
+    let angry = |w: &mut World, id: i32, at: [f64; 3]| {
+        add(w, id, EntityKind::Enderman, at);
+        data(w, id, vec![(17, MetaValue::Bool(true))]);
+    };
+    let bucket = |w: &mut World, k: data::ItemKind| {
+        w.inventory.slots.insert(36, (k, 1));
+        w.held = 0;
+    };
+    let mut w = end_at(feet);
+    angry(&mut w, 70, [15.5, 64.0, 0.5]);
+    bucket(&mut w, data::ItemKind::WaterBucket);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.ender_water_step(&w, 0).is_some());
+    assert!(p.take_acts().contains(&Act::UseItem));
+    // The source shows a block under the feet's cell.
+    w.step(&Event::Packet(S2c::BlockUpdate {
+        pos: (12, 63, 0),
+        state: state(BlockKind::Water),
+    }));
+    let _ = p.ender_water_step(&w, 5);
+    assert_eq!(p.dragon.ender_water, Some([12, 63, 0]));
+    // None angry, the bot knocked 6 off in the air: no use sent; on the ground, walked back.
+    let calm_at = |at: [f64; 3], ground: bool| {
+        let mut c = end_at(at);
+        c.step(&Event::Packet(S2c::BlockUpdate {
+            pos: (12, 63, 0),
+            state: state(BlockKind::Water),
+        }));
+        bucket(&mut c, data::ItemKind::Bucket);
+        if let Some(b) = c.body.as_mut() {
+            b.on_ground = ground;
+        }
+        c
+    };
+    let air = calm_at([18.5, 66.0, 0.5], false);
+    let _ = p.ender_water_step(&air, 40);
+    assert!(
+        !p.take_acts().contains(&Act::UseItem),
+        "no use from the air"
+    );
+    let off = calm_at([18.5, 64.0, 0.5], true);
+    let c = p.ender_water_step(&off, 60).expect("back to the source");
+    assert!(c.forward, "{c:?}");
+    assert!(!p.take_acts().contains(&Act::UseItem));
+    assert_eq!(p.dragon.ender_take, None, "no use counted");
+    // In reach on the ground: the use goes.
+    let near = calm_at([13.5, 64.0, 0.5], true);
+    let _ = p.ender_water_step(&near, 80);
+    assert!(p.take_acts().contains(&Act::UseItem));
+    // Too far to walk back: left there for the refill, noted.
+    let far = calm_at([40.5, 64.0, 0.5], true);
+    assert_eq!(p.ender_water_step(&far, 100), None);
+    assert!(p.spikes.left_water.contains(&(12, 63, 0)));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "end: the water against endermen lost at [12, 63, 0]")
+    );
+}

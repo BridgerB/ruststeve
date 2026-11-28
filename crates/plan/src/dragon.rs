@@ -1058,6 +1058,25 @@ pub const BUCKET_RETRY: u64 = 10;
 /// Ticks a pour's source is looked for, and the take-back's uses at most (wall 49).
 pub const POUR_WAIT: u64 = 20;
 pub const TAKE_TRIES: u32 = 3;
+/// Blocks from the eye to the source a take-back's use is sent within (the reach is 4.5), and on
+/// the plane the bot walks back to its source from; beyond, the water is left there (wall 52:
+/// race 46099479836 lane 2, knocked off by a charge, 3 uses from the air in 40 ticks).
+pub const TAKE_REACH: f64 = 4.0;
+pub const TAKE_WALK: f64 = 12.0;
+
+/// The cells round `at` a pour's water is looked for in: the cell and its four sides, at its
+/// height and one under (wall 52: race 46099479836 lane 4, the water went in a block under the
+/// feet's cell, never found, and E4's refill was sent to the dry cell over it).
+pub fn pour_cells(at: [i32; 3]) -> Vec<[i32; 3]> {
+    [0, -1]
+        .iter()
+        .flat_map(|dy| {
+            [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .map(move |(dx, dz)| [at[0] + dx, at[1] + dy, at[2] + dz])
+        })
+        .collect()
+}
 /// Recovery (wall 46): health it begins under and ends over, and the blocks a cloud's reach and the
 /// dragon are kept by while it lasts.
 pub const RECOVER_BELOW: f32 = 10.0;
@@ -4632,9 +4651,8 @@ impl Plan {
         // water is lost there (wall 49: race 46071506005 lanes 4 and 6, a bucket emptied with no
         // note and the water never recorded).
         if let Some((at, sent)) = self.dragon.ender_pour {
-            let found = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
-                .iter()
-                .map(|(dx, dz)| [at[0] + dx, at[1], at[2] + dz])
+            let found = pour_cells(at)
+                .into_iter()
                 .find(|c| crate::spikes::source(w, (c[0], c[1], c[2])));
             if let Some(c) = found {
                 self.dragon.ender_pour = None;
@@ -4710,6 +4728,24 @@ impl Plan {
                 f64::from(cell[1]) + 0.2,
                 f64::from(cell[2]) + 0.5,
             ];
+            // Off the source (knocked, walked off by another row): back to it on the ground
+            // first, never a use from the air or out of reach; too far, it is left there.
+            let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
+            if dist3(eye, target) > TAKE_REACH || !body.on_ground {
+                if flat(feet, target) > TAKE_WALK {
+                    self.dragon.ender_water = None;
+                    self.dragon.ender_take = None;
+                    self.ender_water_lost(tick, cell, "left behind out of the take-back's walk");
+                    return None;
+                }
+                if !body.on_ground {
+                    return Some(Controls {
+                        yaw: f64::from(w.player.yaw),
+                        ..Controls::default()
+                    });
+                }
+                return Some(toward(feet, mid(cell)));
+            }
             let (yaw, pitch) = look(target);
             match hold::toward(w, ItemKind::Bucket) {
                 Hold::Held => {

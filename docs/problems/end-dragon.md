@@ -443,3 +443,9 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - The second perch (2500 to 2600) went by unfought. E3's open of the bunker had no op done for 900 ticks ("Open work failed … next Some(Dig((12, 61, 3)))") and the fight came only at 2820. The third perch was fought: 5 head strikes, 200 to 175.
   - Lane 1 fought its perches (6 head strikes, 200 to 174.8) and had none of this.
   - **Fix:** `rise_step` needs room over the head (`rise_room`: the cell two over the feet open in every column the body stands in). It gives a cell up after `RISE_JUMPS_MAX` (4) jumps from it with no block gone in, and never rises from it again ("rise: given up at …", "rise: none from …"). Every caller then goes on as if it had nothing to do.
+- **Wall 52: water against endermen left where no one could find it** (race 46099479836 on a5a7aa4, lanes 2 and 4; later "no climb: no water" 19 and 32 times). Every pour in both lanes ended with a take-back or a "lost at", but two kinds of loss left E4's refill nothing to work with:
+  - Lane 4, 9760 to 9920: three pours "lost at [-64, 61, 26] (no source after the pour)". The water had gone in a block under the feet's cell: a scoop filled a bucket at (-64, 60, 26). The search looked only at the feet's height, and `left_water` was given the dry cell over it.
+  - Lane 2, 5980 to 6020: knocked off by a charge, the take-back's 3 uses were sent from the air in 40 ticks ("not taken back in 3 uses"). The water was left where no walk reached ("no way to the water left … 5 walks failed").
+  - **Fix:**
+    - A pour's source is looked for at the feet's height and one under (`pour_cells`).
+    - A take-back's use is sent only on the ground with the source within 4 of the eye (`TAKE_REACH`), and no use is counted otherwise. Off the source within 12 on the plane (`TAKE_WALK`) the bot walks back to it; beyond that the water is left there ("left behind out of the take-back's walk").
