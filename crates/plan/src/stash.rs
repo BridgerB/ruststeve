@@ -1526,6 +1526,13 @@ mod tests {
         }
 
         fn step(&mut self, acts: Vec<Act>) {
+            self.drive(physics::Controls::default(), acts);
+        }
+
+        /// One server tick with the planner's controls pressed (`Event::Controls`: without
+        /// them the body never moves, and every walk fails NoProgress) and its acts sent.
+        fn drive(&mut self, c: physics::Controls, acts: Vec<Act>) {
+            self.w.step(&Event::Controls(c));
             let mut to_bot = self.sim.step(&In::Tick).unwrap();
             for a in acts {
                 for e in self.w.step(&Event::Act(a)) {
@@ -1618,9 +1625,9 @@ mod tests {
         plan.begin(out);
         let notes = plan.event_count;
         for _ in 0..20 {
-            plan.step(&p.w);
+            let c = plan.step(&p.w);
             let acts = plan.take_acts();
-            p.step(acts);
+            p.drive(c, acts);
             assert!(
                 !matches!(
                     plan.task,
@@ -1734,9 +1741,9 @@ mod tests {
         let mut plan = planner();
         let mut done = false;
         for _ in 0..6000 {
-            plan.step(&p.w);
+            let c = plan.step(&p.w);
             let acts = plan.take_acts();
-            p.step(acts);
+            p.drive(c, acts);
             if crate::craft::count(&p.w, ItemKind::Chest) > 0 && plan.stash.early_over {
                 done = true;
                 break;
