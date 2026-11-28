@@ -364,6 +364,7 @@ fn race(a: &Args) -> Result<bool, String> {
             progress: Some(a.out.join(format!("progress-{name}.txt"))),
             snapshot_at: a.snapshot_at,
             eyes: eyes.clone(), // >>> eyes (Q3, issue 19c)
+            seed: Some(plan::lane_seed::derive(&a.run, a.lane, i)), // >>> lane seed (gen)
         };
         let watch = Watch::start(
             format!("{}:{}", a.host, a.rcon_port),

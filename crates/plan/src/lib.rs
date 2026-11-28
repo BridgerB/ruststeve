@@ -52,6 +52,9 @@ pub mod fortress_way;
 // <<< Q11
 pub mod hold;
 pub mod hunt;
+// >>> lane seed (gen)
+pub mod lane_seed;
+// <<< lane seed
 pub mod ledger;
 pub mod look;
 pub mod make;
@@ -946,6 +949,10 @@ pub struct Plan {
     #[serde(default)]
     pub bow: bow::BowState,
     // <<< E8
+    // >>> lane seed (gen): the run's tick seed, held for tie-breaks (`lane_seed`).
+    #[serde(default)]
+    pub lane: lane_seed::Draw,
+    // <<< lane seed
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1094,6 +1101,9 @@ impl Plan {
             // >>> E8
             bow: bow::BowState::default(),
             // <<< E8
+            // >>> lane seed (gen)
+            lane: lane_seed::Draw::default(),
+            // <<< lane seed
             acts: Vec::new(),
         }
     }
@@ -1166,6 +1176,9 @@ impl Plan {
     /// dropped in the tick goes into the task ledger (issue 16e).
     pub fn step(&mut self, w: &World) -> Controls {
         let notes_before = self.event_count;
+        // >>> lane seed (gen)
+        self.lane_seed_watch(w);
+        // <<< lane seed
         // >>> shield (docs/problems/shield.md): the one call site of `plan::shield`. The defend's
         // swing count before the tick: a strike the raised shield drops is given back.
         let swings_before = self.swing_count();
@@ -1185,6 +1198,46 @@ impl Plan {
         self.track(w.session.server_ticks, notes_before);
         c
     }
+
+    // >>> lane seed (gen)
+    /// The first non-zero tick seed is held for the run, and the ties it breaks once a run are
+    /// broken then: the explore heading's first quarter (only while the heading is still the
+    /// default 0, so a heading a task already set is kept) and the turn's side. Noted once, with
+    /// whether each changed from the old default (`lane_seed::DEFAULT_START`).
+    fn lane_seed_watch(&mut self, w: &World) {
+        let Some(start) = self.lane.from_tick(w.seed) else {
+            return;
+        };
+        let heading_free = self.heading == lane_seed::DEFAULT_START.heading;
+        if heading_free {
+            self.heading = start.heading;
+        }
+        let said = |changed: bool| if changed { "changed" } else { "the default" };
+        self.note(
+            w.ticks,
+            format!(
+                "tie broken by the lane seed: explore heading starts at {}, turns of {}",
+                self.heading, start.turn
+            ),
+            format!(
+                "seed {:#018x}; heading {} ({}), turn {}",
+                self.lane.seed.unwrap_or(0),
+                if heading_free {
+                    said(start.heading != lane_seed::DEFAULT_START.heading)
+                } else {
+                    "held"
+                },
+                start.heading,
+                said(start.turn != lane_seed::DEFAULT_START.turn),
+            ),
+        );
+    }
+
+    /// The heading turned a quarter, to the lane seed's side (+90 with no seed).
+    fn turned(&self) -> f64 {
+        (self.heading + self.lane.turn()) % 360.0
+    }
+    // <<< lane seed
 
     /// A stack left on the cursor with no window and no click pending for `CURSOR_STUCK_TICKS` is
     /// put down in a free main slot (else the window is asked for again), noted: every task
@@ -2052,7 +2105,7 @@ impl Plan {
                         );
                     }
                     Task::Explore(walk) => {
-                        self.heading = (self.heading + 90.0) % 360.0;
+                        self.heading = self.turned(); // >>> lane seed (gen): the seed's side
                         self.note(
                             tick,
                             format!("explore to {:?} failed: {f:?}", walk.target),
@@ -4099,7 +4152,7 @@ impl Plan {
                 return Task::Explore(walk);
             }
             self.expanded += walk.expanded;
-            self.heading = (self.heading + 90.0) % 360.0;
+            self.heading = self.turned(); // >>> lane seed (gen): the seed's side
         }
         // Nothing with a way this tick: wait, and count it toward giving up.
         self.retry_at = tick + RETRY_TICKS;
@@ -5941,7 +5994,7 @@ impl Plan {
                 *self.failures.entry(format!("{f:?}")).or_default() += 1;
                 self.retry_at = tick + RETRY_TICKS;
                 self.failed_in_row += 1;
-                self.heading = (self.heading + 90.0) % 360.0;
+                self.heading = self.turned(); // >>> lane seed (gen): the seed's side
                 if let Task::Stairs(st) = std::mem::replace(&mut self.task, Task::Idle) {
                     let last = st.refusals.last().cloned().unwrap_or_default();
                     self.note(
@@ -5980,7 +6033,7 @@ impl Plan {
             self.refused.clear();
             self.refused_areas.clear();
             self.stalled.clear();
-            self.heading = (self.heading + 90.0) % 360.0;
+            self.heading = self.turned(); // >>> lane seed (gen): the seed's side
             self.note(
                 tick,
                 format!("relocate ({} of {MAX_RELOCATIONS})", self.relocations),
@@ -6089,7 +6142,7 @@ impl Plan {
             if self.explored.iter().any(|e| {
                 f64::from((e.0 - target.0).pow(2) + (e.2 - target.2).pow(2)).sqrt() < EXPLORED_NEAR
             }) {
-                self.heading = (self.heading + 90.0) % 360.0;
+                self.heading = self.turned(); // >>> lane seed (gen): the seed's side
                 continue;
             }
             let mut walk = Walk::new(
@@ -6107,7 +6160,7 @@ impl Plan {
                 return Some(Task::Explore(walk));
             }
             self.expanded += walk.expanded;
-            self.heading = (self.heading + 90.0) % 360.0;
+            self.heading = self.turned(); // >>> lane seed (gen): the seed's side
         }
         // No way out ahead: back along the trail, the newest mark far enough away that a route
         // reaches (bots dug into dead ends by drops and water, every way ahead refused:

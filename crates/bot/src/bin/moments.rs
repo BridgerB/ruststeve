@@ -1123,6 +1123,7 @@ fn real_waves(
                 no_progress_ticks: None,
                 snapshot_at: None,
                 eyes: None,
+                seed: None, // >>> lane seed (gen): the clock, as before
                 progress: None,
             };
             let id = m.id.clone();

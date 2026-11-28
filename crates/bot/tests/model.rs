@@ -46,6 +46,7 @@ fn the_bot_joins_the_model_and_walks() {
         no_progress_ticks: None,
         snapshot_at: None,
         eyes: None,
+        seed: Some(1), // >>> lane seed (gen): a fixed seed, so the run is reproducible
         progress: None,
     })
     .unwrap();

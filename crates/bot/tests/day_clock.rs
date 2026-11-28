@@ -46,6 +46,7 @@ fn stand(day_time: i64, cap: u64, tag: &str) -> bot::Outcome {
         no_progress_ticks: None,
         snapshot_at: None,
         eyes: None,
+        seed: Some(1), // >>> lane seed (gen): a fixed seed, so the run is reproducible
         progress: None,
     })
     .unwrap();

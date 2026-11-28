@@ -104,6 +104,12 @@ pub struct Opts {
     /// at the start, so a resumed bot keeps the lines and the fix the snapshot bot had.
     pub eyes: Option<plan::eyes::Kept>,
     // <<< eyes
+    // >>> lane seed (gen)
+    /// The start of the tick seeds (`plan::lane_seed`): a race gives each bot its own from the
+    /// run, lane and bot (`plan::lane_seed::derive`), so lanes of one snapshot break ties apart
+    /// and a rerun breaks them alike; `None` starts from the clock, as before.
+    pub seed: Option<u64>,
+    // <<< lane seed
 }
 
 /// A run reaching a new stage, for the race's snapshot.
@@ -489,6 +495,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
         progress,
         snapshot_at,
         eyes,
+        seed: lane_seed,
     } = opts;
     let (addr, conn) = match model {
         Some(sim) => ("model".to_owned(), model::connect(*sim)),
@@ -506,7 +513,9 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     }
     println!("bot {name}: connecting to {addr} as protocol {protocol}");
 
-    let seed = now_ms() | 1;
+    // >>> lane seed (gen): the race's seed, else the clock's; never 0 (xorshift stays at 0).
+    let seed = lane_seed.map_or_else(|| now_ms() | 1, |s| s | 1);
+    // <<< lane seed
     let mut seeds = Seeds(seed);
     // The live stream: an observer on its own thread, fed after each step.
     let sink = relay.as_deref().map(|r| {

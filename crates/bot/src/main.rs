@@ -43,6 +43,7 @@ fn opts() -> Result<bot::Opts, String> {
         no_progress_ticks: None,
         snapshot_at: None,
         eyes: None,
+        seed: None, // >>> lane seed (gen): the clock, as before
         progress: None,
     };
     let mut seconds = 600u64;
