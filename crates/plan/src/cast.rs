@@ -376,6 +376,12 @@ pub struct Cast {
     /// The source the last refill's scoop filled from, for the lava-first note.
     #[serde(default)]
     last_fill: Option<Cell>,
+    /// Pours whose bucket showed empty before the cell showed their answer, waited for instead of
+    /// refilled (issue 83, docs/problems/lava-portal.md wall 6), and the op last waited on.
+    #[serde(default)]
+    pub answer_waits: u32,
+    #[serde(default)]
+    awaited: Option<usize>,
     /// A note for the planner's ledger, taken once (`take_note`).
     #[serde(default)]
     note: Option<(String, String)>,
@@ -387,6 +393,28 @@ fn eye(b: &physics::Body) -> [f64; 3] {
 
 fn centre((x, y, z): Cell) -> [f64; 3] {
     [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5]
+}
+
+/// The look on a use op's aim (its block's top middle when it has no aim, else its stand).
+fn use_look(op: &Op, body: &physics::Body) -> Controls {
+    let target = op
+        .aim
+        .or_else(|| {
+            op.pos.map(|p| {
+                [
+                    f64::from(p.0) + 0.5,
+                    f64::from(p.1) + 1.0,
+                    f64::from(p.2) + 0.5,
+                ]
+            })
+        })
+        .unwrap_or_else(|| centre(op.stand));
+    let (yaw, pitch) = look_at(eye(body), target);
+    Controls {
+        yaw,
+        pitch: Some(pitch),
+        ..Controls::default()
+    }
 }
 
 /// The eye's distance to the nearest point of cell `c`'s box (0 inside it).
@@ -500,6 +528,8 @@ impl Cast {
             walk_digs: 0,
             lava_first: LavaFirst::Off,
             last_fill: None,
+            answer_waits: 0,
+            awaited: None,
             note: None,
         }
     }
@@ -616,10 +646,11 @@ impl Cast {
     /// The refused sources, for the notes: the count is the fix's firings (cast.md wall 1).
     pub fn refused_text(&self) -> String {
         format!(
-            "refused sources {}, box reach {}, walk digs {}",
+            "refused sources {}, box reach {}, walk digs {}, pour answers awaited {}",
             self.refused.len(),
             self.box_reach,
-            self.walk_digs
+            self.walk_digs,
+            self.answer_waits
         )
     }
 
@@ -740,6 +771,26 @@ impl Cast {
             OpKind::Place => self.place(w, &body, &op, tick),
             OpKind::Pour | OpKind::Scoop | OpKind::UseOn => self.use_at(w, &body, &op, tick),
             OpKind::Verify | OpKind::StandIn => self.go_to(w, &body, op.stand, tick),
+        }
+    }
+
+    /// A pour's bucket shows empty and its cell not yet answered: counted once a pour, and the
+    /// cast's first one noted for the ledger (lava-portal.md wall 6).
+    fn await_answer(&mut self, op: &Op, since_use: u64) {
+        if self.op.is_none() || self.awaited == self.op {
+            return;
+        }
+        self.awaited = self.op;
+        self.answer_waits += 1;
+        if self.answer_waits == 1 && self.note.is_none() {
+            self.note = Some((
+                format!(
+                    "pour answer awaited: {} pour into {:?}, its bucket empty {since_use} ticks after the use",
+                    op.step.name(),
+                    op.into
+                ),
+                format!("the refill waits up to {ANSWER_TICKS} ticks for the cell"),
+            ));
         }
     }
 
@@ -1076,6 +1127,32 @@ impl Cast {
         // A bucket to pour that is not held: fill it first (lava at the site's pool, water at a
         // remembered surface source).
         if op.kind == OpKind::Pour && crate::craft::count(w, item) == 0 {
+            match self.work {
+                // Poured, and the cell not answered yet: the server's slot update comes before its
+                // block updates, so the bucket shows empty while the cell is not yet obsidian
+                // (lava-portal.md wall 6: race 46152526931 lane 1 poured its one water bucket at
+                // tick 29,338, saw it empty at 29,344 and the obsidian at 29,346; in between the
+                // refill found no water and the cast ended "out of water" with its water in the
+                // room). The pour is judged only after its answer, as every use is.
+                Work::Sent { at } if tick.saturating_sub(at) < ANSWER_TICKS => {
+                    self.await_answer(op, tick.saturating_sub(at));
+                    return (use_look(op, body), None, CastStatus::Running);
+                }
+                // No answer in its time and the bucket gone: the refill takes the cast's own
+                // water first (wall 28), which a pour that made no obsidian left in the room.
+                Work::Sent { at } => {
+                    self.trail(
+                        tick,
+                        format!(
+                            "{} pour into {:?} not answered in {} ticks, its bucket empty",
+                            op.step.name(),
+                            op.into,
+                            tick.saturating_sub(at)
+                        ),
+                    );
+                }
+                _ => {}
+            }
             return self.refill(w, item, tick);
         }
         if let Work::Refill(s) = &mut self.work {
@@ -1092,24 +1169,7 @@ impl Cast {
             Hold::Wait => return (Controls::default(), None, CastStatus::Running),
             Hold::Missing => return self.fail(),
         }
-        let target = op
-            .aim
-            .or_else(|| {
-                op.pos.map(|p| {
-                    [
-                        f64::from(p.0) + 0.5,
-                        f64::from(p.1) + 1.0,
-                        f64::from(p.2) + 0.5,
-                    ]
-                })
-            })
-            .unwrap_or_else(|| centre(op.stand));
-        let (yaw, pitch) = look_at(eye(body), target);
-        let look = Controls {
-            yaw,
-            pitch: Some(pitch),
-            ..Controls::default()
-        };
+        let look = use_look(op, body);
         match self.work {
             Work::Idle => {
                 self.work = Work::Aim { since: tick };
