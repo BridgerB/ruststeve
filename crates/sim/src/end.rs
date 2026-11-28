@@ -789,7 +789,7 @@ impl Sim {
         let swing = self.swing_damage();
         let life = &mut self.survival.life;
         life.attack_ticker = 0;
-        life.exhaustion += crate::life::EXHAUSTION_ATTACK;
+        life.exhaust(crate::life::EXHAUSTION_ATTACK);
         // `EnderDragon.hurt(part)`: the head takes the blow, any other part a quarter and one.
         let damage = if part == 1 {
             swing

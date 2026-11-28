@@ -331,6 +331,29 @@ impl Sim {
                 self.survival.life.sneaking = flags & protocol::packets::INPUT_SHIFT != 0;
                 Ok(Vec::new())
             }
+            // The sprint (issue 56): `handlePlayerCommand` sets the flag from START and STOP
+            // and checks nothing. The other actions (sleep, riding, the inventory, elytra) are
+            // not modelled and stay violations.
+            (
+                Phase::Play,
+                C2s::PlayerCommand {
+                    action: protocol::PlayerCommandAction::StartSprinting,
+                    ..
+                },
+            ) => {
+                self.on_sprint_command(true);
+                Ok(Vec::new())
+            }
+            (
+                Phase::Play,
+                C2s::PlayerCommand {
+                    action: protocol::PlayerCommandAction::StopSprinting,
+                    ..
+                },
+            ) => {
+                self.on_sprint_command(false);
+                Ok(Vec::new())
+            }
             (
                 Phase::Play,
                 C2s::PlayerAction {
@@ -587,6 +610,8 @@ impl Sim {
         }
         self.pos = to;
         self.survival.on_ground = on_ground;
+        // `checkMovementStatistics`: the move's exhaustion (a sprint on the ground, water).
+        self.moved(delta, on_ground);
         let mut out = self.fall(delta[1], on_ground)?;
         out.extend(self.chunks_around()?);
         Ok(out)

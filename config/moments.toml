@@ -35,6 +35,9 @@ landing = 0
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -75,6 +78,9 @@ landing = 1
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -115,6 +121,9 @@ landing = 2
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -155,6 +164,9 @@ landing = 3
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -195,6 +207,9 @@ landing = 4
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -235,6 +250,9 @@ landing = 5
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -275,6 +293,9 @@ landing = 6
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -315,6 +336,9 @@ landing = 7
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -355,6 +379,9 @@ landing = 8
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -395,6 +422,9 @@ landing = 9
 dx = -6
 dz = 0
 script = "jump:90"
+# The bodies end within 0.25 blocks: the square root of the server's 0.0625 squared "moved
+# wrongly" bound (config/sprint.toml [server]), so a jump's inertia cannot hide in a cell (56).
+position_tolerance = 0.25
 ticks = 160
 
 [[moment]]
@@ -2662,6 +2692,9 @@ watch = [[20, 30, 0], [20, 29, 0]]
 
 [[moment]]
 id = "p02-sprint"
+# Within 0.25 blocks: the square root of the server's 0.0625 squared "moved wrongly" bound
+# (config/sprint.toml [server]).
+position_tolerance = 0.25
 landing = 2
 dx = 20
 dz = 20
@@ -2671,6 +2704,9 @@ set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["air", 0, 0, 1], ["air", 0, 1,
 
 [[moment]]
 id = "p02-sprint-jump"
+# Within 0.25 blocks: the square root of the server's 0.0625 squared "moved wrongly" bound
+# (config/sprint.toml [server]).
+position_tolerance = 0.25
 landing = 2
 dx = -20
 dz = 20
@@ -2680,6 +2716,9 @@ set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["air", 0, 0, 1], ["air", 0, 1,
 
 [[moment]]
 id = "p02-sprint-wall"
+# Within 0.25 blocks: the square root of the server's 0.0625 squared "moved wrongly" bound
+# (config/sprint.toml [server]).
+position_tolerance = 0.25
 landing = 2
 dx = 20
 dz = -20
@@ -2689,6 +2728,9 @@ set = [["stone", 0, -1, 0], ["stone", 0, -1, -1], ["air", 0, 0, -1], ["air", 0, 
 
 [[moment]]
 id = "p02-sprint-food6"
+# Within 0.25 blocks: the square root of the server's 0.0625 squared "moved wrongly" bound
+# (config/sprint.toml [server]).
+position_tolerance = 0.25
 landing = 2
 dx = -20
 dz = -20

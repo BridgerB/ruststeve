@@ -122,11 +122,34 @@ const DEATH_TICKS: u64 = 20;
 /// Reach for melee: the entity interaction range 3 plus the server's 1 of slack.
 pub(crate) const MELEE_REACH: f64 = 3.0 + 1.0;
 /// Exhaustion costs (`FoodConstants`).
-const EXHAUSTION_JUMP: f32 = 0.05;
+pub const EXHAUSTION_JUMP: f32 = 0.05;
 pub(crate) const EXHAUSTION_ATTACK: f32 = 0.1;
 const EXHAUSTION_HURT: f32 = 0.1;
 const EXHAUSTION_MINE: f32 = 0.005;
 const EXHAUSTION_HEAL: f32 = 6.0;
+// The sprint's and the move's exhaustion (issue 56), config/sprint.toml `[exhaustion]` (S1's
+// javap of the 26.1.2 server jar), mirrored as constants because the core reads no files; the
+// test `the_constants_are_config_sprint_toml` (tests/sprint.rs) holds them equal.
+/// A sprint-jump (`ServerPlayer.jumpFromGround`: 0.2 when sprinting, else `EXHAUSTION_JUMP`).
+pub const EXHAUSTION_SPRINT_JUMP: f32 = 0.2;
+/// A metre sprinted on the ground (`ServerPlayer.checkMovementStatistics`: horizontal, in whole
+/// centimetres, `0.1F × cm × 0.01F`). A walk or a crouch on the ground costs nothing.
+pub const EXHAUSTION_SPRINT_PER_METRE: f32 = 0.1;
+/// A metre in water (`checkMovementStatistics`: swimming or the eye in water 3D, else in water
+/// horizontal, 0.01F a metre).
+pub const EXHAUSTION_SWIM_PER_METRE: f32 = 0.01;
+/// `FoodData.addExhaustion`: `min(level + amount, 40)`.
+pub const EXHAUSTION_CAP: f32 = 40.0;
+/// `FoodData.tick`: over this the level drops by it and one saturation, else food, point goes
+/// (`FoodConstants.EXHAUSTION_DROP`).
+pub const EXHAUSTION_PER_POINT: f32 = 4.0;
+/// The shared flags of entity data index 0 (`Entity.FLAG_ONFIRE` 0, `FLAG_SPRINTING` 3, the
+/// bits the model sets; config/sprint.toml `[packet] shared_flag_bit`).
+const FLAG_ON_FIRE: u8 = 0x01;
+pub const FLAG_SPRINTING: u8 = 0x08;
+/// A hit at a charge over this while sprinting is a sprint hit (`Player.attack`'s 0.9F;
+/// config/sprint.toml `[stop] sprint_hit_strength_above`).
+pub const SPRINT_HIT_STRENGTH: f64 = 0.9;
 
 /// Ticks between a melee mob's hits (`MeleeAttackGoal.resetAttackCooldown`: 20).
 const MELEE_EVERY: u64 = 20;
@@ -410,6 +433,20 @@ pub struct Life {
     /// The shift key as the server holds it (`isShiftKeyDown`), set by the `player_input`
     /// packet the bot's world sends when its keys change: sneaking over magma spares the bot.
     pub sneaking: bool,
+    /// The server's sprint flag (`isSprinting`, issue 56): set and cleared only by the client's
+    /// `player_command` START and STOP (`handlePlayerCommand`, no food or speed check), and
+    /// cleared by a sprint hit (`Player.causeExtraKnockback`). Echoed as bit 0x08 of index 0.
+    pub sprinting: bool,
+    /// Each sprint path's firings (issue 56), so a run can count them: START and STOP
+    /// commands taken, sprints a sprint hit stopped, sprint-jumps, the centimetres charged on the
+    /// ground sprinting and in water, and the exhaustion they cost.
+    pub sprint_starts: u64,
+    pub sprint_stops: u64,
+    pub sprint_hit_stops: u64,
+    pub sprint_jumps: u64,
+    pub sprint_cm: u64,
+    pub swim_cm: u64,
+    pub move_exhaustion: f32,
     /// Armour points worn (iron helmet, chestplate and leggings: 2 + 6 + 5). The model wears
     /// nothing: a test sets it.
     pub armor: f32,
@@ -457,7 +494,8 @@ pub struct Life {
     /// What the client was last told.
     sent: (f32, i32, bool),
     sent_air: i32,
-    sent_fire: bool,
+    /// Index 0's shared flags as last sent (on fire 0x01, sprinting 0x08).
+    sent_flags: u8,
     pub kills: u64,
     /// Fresh hits on mobs that knocked them back.
     pub mobs_knocked: u64,
@@ -499,6 +537,14 @@ impl Default for Life {
             water_breathing: false,
             fire_resistance: false,
             sneaking: false,
+            sprinting: false,
+            sprint_starts: 0,
+            sprint_stops: 0,
+            sprint_hit_stops: 0,
+            sprint_jumps: 0,
+            sprint_cm: 0,
+            swim_cm: 0,
+            move_exhaustion: 0.0,
             armor: 0.0,
             crystals_struck: 0,
             blasts: Vec::new(),
@@ -523,7 +569,7 @@ impl Default for Life {
             mobs: std::collections::BTreeMap::new(),
             sent: (20.0, 20, false),
             sent_air: MAX_AIR,
-            sent_fire: false,
+            sent_flags: 0,
             kills: 0,
             mobs_knocked: 0,
             mobs_fell: 0,
@@ -544,6 +590,11 @@ impl Life {
     /// `hurt` sent a `set_health` itself.
     pub(crate) fn note_health_sent(&mut self, health: f32) {
         self.sent = (health, self.food, self.saturation == 0.0);
+    }
+
+    /// `FoodData.addExhaustion`: the level grows, capped at 40.
+    pub(crate) fn exhaust(&mut self, amount: f32) {
+        self.exhaustion = (self.exhaustion + amount).min(EXHAUSTION_CAP);
     }
 }
 
@@ -1556,7 +1607,7 @@ impl Sim {
             damage
         };
         life.last_hurt = damage;
-        life.exhaustion += EXHAUSTION_HURT;
+        life.exhaust(EXHAUSTION_HURT);
         *life.hurt_by.entry(damage_type.to_owned()).or_insert(0.0) += dealt;
         self.hurt(dealt, damage_type, death_key)
     }
@@ -1573,7 +1624,7 @@ impl Sim {
             life.attack_ticker += 1;
             life.invulnerable = life.invulnerable.saturating_sub(1);
             if let Some((t, amp)) = life.hunger {
-                life.exhaustion += 0.005 * (amp as f32 + 1.0);
+                life.exhaust(0.005 * (amp as f32 + 1.0));
                 life.hunger = (t > 1).then_some((t - 1, amp));
             }
         }
@@ -1679,8 +1730,8 @@ impl Sim {
         let mut out = Vec::new();
         let hurt = self.health < 20.0;
         let life = &mut self.survival.life;
-        if life.exhaustion > 4.0 {
-            life.exhaustion -= 4.0;
+        if life.exhaustion > EXHAUSTION_PER_POINT {
+            life.exhaustion -= EXHAUSTION_PER_POINT;
             if life.saturation > 0.0 {
                 life.saturation = (life.saturation - 1.0).max(0.0);
             } else if !peaceful {
@@ -1691,14 +1742,14 @@ impl Sim {
             life.food_timer += 1;
             if life.food_timer >= 10 {
                 let amount = life.saturation.min(6.0);
-                life.exhaustion += amount;
+                life.exhaust(amount);
                 life.food_timer = 0;
                 self.health = (self.health + amount / 6.0).min(20.0);
             }
         } else if life.food >= 18 && hurt {
             life.food_timer += 1;
             if life.food_timer >= 80 {
-                life.exhaustion += EXHAUSTION_HEAL;
+                life.exhaust(EXHAUSTION_HEAL);
                 life.food_timer = 0;
                 self.health = (self.health + 1.0).min(20.0);
             }
@@ -1799,14 +1850,84 @@ impl Sim {
         self.survival.life.blocking_since = None;
     }
 
-    /// A jump (`jumpFromGround`, from a move that leaves the ground going up).
+    /// A jump (`ServerPlayer.jumpFromGround`, from a move that leaves the ground going up):
+    /// 0.2 when the server holds the player sprinting, else 0.05.
     pub(crate) fn jumped(&mut self) {
-        self.survival.life.exhaustion += EXHAUSTION_JUMP;
+        let life = &mut self.survival.life;
+        if life.sprinting {
+            life.sprint_jumps += 1;
+            life.exhaust(EXHAUSTION_SPRINT_JUMP);
+        } else {
+            life.exhaust(EXHAUSTION_JUMP);
+        }
+    }
+
+    /// `ServerPlayer.checkMovementStatistics` for an accepted move of `delta`, the player now
+    /// at `self.pos` with the packet's `on_ground`: the first branch that holds, the distance in
+    /// whole centimetres (`Math.round(sqrt × 100)`). Swimming or the eye in water, 3D at 0.01 a
+    /// metre; in water, horizontal at 0.01; on a climbable block, nothing; on the ground,
+    /// horizontal, 0.1 sprinting and nothing walking or crouching; in the air, nothing. The
+    /// water is read at the move's end (vanilla's `wasTouchingWater` is the tick's, a tick
+    /// behind at most).
+    pub(crate) fn moved(&mut self, delta: [f64; 3], on_ground: bool) {
+        let cm = |d: f64| (d.sqrt() * 100.0).round() as u64;
+        let horizontal = delta[0] * delta[0] + delta[2] * delta[2];
+        let eye_y = self.pos[1] + physics::EYE_HEIGHT;
+        let eye_cell = (
+            self.pos[0].floor() as i32,
+            eye_y.floor() as i32,
+            self.pos[2].floor() as i32,
+        );
+        let feet = (
+            self.pos[0].floor() as i32,
+            self.pos[1].floor() as i32,
+            self.pos[2].floor() as i32,
+        );
+        let (per_metre, n, swim) = if self.eye_in_water(eye_y, eye_cell) {
+            (
+                EXHAUSTION_SWIM_PER_METRE,
+                cm(horizontal + delta[1] * delta[1]),
+                true,
+            )
+        } else if self.in_water(self.pos) {
+            (EXHAUSTION_SWIM_PER_METRE, cm(horizontal), true)
+        } else if kind_at(self, feet).is_some_and(climbable) {
+            return;
+        } else if on_ground && self.survival.life.sprinting {
+            (EXHAUSTION_SPRINT_PER_METRE, cm(horizontal), false)
+        } else {
+            return;
+        };
+        if n == 0 {
+            return;
+        }
+        // As the jar computes it: `per_metre × cm × 0.01F`, in floats.
+        let amount = per_metre * n as f32 * 0.01;
+        let life = &mut self.survival.life;
+        if swim {
+            life.swim_cm += n;
+        } else {
+            life.sprint_cm += n;
+        }
+        life.move_exhaustion += amount;
+        life.exhaust(amount);
+    }
+
+    /// `player_command` START or STOP sprinting (`handlePlayerCommand`): the flag set or
+    /// cleared as the client says, no food, collision or speed check.
+    pub(crate) fn on_sprint_command(&mut self, start: bool) {
+        let life = &mut self.survival.life;
+        if start {
+            life.sprint_starts += 1;
+        } else {
+            life.sprint_stops += 1;
+        }
+        life.sprinting = start;
     }
 
     /// A block broken costs exhaustion (`causeFoodExhaustion` in `playerDestroy`).
     pub(crate) fn mined(&mut self) {
-        self.survival.life.exhaustion += EXHAUSTION_MINE;
+        self.survival.life.exhaust(EXHAUSTION_MINE);
     }
 
     /// `attack`: a placed mob in reach takes the held item's damage scaled by the swing's
@@ -1821,6 +1942,15 @@ impl Sim {
         let delay = 20.0 / speed.max(0.01);
         let scale = ((f64::from(self.survival.life.attack_ticker) + 0.5) / delay).clamp(0.0, 1.0);
         (base * (0.2 + scale * scale * 0.8)) as f32
+    }
+
+    /// The swing's charge (`getAttackStrengthScale(0.5)`), 0 to 1.
+    fn attack_strength(&self) -> f64 {
+        let held = self.survival.held_stack().map(|(k, _)| k);
+        let weapon = held.and_then(data::generated::item_props::weapon_of);
+        let speed = 4.0 + weapon.map_or(0.0, |w| w.speed);
+        let delay = 20.0 / speed.max(0.01);
+        ((f64::from(self.survival.life.attack_ticker) + 0.5) / delay).clamp(0.0, 1.0)
     }
 
     pub(crate) fn on_attack(&mut self, entity: i32) -> Result<Vec<Wire>, EncodeError> {
@@ -1841,6 +1971,11 @@ impl Sim {
         let eye = [self.pos[0], self.pos[1] + physics::EYE_HEIGHT, self.pos[2]];
         let held = self.survival.held_stack().map(|(k, _)| k);
         let damage = self.swing_damage();
+        // A sprint hit (`Player.attack`: sprinting and the charge over 0.9) adds a knockback,
+        // and `causeExtraKnockback` then ends the sprint. The extra knock on the mob is not
+        // modelled; the flag's end is.
+        let sprint_hit =
+            self.survival.life.sprinting && self.attack_strength() > SPRINT_HIT_STRENGTH;
         let life = &mut self.survival.life;
         let Some(m) = life.mobs.get_mut(&entity).filter(|m| m.dead_at.is_none()) else {
             return Ok(Vec::new());
@@ -1864,7 +1999,8 @@ impl Sim {
             return Ok(Vec::new());
         }
         life.attack_ticker = 0;
-        life.exhaustion += EXHAUSTION_ATTACK;
+        // `exhaust` by field: the mob is borrowed from the same `Life`.
+        life.exhaustion = (life.exhaustion + EXHAUSTION_ATTACK).min(EXHAUSTION_CAP);
         let dealt = if m.invulnerable > INVULNERABLE_HALF {
             if damage <= m.last_hurt {
                 return Ok(Vec::new());
@@ -1882,6 +2018,10 @@ impl Sim {
         m.last_hurt = damage;
         m.health = (m.health - dealt).max(0.0);
         let health = m.health;
+        if sprint_hit {
+            life.sprinting = false;
+            life.sprint_hit_stops += 1;
+        }
         let mut out = vec![wire(
             State::Play,
             &S2c::SetEntityData {
@@ -1982,10 +2122,12 @@ impl Sim {
             life.sent_air = life.air;
             entries.push((1, MetaValue::Int(life.air)));
         }
-        let fire = life.fire_ticks > 0;
-        if fire != life.sent_fire {
-            life.sent_fire = fire;
-            entries.push((0, MetaValue::Byte(u8::from(fire))));
+        let fire = if life.fire_ticks > 0 { FLAG_ON_FIRE } else { 0 };
+        let sprint = if life.sprinting { FLAG_SPRINTING } else { 0 };
+        let flags = fire | sprint;
+        if flags != life.sent_flags {
+            life.sent_flags = flags;
+            entries.push((0, MetaValue::Byte(flags)));
         }
         if !entries.is_empty() {
             out.push(wire(
@@ -1998,4 +2140,9 @@ impl Sim {
         }
         Ok(out)
     }
+}
+
+/// The `#climbable` block tag (ladders, vines, scaffolding...): `LivingEntity.onClimbable`.
+fn climbable(kind: BlockKind) -> bool {
+    data::generated::tags::block_tag("climbable").is_some_and(|t| t.contains(&kind))
 }
