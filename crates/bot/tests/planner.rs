@@ -42,10 +42,16 @@ fn plains() -> ModelWorld {
 }
 
 /// The churn invariant over a plan's events: no task starts and ends within one tick, except
-/// the aim being met.
+/// the aim being met. The pace gate's notes ("sprint begun", issue 56) are notes about a task's
+/// pace, not tasks, and are left out.
 fn churned(p: &Plan) -> Option<String> {
     let starts = |w: &str| w.starts_with("walk to") || w.starts_with("explore toward");
-    p.events.windows(2).find_map(|e| {
+    let tasks: Vec<&plan::PlanEvent> = p
+        .events
+        .iter()
+        .filter(|e| !e.what.starts_with("sprint "))
+        .collect();
+    tasks.windows(2).find_map(|e| {
         let (a, b) = (&e[0], &e[1]);
         (starts(&a.what) && b.tick <= a.tick + 1 && !b.what.starts_with("reached"))
             .then(|| format!("{} at {} then {} at {}", a.what, a.tick, b.what, b.tick))
