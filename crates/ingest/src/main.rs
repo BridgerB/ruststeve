@@ -5,7 +5,7 @@
 //!
 //! ```text
 //! cargo run --release --manifest-path crates/ingest/Cargo.toml -- add <store dir> <batch dirs or batch.rsb>...
-//! cargo run --release --manifest-path crates/ingest/Cargo.toml -- query <store dir> kn|deaths|endings|batches|runs|seeds
+//! cargo run --release --manifest-path crates/ingest/Cargo.toml -- query <store dir> kn|deaths|endings|batches|runs|seeds|stalls
 //! cargo run --release --manifest-path crates/ingest/Cargo.toml -- case <store dir> <race run id> <bot>
 //! ```
 //!
@@ -126,6 +126,27 @@ async fn add_seed_rows(db: &Surreal<Db>, path: &Path) -> Res<u32> {
             .await
             .map_err(err)?;
         n += 1;
+    }
+    for st in &rows.stall {
+        let Some(stage) = Stage::from_name(&st.stage) else {
+            eprintln!("ingest: {}: {} is not a stage", path.display(), st.stage);
+            continue;
+        };
+        let key = format!("{}/{}", st.seed, st.run);
+        let reasons: Vec<String> = st
+            .reasons
+            .iter()
+            .map(|r| format!("{} x{}", r.signature, r.n))
+            .collect();
+        let _: Option<Value> = db
+            .upsert(("seed_stall", key.as_str()))
+            .content(json!({
+                "seed": st.seed, "stage": st.stage, "rank": rank(stage), "k": st.k, "n": st.n,
+                "reasons": reasons, "bot": st.bot, "race_run": st.run, "lane": st.lane,
+                "last_task": st.last_task,
+            }))
+            .await
+            .map_err(err)?;
     }
     Ok(n)
 }
@@ -280,6 +301,13 @@ async fn query(db: &Surreal<Db>, what: &str) -> Res<Vec<String>> {
             )
             .await?
         }
+        "stalls" => {
+            select_all(
+                db,
+                "SELECT seed, race_run, stage, k, n, reasons, bot, last_task FROM seed_stall ORDER BY seed, race_run",
+            )
+            .await?
+        }
         "runs" => {
             select_all(
                 db,
@@ -287,7 +315,7 @@ async fn query(db: &Surreal<Db>, what: &str) -> Res<Vec<String>> {
             )
             .await?
         }
-        other => return Err(format!("no query {other}: kn, deaths, endings, batches, runs, seeds")),
+        other => return Err(format!("no query {other}: kn, deaths, endings, batches, runs, seeds, stalls")),
     };
     Ok(rows.iter().map(|r| strip_id(r).to_string()).collect())
 }
@@ -520,11 +548,27 @@ mod tests {
         };
         std::fs::write(
             lane.join("seed-rows-r1.toml"),
-            results::seeds::rows_toml(&[
-                row("typecraft", "win", 466_498, "a"),
-                row("typecraft", "win", 470_000, "b"),
-                row("desert", "log", 900, "a"),
-            ])
+            results::seeds::rows_toml(
+                &[
+                    row("typecraft", "win", 466_498, "a"),
+                    row("typecraft", "win", 470_000, "b"),
+                    row("desert", "log", 900, "a"),
+                ],
+                &[results::seeds::Stall {
+                    seed: "desert".to_owned(),
+                    stage: "log".to_owned(),
+                    k: 1,
+                    n: 3,
+                    reasons: vec![results::seeds::Reason {
+                        signature: "cap  | walk | wood".to_owned(),
+                        n: 1,
+                    }],
+                    bot: "a".to_owned(),
+                    run: "r1".to_owned(),
+                    lane: 0,
+                    last_task: "walk: to the log (wood) -> open".to_owned(),
+                }],
+            )
             .unwrap(),
         )
         .unwrap();
@@ -561,6 +605,9 @@ mod tests {
                 (win["ticks"].as_i64(), win["n"].as_i64()),
                 (Some(466_498), Some(2))
             );
+            let stalls = query(&db, "stalls").await.unwrap();
+            assert_eq!(stalls.len(), 1, "{stalls:?}");
+            assert!(stalls[0].contains("cap  | walk | wood x1"), "{stalls:?}");
             let deaths = query(&db, "deaths").await.unwrap();
             assert_eq!(deaths.len(), 1);
             assert!(deaths[0].contains("death.attack.mob zombie"), "{deaths:?}");

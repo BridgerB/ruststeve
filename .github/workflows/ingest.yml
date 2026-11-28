@@ -117,6 +117,7 @@ jobs:
             $i query store/insight batches
             $i query store/insight kn
             $i query store/insight seeds
+            $i query store/insight stalls
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

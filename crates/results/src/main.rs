@@ -244,11 +244,26 @@ fn run(args: &[String]) -> Result<(), String> {
                     snaps.push(s);
                 }
             }
+            // The runs under the same dirs (issue 56's stage ticks; the stalls): each batch's
+            // seed from the nearest lanes.toml, its ledgers beside it.
+            let mut batches = Vec::new();
+            for f in files_under(&dirs, |n| n == "batch.rsb") {
+                let mut b = results::read_batch(&f)?;
+                let dir = f.parent().unwrap_or(Path::new(".")).to_path_buf();
+                results::fill_stage_ticks(&mut b, &dir);
+                batches.push((results::seeds::batch_seed(&f, b.lane), dir, b));
+            }
+            let stalls = results::seeds::stalls(&batches);
             if let Some(out) = rows_out {
-                std::fs::write(&out, results::seeds::rows_toml(&snaps)?)
+                std::fs::write(&out, results::seeds::rows_toml(&snaps, &stalls)?)
                     .map_err(|e| format!("{out}: {e}"))?;
             }
             print!("{}", results::seeds::render(&results::seeds::fold(&snaps)));
+            print!("{}", results::seeds::render_stalls(&stalls));
+            print!(
+                "{}",
+                results::seeds::render_run_ticks(&results::seeds::run_ticks(&batches))
+            );
             Ok(())
         }
         Some("endermen") => {
