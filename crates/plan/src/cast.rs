@@ -1584,6 +1584,115 @@ pub fn far_pool(w: &World, given_up: &[Cell]) -> Option<Cell> {
     })
 }
 
+// >>> lava hunt (issue 83)
+/// Blocks a hunt target may lie over the feet and still be dug toward: the hunt's stairs only go
+/// down or level (`mine` to the lava's height + 2), and a site's landing lies three under to three
+/// over its lava (`site_choice_report`'s `dy`). Higher lava is reached only by a walk
+/// (lava-portal wall 5: lava at y -7 hunted from the sea at y -55 by level tunnels).
+pub const HUNT_RISE: i32 = 3;
+
+/// The hunt's target held across looks (lava-portal wall 5), and the nearer target last passed
+/// over for it (noted once each).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HuntHold {
+    pub target: Cell,
+    pub passed: Option<Cell>,
+}
+
+/// Why a held hunt target is let go before its stalls give it up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HuntEnd {
+    /// Among the sources the site choice looks at, and no site was taken: given up there.
+    Reached,
+    /// Within `GIVE_UP_RADIUS` of a site given up since it was chosen.
+    Refused,
+    /// No longer a lava source memory holds within `FAR_RADIUS`.
+    Gone,
+}
+
+impl HuntEnd {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Reached => "reached, no site beside it",
+            Self::Refused => "refused, a site given up beside it",
+            Self::Gone => "gone from memory within the far radius",
+        }
+    }
+}
+
+/// One look of the hunt at its target: the target to head for (`fresh` when chosen in this
+/// look), the held one let go and why, and a target nearer the feet passed over for the held one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HuntLook {
+    pub target: Option<Cell>,
+    pub fresh: bool,
+    pub ended: Option<(Cell, HuntEnd)>,
+    pub passed: Option<Cell>,
+}
+
+/// The hunt's target (lava-portal wall 5): the held one while it holds, else a fresh one, the far
+/// pool of ten first, else the nearest far lava (overworld-leg walls 1 and 13). A held target is
+/// let go only when reached (the site choice looks at it), refused or gone; its stalls are the
+/// caller's. Race 46144128199 lane 0 flipped between two targets 308 times over 26,000 ticks:
+/// each lay just inside `LAVA_RADIUS` of the cell the other led to, so the far filters skipped it
+/// there and took the other.
+pub fn hunt_look(w: &World, given_up: &[Cell], held: Option<Cell>) -> HuntLook {
+    let refused = |gu: &[Cell], c: Cell| {
+        gu.iter()
+            .any(|g| dist(centre(*g), centre(c)) <= GIVE_UP_RADIUS)
+    };
+    let fresh = |gu: &[Cell]| far_pool(w, gu).or_else(|| far_lava(w, gu));
+    let Some(t) = held else {
+        let target = fresh(given_up);
+        return HuntLook {
+            target,
+            fresh: target.is_some(),
+            ended: None,
+            passed: None,
+        };
+    };
+    // The sources the site choice looks at now (`site_choice_report`): there the hunt ends.
+    let looked = || {
+        lava_sources(w)
+            .into_iter()
+            .filter(|c| !refused(given_up, *c))
+            .take(MAX_SOURCES)
+            .any(|c| c == t)
+    };
+    let end = if refused(given_up, t) {
+        Some(HuntEnd::Refused)
+    } else if !lava_within(w, FAR_RADIUS).contains(&t) {
+        Some(HuntEnd::Gone)
+    } else if looked() {
+        Some(HuntEnd::Reached)
+    } else {
+        None
+    };
+    if let Some(end) = end {
+        let mut gu = given_up.to_vec();
+        if end == HuntEnd::Reached {
+            gu.push(t);
+        }
+        let target = fresh(&gu);
+        return HuntLook {
+            target,
+            fresh: target.is_some(),
+            ended: Some((t, end)),
+            passed: None,
+        };
+    }
+    let here = w.body.map_or([0.0; 3], |b| centre(feet(&b)));
+    let passed =
+        fresh(given_up).filter(|c| *c != t && dist(here, centre(*c)) < dist(here, centre(t)));
+    HuntLook {
+        target: Some(t),
+        fresh: false,
+        ended: None,
+        passed,
+    }
+}
+// <<< lava hunt
+
 pub fn lava_within(w: &World, radius: f64) -> Vec<Cell> {
     let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
         return Vec::new();

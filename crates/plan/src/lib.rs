@@ -228,6 +228,11 @@ const PRESS_AT: i32 = 64;
 /// Looks at one far lava target that come no nearer than the best before it is given up: a leg
 /// of stairs or a walk each (overworld-leg wall 13).
 const LAVA_AIM_STALLS: u32 = 4;
+// >>> lava hunt (issue 83)
+/// Hunt targets one look may give up for lying over the feet with no walk to them, each after a
+/// walk's route is tried: the site choice's `MAX_SOURCES` (3), the same bound on a look's work.
+const HUNT_PICKS: usize = 3;
+// <<< lava hunt
 /// Items of the dropped kind coming back at once that count as the stack picked up again: a dig
 /// brings one.
 const REPICKUP_JUMP: i32 = 4;
@@ -787,6 +792,12 @@ pub struct Plan {
     /// no nearer (wall 13).
     #[serde(default)]
     pub lava_aims: Vec<(Cell, f64, u32)>,
+    // >>> lava hunt (issue 83)
+    /// The hunt's lava target, held until reached, refused or given up by its stalls
+    /// (lava-portal wall 5).
+    #[serde(default)]
+    pub lava_hold: Option<cast::HuntHold>,
+    // <<< lava hunt
     /// A table put down to press stone at, to be taken along after (wall 12).
     #[serde(default)]
     pub press_table: bool,
@@ -1032,6 +1043,9 @@ impl Plan {
             dusk_noted: false,
             pressed: 0,
             lava_aims: Vec::new(),
+            // >>> lava hunt (issue 83)
+            lava_hold: None,
+            // <<< lava hunt
             press_table: false,
             repickups: 0,
             dropped: None,
@@ -5669,22 +5683,25 @@ impl Plan {
         // A far lava target the hunt comes no nearer to is given up (wall 13, a progress
         // invariant: lane 0 of race 45354021804 circled a pool of ten at (-30, 46, -254) for 8,000
         // ticks, its walks failing and its stairs re-walking cut steps).
+        // The target is held until reached, refused or given up by its stalls, and its stalls
+        // are counted on the target the hunt heads for (lava-portal wall 5: race 46144128199
+        // lane 0 flipped between two targets 308 times while the stalls counted far pools it
+        // never headed for, about 50 of them given up unvisited).
+        let mut hunted = self.hunt_target(w, tick);
         if let Some(body) = w.body
-            && let Some(aim) = cast::far_pool(w, &self.given_up_sites)
-                .or_else(|| cast::far_lava(w, &self.given_up_sites))
+            && let Some(aim) = hunted
         {
             let (fx, fy, fz) = path::feet_cell(body.pos);
             let d =
                 f64::from((aim.0 - fx).pow(2) + (aim.1 - fy).pow(2) + (aim.2 - fz).pow(2)).sqrt();
             let (best, stalls) = landing_stalls(&mut self.lava_aims, aim, d);
             if stalls >= LAVA_AIM_STALLS {
-                self.lava_aims.retain(|(c, _, _)| *c != aim);
-                self.given_up_sites.push(aim);
-                self.note(
-                    tick,
-                    format!("lava at {aim:?} given up"),
+                self.give_up_hunt(
+                    aim,
                     format!("{stalls} looks came no nearer than {best:.1}: another target"),
+                    tick,
                 );
+                hunted = self.hunt_target(w, tick);
             }
         }
         if let Some(body) = w.body {
@@ -5745,10 +5762,16 @@ impl Plan {
                 }
             }
         }
-        // No site: head for the nearest lava seen within `FAR_RADIUS`, down to its height
-        // (clojurecraft's lava hunt goes toward far sources); with none seen, down toward the lava
-        // sea. Stairs down blind boxed in 25,652 times in one race (docs/problems/portal.md wall 5).
-        if let (Some(far), Some(body)) = (cast::far_lava(w, &self.given_up_sites), w.body) {
+        // No site: head for the held target (a far pool of ten, else the nearest lava seen within
+        // `FAR_RADIUS`), down to its height (clojurecraft's lava hunt goes toward far sources);
+        // with none seen, down toward the lava sea. Stairs down blind boxed in 25,652 times in
+        // one race (docs/problems/portal.md wall 5).
+        // A target higher than `HUNT_RISE` over the feet is reached only by a walk: with none it
+        // is given up and the next one taken, at most `HUNT_PICKS` in a look.
+        for _ in 0..HUNT_PICKS {
+            let (Some(far), Some(body)) = (hunted, w.body) else {
+                break;
+            };
             let feet = path::feet_cell(body.pos);
             let to = [f64::from(far.0) + 0.5, body.pos[1], f64::from(far.2) + 0.5];
             self.heading = walk::yaw_to(body.pos, to).rem_euclid(360.0);
@@ -5780,6 +5803,18 @@ impl Plan {
                     return Task::Explore(walk);
                 }
             }
+            if far.1 > feet.1 + cast::HUNT_RISE {
+                self.give_up_hunt(
+                    far,
+                    format!(
+                        "{} over the feet at {feet:?} and no walk to it: the hunt's stairs never rise",
+                        far.1 - feet.1
+                    ),
+                    tick,
+                );
+                hunted = self.hunt_target(w, tick);
+                continue;
+            }
             self.note(
                 tick,
                 format!("hunt lava at {far:?}"),
@@ -5793,6 +5828,79 @@ impl Plan {
         }
         self.mine(w, &[], Some(LAVA_DEPTH), tick)
     }
+
+    // >>> lava hunt (issue 83)
+    /// The hunt's target for this look (`cast::hunt_look`), held in `lava_hold`, with a note when
+    /// one is chosen, let go, or held over a nearer one (lava-portal wall 5).
+    fn hunt_target(&mut self, w: &World, tick: u64) -> Option<Cell> {
+        let look = cast::hunt_look(w, &self.given_up_sites, self.lava_hold.map(|h| h.target));
+        if let Some((t, end)) = look.ended {
+            self.lava_hold = None;
+            match end {
+                cast::HuntEnd::Reached => self.give_up_hunt(
+                    t,
+                    "reached: among the sources the site choice looks at, and no site taken"
+                        .to_owned(),
+                    tick,
+                ),
+                cast::HuntEnd::Refused | cast::HuntEnd::Gone => self.note(
+                    tick,
+                    format!("lava target let go: {t:?}"),
+                    end.name().to_owned(),
+                ),
+            }
+        }
+        let Some(t) = look.target else {
+            self.lava_hold = None;
+            return None;
+        };
+        let feet = w.body.map(|b| path::feet_cell(b.pos));
+        let far = |c: Cell| {
+            feet.map_or(0.0, |f| {
+                f64::from((c.0 - f.0).pow(2) + (c.1 - f.1).pow(2) + (c.2 - f.2).pow(2)).sqrt()
+            })
+        };
+        if look.fresh {
+            self.lava_hold = Some(cast::HuntHold {
+                target: t,
+                passed: None,
+            });
+            self.note(
+                tick,
+                format!("lava target {t:?}"),
+                format!(
+                    "{:.1} from the feet {feet:?}: held until reached, refused or given up by its stalls",
+                    far(t)
+                ),
+            );
+        } else if let Some(p) = look.passed
+            && let Some(hold) = self.lava_hold.as_mut()
+            && hold.passed != Some(p)
+        {
+            hold.passed = Some(p);
+            self.note(
+                tick,
+                format!("lava target held: {t:?}"),
+                format!(
+                    "{:.1} from the feet {feet:?}, over {p:?} at {:.1}",
+                    far(t),
+                    far(p)
+                ),
+            );
+        }
+        Some(t)
+    }
+
+    /// A hunt target given up: never chosen again, no site within `GIVE_UP_RADIUS` of it.
+    fn give_up_hunt(&mut self, t: Cell, why: String, tick: u64) {
+        self.lava_aims.retain(|(c, _, _)| *c != t);
+        self.given_up_sites.push(t);
+        if self.lava_hold.is_some_and(|h| h.target == t) {
+            self.lava_hold = None;
+        }
+        self.note(tick, format!("lava at {t:?} given up"), why);
+    }
+    // <<< lava hunt
 
     fn after_cast(
         &mut self,
