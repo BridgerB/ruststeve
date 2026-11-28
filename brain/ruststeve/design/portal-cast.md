@@ -38,7 +38,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - `crates/plan/src/scoop.rs`: the bucket's aim (`aim_for`) and its exact sight line (`ray_cells`, `clear_ray`).
 - `crates/plan/src/lib.rs`: `Aim::Portal`, `cast_task`, `after_cast`, `LAVA_DEPTH`.
 - `config/goals.toml` row `portal`; `config/starts.toml` starts `kit` and `lava`.
-- Tests: `crates/plan/tests/build_differential.rs`, `crates/plan/tests/rays.rs`, `crates/bot/tests/cast.rs`.
+- Tests: `crates/plan/tests/build_differential.rs`, `crates/plan/tests/rays.rs`, `crates/bot/tests/cast.rs`, `crates/plan/tests/portal_shape.rs` (issue 83: vanilla's `PortalShape`, `crates/plan/src/portal_shape.rs`, [[mc-portal-cast]]).
 - The walls, each read from a recording before its fix: `docs/problems/portal.md` (1 to 49).
 
 ## How it works
@@ -72,6 +72,7 @@ Issue 14c. No bot mines obsidian; the frame is cast ([[mc-portal-cast]]). The ro
 - `build_differential`: 144 plans (cast-one, portal and nether; four facings; lava heights 0, 1, 3, 6; three origins), **32,124 of 32,124** op lines equal to clojurecraft's `plan-for` at be85a92 (a one-off oracle in its flake shell).
 - `tests/cast.rs`: from the kit, on a stone plateau with a corridor, an 18-source lava pool in its floor and a pond outside, the bot scoops its water, chooses a site, works 118 ops and lights the portal by tick 2,880.
 - `tests/rays.rs`: the exact sight line, with race 44041169156's grazed corner as a literal case.
+- `tests/portal_shape.rs` (issue 83): `frame_plan`'s ops worked to their done states on a hand-built rock with a pool, every `Facing` and lava heights 0, 3, 6, build a frame vanilla's `PortalShape` (ported from the 26.1.2 jar) accepts: 2 by 3, six portal blocks, on the plan's axis; with vanilla's own cases (ten obsidian, no corners; nine refused; crying obsidian not frame; the size limits). `tests/cast.rs` checks the sim-lit frame with it too.
 - **Real, from `kit`** (the issue's measure): never over 2% (walls 1 to 15).
 - **Real, from `lava`**, pairs of 8 lanes x 14 pooled over 224: the crowded checkpoint 10; the station refill 14; one bot a pool 38 (0347960); the way dig 53 (c29153b); walls 24 and 26 52 and 56 (98e43ab, 6d82b7b). Six of the fourteen places light none; the bots that light mostly light their second site. Walls 28 to 32 took it to 62, 58, 62, 83 and 100 (44.6%).
 - **Real, official from `kit`** (88c67e8, 44226112675): **1 of 56**. 36 of 56 filled water, 22 cast, 1 lit; the 20 without water walked pool to pool with every scoop route refused (wall 39).

@@ -732,14 +732,19 @@ impl Sim {
     // ---------------------------------------------------------------- fire and the portal
 
     /// `FlintAndSteelItem.useOn`: fire beside the clicked face when it may stand there
-    /// (`canBePlacedAt`: air, and a sturdy floor or a portal frame round it).
+    /// (`canBePlacedAt`: air, and a sturdy floor or a portal frame round it). The frame counts
+    /// only with obsidian on one of the fire cell's six sides (`BaseFireBlock.isPortal`, 26.1.2,
+    /// probe 46139819290; brain/game/mc-portal-cast.md).
     pub(crate) fn strike(&mut self, clicked: Pos, face: i32) -> Result<Vec<Wire>, EncodeError> {
         let at = beside(clicked, face);
         if !is_air(self.st(at)) {
             return Ok(Vec::new());
         }
         let floor = matches!(collision(self.st((at.0, at.1 - 1, at.2))), Collision::Full);
-        if !floor && self.portal_shape(at).is_none() {
+        let obsidian_beside =
+            (0..6).any(|f| kind_of(self.st(beside(at, f))) == Some(BlockKind::Obsidian));
+        let portal = obsidian_beside && self.portal_shape(at).is_some();
+        if !floor && !portal {
             return Ok(Vec::new());
         }
         let fire = BlockKind::Fire.info().map_or(0, |i| i.default_state);
