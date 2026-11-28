@@ -365,10 +365,12 @@ pub fn lull(w: &World) -> bool {
     dragon(w).is_none_or(|(pos, phase)| phase == Some(0) && dist(pos, body.pos) > STRAFE_RANGE)
 }
 
-/// The calm gate (the coordinator's rule, shared with E4): the dragon holding (phase 0), at least
-/// `CALM_FROM` off, and not closing: its distance not fallen by more than `CALM_CLOSING` over the
-/// last `CALM_TICKS` (holding over 64 off is seldom true for long: race 46071506005).
+/// The calm gate's distance (the coordinator's rule, shared with E4): the dragon holding (phase 0)
+/// at least this far off is calm (`Plan::calm_why`; holding over 64 off is seldom true for long:
+/// race 46071506005).
 pub const CALM_FROM: f64 = 40.0;
+/// Unused since race 46079924222 dropped the closing test (a holding circle closes on part of
+/// every arc); kept so a recorded plan's fields still read.
 pub const CALM_TICKS: u64 = 20;
 pub const CALM_CLOSING: f64 = 1.0;
 

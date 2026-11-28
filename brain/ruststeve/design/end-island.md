@@ -6,7 +6,7 @@ tags: [plan, end, bridge, bunker, gaze, void]
 aliases: [end, EndState, end_task, end_step, end_look, end_gaze, void_edge, void_column, bunker, Bunker, the bridge, BRIDGE_FLOOR, STOCK_WANTED, DRAGON_CLEAR, stock_dir]
 status: draft
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@117843e
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/end.rs#pub fn end_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:crates/plan/src/end.rs#pub fn end_step(&mut self, w: &World, tick: u64) -> Option<Controls> {"
@@ -30,7 +30,9 @@ Issue 20e (agent E3, `docs/problems/end-island.md`). `Plan::end_step` runs ahead
 3. **The bridge** west along z 0: the guards first (`home::guard_next` across the axis, none on the platform's obsidian), then the floor ahead clicked onto the side of the block stood on, then a sneaking step. Cut only while the dragon is more than `DRAGON_CLEAR` 48 off or perched (phase 5 to 7, metadata 16); otherwise it waits crouched at the cell's centre ("end: bridge waits for the dragon", "end: bridge goes on"). Progress invariant: no cell gained in `BRIDGE_STALL` 1,200 ticks (waits not counted) fails it. Over on end stone under the sky ("end: on the island at") or at a cliff of end stone ahead, which is climbed by `Stairs::up` west ("end: cliff at …").
 4. **The bunker site**: about `BUNKER_FROM_FOUNTAIN` 12 off the fountain on the bot's bearing (turned up to 60 degrees on failure), a far walk ("end: walk to the bunker site"); dug where the bot stands within 30 after `SITE_WALKS`.
 5. **The bunker**: begun only with the dragon over 64 off or perched; a post of two blocks on the ground beside the column, then four digs under the feet, the cell over the new head laid after each (`shaft_ops`, never open to the sky); the door (a three-step stair out) on another side. "end: bunker dug at". Sealed (roof and door laid back) on every return; opened (roof and stair dug) to leave.
-6. **Retreat, eat, heal**: under `RETREAT_HEALTH` 14 back to the bunker until `HEALED` 18; food under `FED` 18 with food held is eaten there.
+6. **Retreat, eat, heal**: under `RETREAT_HEALTH` 14 back to the bunker until `HEALED` 18; food under `FED` 18 with food held is eaten there. The walk in from outside waits for calm.
+   - **Calm** (`Plan::calm`, the one gate shared with E4's climb): no dragon sent, or the dragon holding (phase 0) at least `CALM_FROM` 40 off. No closing test (race 46079924222: a holding circle closes on part of every arc). It gates the walk in to heal and eat, the stock's first run and its resume after a strafe pause, the restock for the crystals, and the wooden pickaxes.
+   - **Wooden pickaxes**: under `PICK_RESERVE` 40 uses with wood held, on calm open ground, the way home's wooden pickaxe run at a placed table, the table taken back ("end: wooden pickaxes at a placed table"); a surface dig is held for that reserve ("end: surface dig held for the pickaxe reserve").
 7. **The stock**: every run begins and ends at the bunker: stairs down `STOCK_DEPTH` 6 first (their foot kept), then three level arms from the foot, each run walked out to its tip and back (`stock_step`); until `STOCK_WANTED` 160 end stone or `STOCK_RUNS` 24; a run with no walk back ends the stock. From under the ground with no walk home, stairs up to hand over (`OUT_RUNS`).
 8. **The hand-offs**: while a crystal is alive E4's spikes task, then E5's `Plan::dragon_task` (`end_dragon`; the fight waits in `Plan.bunker` while the dragon flies); out by the bunker's stair first. With none ready the bot holds sealed in the bunker. On the bow line (E8, [[end-bow]]) both crystal hand-offs, `end_spikes` and `open_task` before its end stone stock, ask `Plan::bow_task` first; the pillar gets the caged crystals and any the bow leaves.
 

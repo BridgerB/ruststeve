@@ -5,8 +5,8 @@ type: reference
 tags: [window, crafting, table, clicks, model]
 aliases: [open_screen, OpenScreen, Window, World::window, inventory_slot, CraftingMenu, crafting table window, 3x3 grid, Loc, container counter, stillValid, dropOrPlaceInInventory]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub struct Window {"
   - "ruststeve:crates/world/src/lib.rs#pub fn inventory_slot(&self, slot: i16) -> Option<i16> {"

@@ -169,16 +169,28 @@ fn the_aim_meets_the_crystals_box_from_the_ground() {
         "inside the blast's reach"
     );
     assert_eq!(
-        bow::aim([8.5, 64.0, -60.5], CRYSTAL_AT, &mut open),
+        bow::aim([8.5, 64.0, -80.5], CRYSTAL_AT, &mut open),
         Err(Miss::Far)
     );
     let mut wall = |c: (i32, i32, i32)| c.2 == -5 && c.1 < 75;
     assert!(
         matches!(
-            bow::aim(FEET, CRYSTAL_AT, &mut wall),
+            bow::aim_with(FEET, CRYSTAL_AT, &mut wall, false),
             Err(Miss::Blocked((_, _, -5)))
         ),
-        "a wall across the way"
+        "a wall across the way: no low arc"
+    );
+    assert!(
+        bow::aim(FEET, CRYSTAL_AT, &mut wall).is_ok_and(|a| a.high),
+        "the high arc over it"
+    );
+    let mut tall = |c: (i32, i32, i32)| c.2 == -5 && c.1 < 200;
+    assert!(
+        matches!(
+            bow::aim(FEET, CRYSTAL_AT, &mut tall),
+            Err(Miss::Blocked((_, _, -5)))
+        ),
+        "a wall too tall for either arc"
     );
 }
 
@@ -188,7 +200,7 @@ fn the_stands_go_toward_the_middle_first() {
     assert_eq!(cols[0], [22, 0], "18 toward the fountain first");
     assert!(cols.iter().all(|c| {
         let d = f64::from(c[0] - 40).hypot(f64::from(c[1]));
-        (16.0..=41.0).contains(&d)
+        (16.0..=71.0).contains(&d)
     }));
     assert!(cols.iter().all(|c| c[0] <= 41), "never behind the spike");
 }
@@ -359,5 +371,71 @@ fn a_crystal_untracked_after_a_shot_is_no_hit() {
         notes(&p)
             .iter()
             .any(|n| n == "bow: crystal 7 out of sight after the shot")
+    );
+}
+
+/// A tall spike (obsidian of radius 3 up to y 95, the crystal on its bedrock at 96) 25 off the
+/// feet: the low arc meets the spike's top edge under the box, the high arc comes down onto it
+/// from above (race 46078921264: "0 stands with a shot" at every tall spike).
+#[test]
+fn a_tall_spike_is_shot_with_the_high_arc() {
+    let crystal = [8.5, 96.0, 8.5];
+    let feet = [8.5, 64.0, -16.5];
+    let mut spike = |c: (i32, i32, i32)| {
+        let (dx, dz) = (c.0 - 8, c.2 - 8);
+        dx * dx + dz * dz <= 10 && c.1 <= 95
+    };
+    let low = bow::solve_pitch(25.0, 33.4).expect("a low arc");
+    let a = bow::aim(feet, crystal, &mut spike).expect("a shot over the edge");
+    assert!(
+        f64::from(a.pitch) < low - 5.0,
+        "the high arc, steeper than the low {low}: {}",
+        a.pitch
+    );
+    assert!(a.ticks > 20, "a long flight: {}", a.ticks);
+}
+
+/// A tall spike (to y 89, its bedrock at 90, the crystal at 91) with the feet 18 off toward the
+/// island's middle: no low arc clears its edge from here, and the bot walks to a far stand with
+/// a clear low arc (45 off and more) before any high arc (the orchestrator: the shortest clear
+/// flight, the low arc spreading far less).
+#[test]
+fn a_far_stand_with_a_low_arc_comes_before_the_high_arc() {
+    let feet = [-4.5, 64.0, -4.5];
+    let mut w = world(feet);
+    for dx in -2i32..=2 {
+        for dz in -2i32..=2 {
+            if dx * dx + dz * dz <= 5 {
+                for y in 70..90 {
+                    set(&mut w, (8 + dx, y, 8 + dz), BlockKind::Obsidian);
+                }
+            }
+        }
+    }
+    set(&mut w, (8, 70, 8), BlockKind::Obsidian);
+    set(&mut w, (8, 90, 8), BlockKind::Bedrock);
+    w.step(&Event::Packet(S2c::RemoveEntities { ids: vec![CRYSTAL] }));
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 8,
+        uuid: [2; 16],
+        kind: EntityKind::EndCrystal.id(),
+        x: 8.5,
+        y: 91.0,
+        z: 8.5,
+        velocity: [0.0; 3],
+    }));
+    let mut p = Plan::new(Aim::Race);
+    let t = p.bow_task(&w, 100);
+    assert!(matches!(t, Some(Task::Explore(_))), "{t:?} {:?}", told(&p));
+    let stand = p.bow.stand.map(|(c, _)| c).expect("a stand");
+    let off = f64::from(stand.0 - 8).hypot(f64::from(stand.2 - 8));
+    assert!(
+        off > 22.0,
+        "a stand farther out than the feet's 18: {stand:?}, {off:.0} off"
+    );
+    assert!(
+        told(&p).iter().any(|n| n.contains("the low arc")),
+        "{:?}",
+        told(&p)
     );
 }

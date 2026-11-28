@@ -5,8 +5,8 @@ type: decision
 tags: [decision, starts, snapshots, frontier, evidence, development]
 aliases: [development start, made-up start, dev start, kit start, checkpoint start for development, what counts as evidence]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:config/starts.toml#name = \"nether\""
 related:
@@ -25,6 +25,10 @@ Bridger, 2026-11-23 night, after issue 16 spent twelve hours shipping one fix a 
 - **It never counts as an issue's evidence.** No run from a development start goes in a PR body as the done-condition, in a wall's "proven" line, or in a rate.
 - **It never becomes the frontier.** `config/frontier.toml` names only a snapshot a real bot made, and no snapshot taken in a race from a development start is published as one.
 - **The win needs one real bot from a real snapshot.** An issue closes exactly as before: one real bot passes the stage, starting from the frontier.
+
+## In practice
+- Development starts are named `dev-*` in `config/starts.toml` (issues 17 to 20: `dev-spawner`, `dev-fortress`, `dev-stronghold`, `dev-nether-fortress`, `dev-portal-room-armed`, `dev-end-arrival`, `dev-end-island`, `dev-end-no-crystals` and others).
+- Some are raced on top of the frontier snapshot (`race.yml -f snapshot=frontier`, e.g. `dev-nether-fortress`): the kit, wear and memory are a real bot's and only the place is made up. That is still a development run.
 
 ## How it sits beside one-bot-first
 [[one-bot-first]] says every attempt starts at the frontier, "never from spawn or a made-up checkpoint". That rule stands for **attempts**: the runs that can close an issue. This note adds a second kind of run, a **development run**, which can find and fix walls but can prove nothing. One-bot-first's reason for the ban is unchanged and is why the limit is strict: a made-up checkpoint hides real gaps (the teleported `nether` start passed issue 15 while walking into the portal did not exist).
