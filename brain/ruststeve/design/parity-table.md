@@ -12,6 +12,7 @@ sourceRefs:
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
   - "ruststeve:crates/results/src/parity.rs#pub fn compare(real: &[MomentResult], sim: &[MomentResult]) -> Vec<Row> {"
   - "ruststeve:crates/bot/src/bin/simrace.rs#fn simrace(a: &Args) -> Result<bool, String> {"
+  - "ruststeve:crates/results/src/parity_notes.rs#pub fn check(moments: &[Moment], results: &[MomentResult]) -> Vec<String> {"
   - "ruststeve:config/moments.toml#id = \"m00-0\""
   - "ruststeve:config/moments.toml#id = \"d00-late\""
   - "ruststeve:config/moments.toml#id = \"e00-stare\""
@@ -67,6 +68,8 @@ Issue 12b's 9 escape rows run the planner itself (`script = "plan:hold"`: `Aim::
 Two walk rows that fell and were hurt (m00-3, m06-1) missed on every runner after 12a: the world now takes the server's `set_entity_motion` for itself as its velocity, and the real server sends one when the player is hurt ((0, -0.0784, 0) and (0, -0.2305, 0), one and three ticks of gravity), which the model did not. The model now sends it ([[server-model]]).
 
 Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick loop running at about 0.65 of a client's pace, and a click's answer arriving after the window closed; both fixed, then 9 of 9 locally.
+
+**A row's path** (issue 77, [[chests]]): a moment's `notes` lists `[substring, count]` pairs. `moments compare` checks each one against the planner notes on both sides: the real side's taken from the ledger, the model's from `events_since`, both carried in `MomentResult.notes`. A count that differs on either side is a miss, printed under the table and failing it. This lets a planner row check how it got to its end, not only the end: `k01-task` asks for a stash, a fetch and the aim met, once each.
 
 ## Limits
 - The server runs peaceful, which removes hostile mobs: zombie rows (their attacks and knockback) need a non-peaceful row and come with defence (12d). Rows other than the drowning ones still breathe.
