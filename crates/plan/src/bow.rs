@@ -431,6 +431,10 @@ pub struct BowState {
 
 /// Shots that miss one crystal before it is left to the pillar.
 pub const MISSES: u32 = 4;
+/// Whether the high arc is shot at all: parity e07-bow-high (run 46099772712) aimed at -83.4
+/// degrees and missed, where the low arcs of e07-bow-24 and -40 hit; near vertical a tiny pitch
+/// error is a wide miss. Off: a crystal with no clear low arc waits, then goes to the pillar.
+const HIGH_ARC: bool = false;
 /// A crystal with no stand to walk to is asked again after this.
 const NO_STAND_WAIT: u64 = 400;
 /// The feet within this of the fountain (flat) are on the island for the bow (the island's
@@ -625,7 +629,7 @@ impl Plan {
         let mut first_miss = None;
         // The low arc first, from here and then from a stand; the high arc (longer, wider) only
         // where no low arc is clear.
-        for high in [false, true] {
+        for high in [false, HIGH_ARC] {
             let mut cells = path::Cells::new(w);
             let mut blocked = |c: Cell| blocks_arrow(&mut cells, c);
             for (id, pos) in &targets {
@@ -728,7 +732,7 @@ impl Plan {
                 }
                 self.expanded += walk.expanded;
             }
-            if high {
+            if high || !HIGH_ARC {
                 // None now with either arc: asked again later, the pillar kept off it meanwhile.
                 self.bow
                     .no_stand
@@ -873,7 +877,7 @@ impl Plan {
                 // The aim again from where the feet are now.
                 let mut cells = path::Cells::new(w);
                 let mut blocked = |c: Cell| blocks_arrow(&mut cells, c);
-                match aim(body.pos, shot.at, &mut blocked) {
+                match aim_with(body.pos, shot.at, &mut blocked, shot.aim.high) {
                     Ok(a) => shot.aim = a,
                     Err(m) => {
                         self.note(
