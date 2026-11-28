@@ -46,3 +46,12 @@ What this changes in the plan:
 - **The server never corrects a wrong sprint**, so the parity rows (S3) and the jar read are the only evidence the body is right.
 
 Not read: the client's side of a sprint hit (`MultiPlayerGameMode.attack` running `Player.attack` locally), swimming's speed (`Player.travel` in water), and `AttributeInstance.calculateValue` (the standard `value × (1 + amount)` is assumed for `add_multiplied_total`).
+
+## Lead: walls found in the races
+
+### Wall L1: a retreat that circles the same creeper never ends (progress-invariant gap)
+- **Seen:** no-sprint arm race 46121815604 (8643d925), bot rs-l06-b00. A creeper stood by the bot's furnace. For about 2,200 ticks (31080 to 33300) the bot went round a loop: `smelt: collect 7 IronIngot` (a batch was left cooking), then `defend Creeper 7897 (Retreat)`, then collect again, six times over. Each retreat ended with 0 swings and the creeper still in reach of the furnace. On the sixth return the fuse lit at 3 blocks and the explosion killed it.
+- **Structural cause:** the retreat and the work it cuts have no shared progress invariant. Each retreat counts as a success ("defended", back to the goal), and each return to the same furnace counts as fresh work. Nothing counts the returns to one threat, so the loop has no end. This is the class of iron-kit walls 21, 28 and 29: `flee_clear` holds work off for a while, but the work comes back to the same spot while the creeper is still there.
+- **Needs:** a retreat from a `never_fight` kind, repeated around the same entity and the same work site, must end the loop. After N returns, the work site is given up (a new furnace elsewhere), or the bot waits out of sight until the creeper is gone. N comes from data, and every firing writes a ledger note.
+- **Decision:** fixed in #56 only if the sprint arm does not clear it. Sprinting widens the gap on each retreat, but it does not end the loop.
+- **Done, in world terms:** in the races, no bot dies to a creeper after more than two retreats from the same creeper.
