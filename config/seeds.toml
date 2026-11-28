@@ -1,0 +1,18 @@
+# The fixed list of seeds the relay races on (issue 69; brain/ruststeve/design/seeds.md). Chosen
+# once and kept: a seed's frontier (config/frontier/<name>.toml) and every number measured on it
+# mean nothing if its world changes. `xtask seeds` lists the names in this order; `xtask seed
+# <name>` prints the value for `xtask server --seed`.
+#
+# The facts in comments (spawn biome, the nearest stronghold and fortress) were measured on a probe
+# server per seed and cite its run. They are development knowledge, never a bot input: the bot
+# finds every structure the way it does on any world (strict no X-ray).
+#
+# name: [a-z0-9-]+. value: server.properties' level-seed, a string (vanilla hashes it) or a
+# 64-bit number (taken as it is).
+
+[[seed]]
+# The issue-20 lineage: every frontier up to the win (config/frontier.toml) is this world, and
+# config/race.toml's `seed` is this value.
+name = "typecraft"
+value = "typecraft"
+tests = "the win lineage"
