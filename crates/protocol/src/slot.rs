@@ -96,17 +96,44 @@ pub fn component_name(id: i32) -> &'static str {
 
 /// How a data component the bot can step over is written: a varint, or nothing (a unit). These
 /// are clojurecraft's `component-codecs`, read from the game's `DataComponents` stream codecs.
+/// `potion_contents` (issue 77) is `PotionContents.STREAM_CODEC` from the 26.1.2 jar (javap,
+/// probe 46151140850): a composite of an optional potion (`Potion.STREAM_CODEC`, a registry id
+/// as a varint), an optional custom colour (`ByteBufCodecs.INT`, four bytes), the custom
+/// effects (`MobEffectInstance.STREAM_CODEC` as a list) and an optional custom name
+/// (`STRING_UTF8`). A witch's potion (race 46140744043) carries no custom effects.
 enum Codec {
     VarInt,
     Unit,
+    PotionContents,
 }
 
 fn codec(component_id: i32) -> Option<Codec> {
     match component_name(component_id) {
         "max_stack_size" | "max_damage" | "damage" | "repair_cost" => Some(Codec::VarInt),
         "unbreakable" => Some(Codec::Unit),
+        "potion_contents" => Some(Codec::PotionContents),
         _ => None,
     }
+}
+
+/// Steps over a `potion_contents` value; `false` when it holds custom effects. A
+/// `MobEffectInstance` is its effect then its `Details` (a recursive record whose stream codec
+/// the jar read here has not shown), so a list that is not empty is left unread: the slot ends
+/// as `Truncated` there, counted, never guessed.
+fn skip_potion_contents(r: &mut Reader<'_>) -> Result<bool, ParseError> {
+    if r.bool()? {
+        r.varint()?;
+    }
+    if r.bool()? {
+        r.i32()?;
+    }
+    if r.varint()? != 0 {
+        return Ok(false);
+    }
+    if r.bool()? {
+        r.string()?;
+    }
+    Ok(true)
 }
 
 /// A slot: count (≤ 0 is empty), item, then the component patch (added count, removed count,
@@ -132,6 +159,16 @@ pub fn read_slot(r: &mut Reader<'_>) -> Result<Slot, ParseError> {
                 }
             }
             Some(Codec::Unit) => {}
+            Some(Codec::PotionContents) => {
+                if !skip_potion_contents(r)? {
+                    return Ok(Slot::Truncated {
+                        item,
+                        count,
+                        wear,
+                        stopped_at: Some(id),
+                    });
+                }
+            }
             None => {
                 return Ok(Slot::Truncated {
                     item,
@@ -251,6 +288,68 @@ mod tests {
             }
         );
         assert_eq!(s.stopped_at(), Some("custom_name"));
+    }
+
+    /// Race 46140744043 lane 2 (rs-l02-b13), a witch's held potion in `set_equipment` (0x66),
+    /// as the cuts probe 46150486488 printed it: entity 983, slot 0, then this stack. Its
+    /// `potion_contents` (component 51) holds potion 13, no colour, no effects, no name.
+    #[test]
+    fn a_witchs_potion_reads_whole() {
+        let packet: [u8; 14] = [
+            0xd7, 0x07, 0x00, 0x01, 0xe2, 0x08, 0x01, 0x00, 0x33, 0x01, 0x0d, 0x00, 0x00, 0x00,
+        ];
+        assert_eq!(component_name(0x33), "potion_contents");
+        let mut r = Reader::new(&packet);
+        assert_eq!(r.varint(), Ok(983));
+        assert_eq!(r.u8(), Ok(0));
+        assert_eq!(read_slot(&mut r), Ok(Slot::item(1122, 1)));
+        assert_eq!(r.remaining(), 0, "the stack read to the packet's end");
+    }
+
+    /// Race 46124595679 lane 0 (rs-l00-b11, cuts probe 46152583531): a tipped arrow put in the
+    /// inventory (`container_set_slot`: window 0, state id 9, slot 40). Its potion_contents
+    /// (potion 28) had cut the slot and every slot after it in a window's content.
+    #[test]
+    fn a_tipped_arrow_in_a_window_slot_reads_whole() {
+        let packet: [u8; 15] = [
+            0x00, 0x09, 0x00, 0x28, 0x01, 0x8e, 0x0a, 0x01, 0x00, 0x33, 0x01, 0x1c, 0x00, 0x00,
+            0x00,
+        ];
+        let mut r = Reader::new(&packet);
+        assert_eq!((r.varint(), r.varint(), r.i16()), (Ok(0), Ok(9), Ok(40)));
+        assert_eq!(read_slot(&mut r), Ok(Slot::item(1294, 1)));
+        assert_eq!(r.remaining(), 0);
+    }
+
+    /// A colour and a name are stepped over; custom effects stop the slot, counted.
+    #[test]
+    fn potion_contents_steps_its_colour_and_name_and_stops_at_effects() {
+        let potion = |effects: i32| {
+            let mut w = Writer::new();
+            w.varint(1);
+            w.varint(1122);
+            w.varint(1);
+            w.varint(0);
+            w.varint(component("potion_contents"));
+            w.bool(false);
+            w.bool(true);
+            w.i32(0x00ff_0000);
+            w.varint(effects);
+            if effects == 0 {
+                w.bool(true);
+                w.string("Splash").unwrap();
+            }
+            w.u8(0xAB);
+            w.buf
+        };
+        let whole = potion(0);
+        let mut r = Reader::new(&whole);
+        assert_eq!(read_slot(&mut r), Ok(Slot::item(1122, 1)));
+        assert_eq!(r.u8(), Ok(0xAB));
+        let effects = potion(1);
+        let s = read_slot(&mut Reader::new(&effects)).unwrap();
+        assert!(s.truncated());
+        assert_eq!(s.stopped_at(), Some("potion_contents"));
     }
 
     #[test]
