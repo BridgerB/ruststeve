@@ -3,7 +3,7 @@ title: Design
 type: moc
 tags: [moc, design]
 status: verified
-lastUpdated: 2026-11-25
+lastUpdated: 2026-11-27
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -30,6 +30,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[entities-and-inventory]] - how the world folds entities and window 0; what is counted rather than invented.
 - [[memory-sightings]] - watched blocks remembered as sightings with time, only when seen with an exposed face.
 - [[physics]] - the body moves: a bit-exact port of clojurecraft's physics step, the movement packets, zero server corrections live.
+- [[sprint]] - sprinting from the 26.1.2 jars: the speed modifier, the jump boost, the start and stop rules, the command packet, its exhaustion.
 - [[race-and-results]] - the race on runners, starts as data, the stage ladder, case and batch files, coverage, k/n.
 - [[insight-store]] - the SurrealDB 4 store built from the race's files, its views, the schema that is steve's contract.
 - [[snapshot-stream]] - the live view: a bot pushes MessagePack frames to steve's local relay, never in the way of a run.
