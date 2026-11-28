@@ -221,6 +221,42 @@ enum Work {
     WayDig(Box<Dig>),
 }
 
+/// The lava bucket filled before the room is cut (issue 83, docs/problems/lava-portal.md wall 1:
+/// race 46139640077 lane 0 cut two rooms, 68 and 50 ops, and lost both at their first lava pour
+/// with 0 fills; 6,040 ticks). A fresh cast holding no lava bucket, with a lava pour still to
+/// do, fills one by the refill ladder before its first op; a failed fill fails it at 0 ops.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum LavaFirst {
+    /// Not asked: a cast resumed at a kept site works as before.
+    #[default]
+    Off,
+    /// A fresh cast, not yet looked at.
+    Armed,
+    /// A fresh cast that held a lava bucket, or had no lava pour left: nothing to fill.
+    Held,
+    /// Filling since this tick.
+    Filling { since: u64 },
+    /// Filled at this tick, after this many ticks.
+    Filled { at: u64, ticks: u64 },
+    /// The fill failed at this tick: the cast failed at 0 ops.
+    Failed { at: u64 },
+}
+
+impl LavaFirst {
+    pub fn text(&self) -> String {
+        match self {
+            LavaFirst::Off => "lava first off (a resumed cast)".to_owned(),
+            LavaFirst::Armed => "lava first armed".to_owned(),
+            LavaFirst::Held => "lava first not needed".to_owned(),
+            LavaFirst::Filling { since } => format!("lava first filling since {since}"),
+            LavaFirst::Filled { at, ticks } => {
+                format!("lava first filled at {at} after {ticks} ticks")
+            }
+            LavaFirst::Failed { at } => format!("lava first failed at {at}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Cast {
     pub site: Site,
@@ -282,6 +318,15 @@ pub struct Cast {
     /// ended "Op after 13 ops, at :dig :room" with nothing to say what the dig met).
     #[serde(default)]
     op_trail: Vec<String>,
+    /// The lava bucket filled before the first op (issue 83 wall 1).
+    #[serde(default)]
+    pub lava_first: LavaFirst,
+    /// The source the last refill's scoop filled from, for the lava-first note.
+    #[serde(default)]
+    last_fill: Option<Cell>,
+    /// A note for the planner's ledger, taken once (`take_note`).
+    #[serde(default)]
+    note: Option<(String, String)>,
 }
 
 fn eye(b: &physics::Body) -> [f64; 3] {
@@ -399,7 +444,90 @@ impl Cast {
             furthest: None,
             churn: 0,
             walk_digs: 0,
+            lava_first: LavaFirst::Off,
+            last_fill: None,
+            note: None,
         }
+    }
+
+    /// A cast at a newly chosen site: its lava bucket filled before its first op when none is
+    /// held and a lava pour is still to do (issue 83 wall 1).
+    pub fn fresh(site: Site, tick: u64) -> Self {
+        Self {
+            lava_first: LavaFirst::Armed,
+            ..Self::new(site, tick)
+        }
+    }
+
+    /// The note the cast left for the ledger since the last call, if any.
+    pub fn take_note(&mut self) -> Option<(String, String)> {
+        self.note.take()
+    }
+
+    /// Whether a lava pour of the plan is still to do.
+    fn lava_pour_left(&self, w: &World) -> bool {
+        self.plan.iter().any(|o| {
+            o.kind == OpKind::Pour && o.item == Some(ItemKind::LavaBucket) && !holds(w, &o.done)
+        })
+    }
+
+    /// The lava bucket filled first: `None` once nothing is left to fill (the op worked as
+    /// before), else the refill's step. A failed fill fails the cast `NoRefill` at 0 ops, the
+    /// refill failure the planner already handles (the fetch, then the site given up).
+    fn lava_first_step(
+        &mut self,
+        w: &World,
+        tick: u64,
+    ) -> Option<(Controls, Option<Act>, CastStatus)> {
+        let held = crate::craft::count(w, ItemKind::LavaBucket) > 0;
+        match self.lava_first {
+            LavaFirst::Off
+            | LavaFirst::Held
+            | LavaFirst::Filled { .. }
+            | LavaFirst::Failed { .. } => return None,
+            LavaFirst::Armed if held || !self.lava_pour_left(w) => {
+                self.lava_first = LavaFirst::Held;
+                return None;
+            }
+            LavaFirst::Armed => {
+                self.lava_first = LavaFirst::Filling { since: tick };
+            }
+            LavaFirst::Filling { since } if held => {
+                let ticks = tick.saturating_sub(since);
+                self.lava_first = LavaFirst::Filled { at: tick, ticks };
+                // The refill's failed scoops spent tries of the first op: it starts afresh.
+                self.tries = 0;
+                self.op_trail.clear();
+                self.work = Work::Idle;
+                self.last_done = tick;
+                let feet = w.body.map(|b| feet(&b));
+                self.note = Some((
+                    format!(
+                        "lava first: filled at {feet:?} from {:?} after {ticks} ticks",
+                        self.last_fill
+                    ),
+                    format!(
+                        "cast at {:?}: the lava bucket filled before the room is cut",
+                        self.site.frame.origin
+                    ),
+                ));
+                return None;
+            }
+            LavaFirst::Filling { .. } => {}
+        }
+        let r = self.refill(w, ItemKind::LavaBucket, tick);
+        if let CastStatus::Failed(f) = r.2 {
+            self.lava_first = LavaFirst::Failed { at: tick };
+            self.note = Some((
+                format!("lava first failed: {f:?} at 0 ops"),
+                format!(
+                    "cast at {:?}, no lava bucket filled before the room; {}",
+                    self.site.frame.origin,
+                    self.refill_text()
+                ),
+            ));
+        }
+        Some(r)
     }
 
     fn trail(&mut self, tick: u64, what: String) {
@@ -443,8 +571,10 @@ impl Cast {
 
     pub fn uses_text(&self) -> String {
         let [fe, fb, ee, eb] = self.scoop_uses;
+        // The lava-first state rides on every ending note (the lit one carries only the uses).
         format!(
-            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked"
+            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked; {}",
+            self.lava_first.text()
         )
     }
 
@@ -538,6 +668,9 @@ impl Cast {
         }
         if self.exposed(w) {
             return (still, None, CastStatus::Failed(CastFailure::Exposed));
+        }
+        if let Some(r) = self.lava_first_step(w, tick) {
+            return r;
         }
         match op.kind {
             OpKind::Dig => self.dig(w, &body, &op, tick),
@@ -1303,6 +1436,7 @@ impl Cast {
             ScoopStatus::Running => (c, act, CastStatus::Running),
             ScoopStatus::Done => {
                 let uses = s.uses;
+                self.last_fill = Some(s.target);
                 self.count_uses(uses);
                 self.work = Work::Idle;
                 (c, act, CastStatus::Running)
