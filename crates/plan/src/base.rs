@@ -397,20 +397,45 @@ pub fn free_slots(w: &World) -> usize {
 /// With fewer than `free_slots` main slots free, the first main stack of a `drop` kind (in the
 /// list's order), never one of `NEVER_DROP`.
 pub fn drop_slot(w: &World, base: &Base) -> Option<(i16, ItemKind)> {
+    drop_slot_by(w, base, &|_, _| crate::keep::Rank::Surplus).map(|(s, k, _)| (s, k))
+}
+
+/// `drop_slot` with the candidates (each `drop` kind's first main stack) ordered least needed
+/// first by `rank` of what the drop leaves (issue 77, brain/ruststeve/design/keep-rule.md), then
+/// the list's order. The gate is unchanged: only `drop` kinds, never `NEVER_DROP`, under
+/// `free_slots`.
+pub fn drop_slot_by(
+    w: &World,
+    base: &Base,
+    rank: &dyn Fn(ItemKind, i32) -> crate::keep::Rank,
+) -> Option<(i16, ItemKind, crate::keep::Rank)> {
     if free_slots(w) >= base.free_slots {
         return None;
     }
+    let main = |s: &i16| (9..=44).contains(s);
     base.drop
         .iter()
         .filter_map(|n| item(n))
         .filter(|k| !NEVER_DROP.contains(k))
-        .find_map(|k| {
-            w.inventory
+        .enumerate()
+        .filter_map(|(i, k)| {
+            let (s, n) = w
+                .inventory
                 .slots
                 .iter()
-                .find(|(s, (h, _))| (9..=44).contains(*s) && *h == k)
-                .map(|(s, _)| (*s, k))
+                .find(|(s, (h, _))| main(s) && *h == k)
+                .map(|(s, (_, n))| (*s, *n))?;
+            let total: i32 = w
+                .inventory
+                .slots
+                .iter()
+                .filter(|(s2, (h, _))| main(s2) && *h == k)
+                .map(|(_, (_, m))| *m)
+                .sum();
+            Some((i, s, k, rank(k, total - n)))
         })
+        .min_by(|a, b| a.3.cmp(&b.3).then(a.0.cmp(&b.0)))
+        .map(|(_, s, k, r)| (s, k, r))
 }
 
 /// On the way home with no main slot free: the main stack of the Nether's blocks whose kind is
@@ -869,7 +894,7 @@ impl Plan {
         if w.click.is_none()
             && w.window.is_none()
             && w.inventory.carried.is_none()
-            && let Some((slot, kind)) = drop_slot(w, &base)
+            && let Some((slot, kind, r)) = drop_slot_by(w, &base, &self.keep_rank(w))
         {
             self.acts.push(Act::Click {
                 slot,
@@ -881,9 +906,10 @@ impl Plan {
                 tick,
                 format!("base: drop {kind:?} from slot {slot}"),
                 format!(
-                    "{} main slots free, {} kept free",
+                    "{} main slots free, {} kept free; {}",
                     free_slots(w),
-                    base.free_slots
+                    base.free_slots,
+                    r.text()
                 ),
             );
             return Some(Task::Idle);
