@@ -21,9 +21,9 @@ use physics::{Body, Controls, Fluid, FluidKind, Surface};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
-use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT};
+use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT, INPUT_SPRINT};
 use protocol::slot::{Slot, Wear};
-use protocol::{C2s, Out, S2c, Session};
+use protocol::{C2s, Out, PlayerCommandAction, S2c, Session};
 
 pub mod biome;
 pub mod stage;
@@ -564,14 +564,19 @@ pub struct Player {
     pub air: Option<i32>,
     #[serde(default)]
     pub on_fire: bool,
+    /// Whether the server holds the player sprinting (index 0, bit 0x08,
+    /// `Entity.FLAG_SPRINTING`), as it last said: `None` before it said. The server sets it
+    /// only from our `player_command`, so this is its word on what we reported (issue 56).
+    #[serde(default)]
+    pub sprinting: Option<bool>,
     /// Items finished using (an eat: entity event 9 for the bot), counted.
     #[serde(default)]
     pub uses_finished: u64,
     /// Effects on the bot by name: amplifier and the server tick it ends (issue 16e).
     #[serde(default)]
     pub effects: BTreeMap<String, (i32, u64)>,
-    /// Its attributes as the server holds them (`armor`, `max_health`): base plus the
-    /// add-value modifiers.
+    /// Its attributes as the server holds them (`armor`, `max_health`): the game's value from
+    /// the base and every modifier (`protocol::Attribute::value`).
     #[serde(default)]
     pub attributes: BTreeMap<String, f64>,
     /// The server thinks it is in a fight (`player_combat_enter` until `_end`).
@@ -627,6 +632,10 @@ pub struct World {
     /// only when they change, as the client's `lastSentInput` does.
     #[serde(default)]
     pub sent_input: u8,
+    /// Whether the server was last told the bot sprints (`player_command` START or STOP), as
+    /// the client's `wasSprinting`: a report goes out when the body's sprint differs from it.
+    #[serde(default)]
+    pub sent_sprinting: bool,
     /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
     #[serde(default)]
     pub hits: Vec<Hit>,
@@ -765,6 +774,10 @@ pub struct DayClock {
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
 const STATUS_ONLY_EVERY: u64 = 20;
+
+/// The sprint bit of an entity's shared flags, data index 0 (`Entity.FLAG_SPRINTING` = 3, so
+/// `1 << 3`; the game's table: 0 on fire, 1 crouching, 3 sprinting, 4 swimming).
+pub const FLAG_SPRINTING: u8 = 1 << 3;
 
 impl World {
     pub fn new() -> Self {
@@ -941,12 +954,15 @@ impl World {
         Some(Fluid { kind, level })
     }
 
-    /// The keys held, as the server is told them: forward, jump and shift from the controls.
-    /// The bot has no backward, strafe or sprint key (it walks; sprinting is never reported).
+    /// The keys held, as the server is told them: forward, jump, shift and sprint from the
+    /// controls. The bot has no backward or strafe key. The sprint bit is the key held
+    /// (`KeyboardInput.tick` builds the `Input` from `keySprint.isDown()`), not whether the
+    /// body sprints: that is `player_command`'s (`report_sprint`).
     pub fn input_flags(controls: &Controls) -> u8 {
         (if controls.forward { INPUT_FORWARD } else { 0 })
             | (if controls.jump { INPUT_JUMP } else { 0 })
             | (if controls.sneak { INPUT_SHIFT } else { 0 })
+            | (if controls.sprint { INPUT_SPRINT } else { 0 })
     }
 
     /// One tick of the body: the keys when they changed, physics, then the movement packet
@@ -972,6 +988,33 @@ impl World {
         }
         self.sent_input = flags;
         vec![Effect::Send(C2s::PlayerInput { flags })]
+    }
+
+    /// The sprint, when the body's differs from the last report: vanilla's
+    /// `LocalPlayer.sendPosition` begins with `sendIsSprintingIfNeeded`, which sends
+    /// `player_command` START_SPRINTING or STOP_SPRINTING when `isSprinting()` is not
+    /// `wasSprinting`, after the tick's movement and before the move packet. The server sets the
+    /// player's sprint flag, and the sprint modifier on its speed, only from this
+    /// (`handlePlayerCommand`); `observe` tells each report as `Fact::Sprint`. With no entity id
+    /// (before the play login) nothing can be sent, and nothing is marked sent.
+    fn report_sprint(&mut self, sprinting: bool) -> Vec<Effect> {
+        if sprinting == self.sent_sprinting {
+            return Vec::new();
+        }
+        let Some(entity) = self.player.entity_id else {
+            return Vec::new();
+        };
+        self.sent_sprinting = sprinting;
+        let action = if sprinting {
+            PlayerCommandAction::StartSprinting
+        } else {
+            PlayerCommandAction::StopSprinting
+        };
+        vec![Effect::Send(C2s::PlayerCommand {
+            entity,
+            action,
+            data: 0,
+        })]
     }
 
     fn move_body(&mut self, body: Body) -> Vec<Effect> {
@@ -1016,9 +1059,19 @@ impl World {
         let solid = |x, y, z| self.solid(x, y, z);
         let fluid = |x, y, z| self.fluid(x, y, z);
         let surface = |x, y, z| self.surface(x, y, z);
-        let moved = physics::step_on(&solid, &fluid, &surface, &body, &self.controls);
+        // The food the server last told decides whether the sprint goes on (food 6 or less stops
+        // it, `LocalPlayer.aiStep`); before the first `set_health` it is unknown and lets it.
+        let moved = physics::step_fed(
+            &solid,
+            &fluid,
+            &surface,
+            &body,
+            &self.controls,
+            self.player.food,
+        );
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
+        let mut out = self.report_sprint(moved.sprinting);
         // Physics and the movement packets use the controls' yaw; the pitch is the controls' when
         // set (a bucket aimed, issue 14a), else the server's look is kept.
         #[allow(clippy::cast_possible_truncation)]
@@ -1034,20 +1087,19 @@ impl World {
             self.sent_look = Some(look);
             self.sent_tick = self.ticks;
             let [x, y, z] = moved.pos;
-            return vec![Effect::Send(C2s::MovePlayerPosRot {
+            out.push(Effect::Send(C2s::MovePlayerPosRot {
                 x,
                 y,
                 z,
                 yaw: look.0,
                 pitch: look.1,
                 flags,
-            })];
-        }
-        if self.ticks - self.sent_tick >= STATUS_ONLY_EVERY {
+            }));
+        } else if self.ticks - self.sent_tick >= STATUS_ONLY_EVERY {
             self.sent_tick = self.ticks;
-            return vec![Effect::Send(C2s::MovePlayerStatusOnly { flags })];
+            out.push(Effect::Send(C2s::MovePlayerStatusOnly { flags }));
         }
-        Vec::new()
+        out
     }
 
     fn enter(&mut self, type_id: i32, name: &str) {
@@ -1503,6 +1555,10 @@ impl World {
                 // (`LocalPlayer`'s `lastSentInput` starts empty), and after a death the server's
                 // new player holds no shift key: keys still held are reported again.
                 self.sent_input = 0;
+                // The sprint last reported is kept, unlike vanilla's new player (`wasSprinting`
+                // false): a portal's respawn keeps the server's player and its sprint flag, so a
+                // body that walks on after it sends the STOP. After a death the server's new
+                // player is not sprinting and that STOP is harmless.
             }
             S2c::LevelChunkWithLight { x, z, column } => {
                 let at = ChunkPos { x: *x, z: *z };
@@ -1632,7 +1688,10 @@ impl World {
                 for (index, value) in entries {
                     match (index, value) {
                         (1, MetaValue::Int(air)) => self.player.air = Some(*air),
-                        (0, MetaValue::Byte(flags)) => self.player.on_fire = flags & 1 == 1,
+                        (0, MetaValue::Byte(flags)) => {
+                            self.player.on_fire = flags & 1 == 1;
+                            self.player.sprinting = Some(flags & FLAG_SPRINTING != 0);
+                        }
                         _ => {}
                     }
                 }
@@ -2026,10 +2085,13 @@ impl World {
                 }
             }
             S2c::UpdateAttributes { id, attributes } => {
-                let values = attributes.iter().map(|(a, base, add)| {
+                // The value the game computes from every modifier, multipliers too: sprinting's
+                // is a multiply_total on movement_speed (physics keeps its own constants; this is
+                // the server's word).
+                let values = attributes.iter().map(|a| {
                     (
-                        registry_name(data::generated::registries::ATTRIBUTE.as_slice(), *a),
-                        base + add,
+                        registry_name(data::generated::registries::ATTRIBUTE.as_slice(), a.id),
+                        a.value(),
                     )
                 });
                 if Some(*id) == self.player.entity_id {
@@ -2446,6 +2508,130 @@ mod body_tests {
     use super::*;
     use protocol::BossOp;
 
+    /// Issue 56: a sprint is reported once on each change, START then STOP, with the player's
+    /// entity id; before the play login gives one, nothing is sent or marked sent.
+    #[test]
+    fn a_sprint_is_reported_once_per_change() {
+        let command = |entity, action| {
+            vec![Effect::Send(C2s::PlayerCommand {
+                entity,
+                action,
+                data: 0,
+            })]
+        };
+        let mut w = World::new();
+        assert!(w.report_sprint(true).is_empty(), "no entity id yet");
+        assert!(!w.sent_sprinting);
+        w.player.entity_id = Some(9);
+        assert_eq!(
+            w.report_sprint(true),
+            command(9, PlayerCommandAction::StartSprinting)
+        );
+        assert!(w.report_sprint(true).is_empty(), "sent once");
+        assert_eq!(
+            w.report_sprint(false),
+            command(9, PlayerCommandAction::StopSprinting)
+        );
+        assert!(w.report_sprint(false).is_empty());
+    }
+
+    /// Issue 56, through the tick: on stone, forward and sprint held, the first tick sends
+    /// START_SPRINTING before its move, the next sends none, food 6 (`set_health`) stops it with
+    /// STOP_SPRINTING (the world steps with the food it holds, `step_fed`), and a tick with the
+    /// sprint still refused sends nothing more. As vanilla, the action is `player_command`'s,
+    /// with the player's entity id and data 0.
+    #[test]
+    fn a_tick_reports_the_sprint_on_each_change_and_hunger_stops_it() {
+        use protocol::chunk::{Paletted, Section};
+        let stone = BlockKind::Stone.info().map(|i| i.first_state).unwrap();
+        // An overworld column: stone up to y 63 (sections 0 to 7, y -64 to 63), air above.
+        let sections = (0..24)
+            .map(|i| Section {
+                block_count: if i < 8 { 4096 } else { 0 },
+                fluid_count: 0,
+                blocks: Paletted::Single(if i < 8 { stone } else { 0 }),
+                biomes: Paletted::Single(0),
+            })
+            .collect();
+        let mut w = World::new();
+        w.step(&Event::Packet(S2c::Login {
+            entity_id: 9,
+            view_distance: 8,
+            simulation_distance: 3,
+            dimension_type: 0,
+            dimension: "minecraft:overworld".to_owned(),
+            game_type: 0,
+        }));
+        w.step(&Event::Packet(S2c::LevelChunkWithLight {
+            x: 0,
+            z: 0,
+            column: Arc::new(Column {
+                min_y: -64,
+                sections,
+            }),
+        }));
+        w.body = Some(Body {
+            pos: [8.5, 64.0, 8.5],
+            on_ground: true,
+            ..Body::default()
+        });
+        w.step(&Event::Controls(Controls {
+            forward: true,
+            sprint: true,
+            ..Controls::default()
+        }));
+        let tick = |w: &mut World, n: u64| {
+            w.step(&Event::Tick {
+                now_ms: n * 50,
+                seed: n,
+            })
+        };
+        let commands = |out: &[Effect]| -> Vec<PlayerCommandAction> {
+            out.iter()
+                .filter_map(|e| match e {
+                    Effect::Send(C2s::PlayerCommand {
+                        entity: 9,
+                        action,
+                        data: 0,
+                    }) => Some(*action),
+                    _ => None,
+                })
+                .collect()
+        };
+        let first = tick(&mut w, 1);
+        assert_eq!(
+            commands(&first),
+            vec![PlayerCommandAction::StartSprinting],
+            "{first:?}"
+        );
+        let start = first
+            .iter()
+            .position(|e| matches!(e, Effect::Send(C2s::PlayerCommand { .. })));
+        let mv = first
+            .iter()
+            .position(|e| matches!(e, Effect::Send(C2s::MovePlayerPosRot { .. })));
+        assert!(
+            start < mv && mv.is_some(),
+            "START before the move: {first:?}"
+        );
+        assert!(w.body.is_some_and(|b| b.sprinting));
+        assert!(commands(&tick(&mut w, 2)).is_empty(), "unchanged: nothing");
+        w.step(&Event::Packet(S2c::SetHealth {
+            health: 20.0,
+            food: 6,
+            saturation: 0.0,
+        }));
+        assert_eq!(
+            commands(&tick(&mut w, 3)),
+            vec![PlayerCommandAction::StopSprinting]
+        );
+        assert!(w.body.is_some_and(|b| !b.sprinting));
+        assert!(
+            commands(&tick(&mut w, 4)).is_empty(),
+            "still refused: nothing"
+        );
+    }
+
     /// Issue 16e: effects, attributes, chat, the boss bar and the win reach the world by name.
     #[test]
     fn effects_chat_bosses_and_the_win_are_kept() {
@@ -2470,9 +2656,24 @@ mod body_tests {
             .unwrap();
         w.fold(&S2c::UpdateAttributes {
             id: 1,
-            attributes: vec![(armor, 0.0, 15.0)],
+            attributes: vec![protocol::Attribute::added(armor, 0.0, 15.0)],
         });
         assert_eq!(w.player.attributes.get("armor"), Some(&15.0));
+        // The sprint modifier, a multiply_total of 0.3, is in the value.
+        let speed = data::generated::registries::ATTRIBUTE
+            .iter()
+            .position(|n| *n == "movement_speed")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap();
+        w.fold(&S2c::UpdateAttributes {
+            id: 1,
+            attributes: vec![protocol::Attribute {
+                multiply_total: 1.3,
+                ..protocol::Attribute::added(speed, 0.1, 0.0)
+            }],
+        });
+        let v = w.player.attributes.get("movement_speed").copied().unwrap();
+        assert!((v - 0.13).abs() < 1e-12, "{v}");
         w.fold(&S2c::SystemChat {
             text: "rs-l01-b00 was slain by Blaze".to_owned(),
             overlay: false,
