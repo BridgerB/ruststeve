@@ -101,6 +101,16 @@ until = "home-chest"
 doc = "a chest put down near, crafted from eight planks in a placed crafting table"
 provides = [["block:chest", 1]]
 
+# The home chest crafted early and carried (wall 5, docs: race 46147028872, bots reached the portal
+# with 11 to 15 planks short of the rule): the first time the same wood spares in the overworld
+# before `ready`, made where the bot stands and put down at the portal by `home-chest`.
+[[goal]]
+id = "carry-chest"
+priority = 7
+until = "carry-chest"
+doc = "a chest held, crafted from eight planks at a crafting table where the bot stands"
+provides = [["item:chest", 1]]
+
 [[goal]]
 id = "place-chest"
 priority = 10

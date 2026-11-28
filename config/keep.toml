@@ -134,6 +134,18 @@ name = "red_mushroom"
 [[item]]
 name = "chicken"
 
+# --- the stash planner (77-stash, brain/ruststeve/design/chests.md) ---
+
+# The home chest (wall 5: race 46147028872 reached the portal 11 to 15 planks short): crafted
+# early, carried, put down at the Nether portal for the stash. One, by the leg's first stage.
+# `when = []`: no drop gate holds it, so the drop rule ranks it Unlisted, which is never
+# dropped (stronger than Needed, and the old lists stay pinned: the_rows_are_the_old_junk_lists);
+# Keep::need_in reads it in any context, so the stash never puts it away.
+[[item]]
+name = "chest"
+when = []
+needs = [["nether", 1]]
+
 # --- the Nether's leftovers: [stronghold] junk, [fortress_way] junk and Q8 ---
 
 # 64 in the overworld for the overland's bridges (bridge_keep 32, bridge_max 40; race
