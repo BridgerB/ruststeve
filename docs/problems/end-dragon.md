@@ -472,3 +472,9 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - **Fix:** recovering with nothing near and food under `REGEN_FOOD` (18), the meal is begun ("recover: eat to heal"), unless `dragon_holds_meal` holds it off.
 - **Wall 58: held by the body through the last flaming turn** (race 46103123144 on b359a01, lane 7). At 8,700 the bot was held "in the low stand, the flame burning", 8.3 across the body. The takeoff came at 8,760 and its 2.5 blow lifted the bot to 84: `death.fell.assist`. A perch's fourth flaming turn always ends in the takeoff (`DragonSittingFlamingPhase`: `flameCount >= 4`), and every perch in these races ran four.
   - **Fix:** `DragonState::flames` counts the flaming turns begun on a perch, reset at the landing. `knock_risk_at` takes the fourth turn as the takeoff's own risk: within 12 of the body, or in the head's lane, the knock dodge goes before the dragon lifts.
+- **Wall 59: a long scan's takeoff, and meals in the air** (race 46103123144 on b359a01; lane 11 took the dragon to 45, lane 2 to 90, and both died to falls).
+  - Lane 11 was 8 from the fountain when sitting-scanning turned to takeoff at 19,040. A scan that finds no player in its view takes off at 100 ticks (`DragonSittingScanningPhase`). The knock dodge came 9 ticks late, two blows took it from 20 to 12.5, and it was flung.
+  - At 19,080 "start #29 eat … (food Some(19) …)" began in the air after the knock. The fall took it to 8.5, then dead at 19,100. Lane 2 also ate in the air.
+  - **Fix:**
+    - `knock_risk_at` takes a scan past `SCAN_LEAVE_TICKS` (60) as the takeoff's risk, like the fourth flaming turn: within 12 of the body, or in the head's lane, the dodge goes before it lifts.
+    - `dragon_holds_meal` holds every meal while the body is off the ground. It gates the always row's eat and `meal_cut`, so a meal in hand is cut once airborne.
