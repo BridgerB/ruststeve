@@ -5,9 +5,10 @@ type: reference
 tags: [physics, sprint, movement, hunger, packets, jar]
 aliases: [sprinting, sprint-jump, START_SPRINTING, STOP_SPRINTING, player_command, sprint exhaustion, config/sprint.toml]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@f2408e5
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@a9a6129
 sourceRefs:
+  - "ruststeve:crates/plan/src/sprint.rs#pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict {"
   - "ruststeve:config/sprint.toml#sprint_modifier_amount = 0.30000001192092896"
   - "ruststeve:config/sprint.toml#air_acceleration_sprint = 0.025999999"
   - "ruststeve:config/sprint.toml#sprint_jump_boost = 0.2"
@@ -48,6 +49,15 @@ Every number is in `config/sprint.toml`, each with the class and method it came 
 ## The server
 - `handlePlayerCommand` sets the flag with no check of food, collision or speed. `handleMovePlayer` never compares a move against the sprint: it refuses only a move over 100 squared beyond the expected velocity per packet, and one its own sweep puts 0.0625 squared from the report. **The server takes the sprint from the client**; a wrong client sprint is no correction, only a cheat.
 - **Exhaustion** (`ServerPlayer.checkMovementStatistics`, per accepted move, whole centimetres): on the ground, sprinting costs 0.1 a metre horizontally and walking or crouching nothing; swimming, eye in water and in water 0.01 a metre; in the air nothing. A jump costs 0.05, a sprint-jump 0.2 (`ServerPlayer.jumpFromGround`, called when the client leaves the ground going up). Each 4.0 takes a saturation point, else a food point: a sprint costs one point every 40 metres, a sprint-jump one every 20 jumps.
+
+## The pace policy (issue 56, `plan::sprint`)
+- **Who asks**: a walk's plain move (`walk::toward`, so every task's walk), an explore, a retreat's away step and straight-away step, and the escape's move hold the sprint key (`Controls.sprint`). The gate (`Plan::pace_gate`, last in `Plan::step`) keeps it only where the policy allows. The kind of move is the closed `sprint::Pace`, read from the task in hand.
+- **Food**: a move sprints while one point is left to spend over `hungry_below`, saturation counted first (`points_to_spend`), one point per `metres_per_point` (40) of flat sprint. So a sprint alone never takes the food under the line: at `hungry_below` + 1 it sprints 40 metres and walks on.
+- **`never_fight`**: a retreat from one always asks and skips the budget; the body's floor (food 6, `physics::sprint_allowed`) still holds.
+- **Ground**: refused in lava or water (no swim model), and toward or along a lava edge (`walk::lava_edge`, the walk's own sneak rule), a missing floor, the End's void edge, water, footing the physics cannot simulate or an unloaded cell, read `look_ahead` (2) blocks along the facing. In the air the last answer holds.
+- **Path**: a bridge, a sneak at an edge and `Task::Stairs` (stairs and travel tunnels) keep walking; a fight's close-in never asks (a sprinting blow is never a critical).
+- **A swing ends a sprint**; the wish is held, so the body starts it again the next tick.
+- **Ledger**: "sprint begun, <pace>" once a task, "sprint refused, <reason>" once a task for each reason, counted in the race summary's notes by kind.
 
 ## Gotchas
 - The plan's "0.1 food per 40 metres" is out by ten: it is one point (half a shank) per 40 metres.

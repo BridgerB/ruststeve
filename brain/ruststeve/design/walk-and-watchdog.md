@@ -5,8 +5,8 @@ type: reference
 tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@a9a6129 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -51,6 +51,9 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 
 ## Issue 20e: the void is an edge (docs/problems/end-island.md)
 In the End a side whose floor neighbour and every cell under it to the dimension's floor are loaded and clear (`end::void_edge`, `end::void_column`) is an edge as lava is: the walk sneaks there, "walk: sneak at a void edge from …" once a walk. Unloaded cells under it are not a known void. The End's bridge is its own ([[end-island]]), not the far walk's bridge move.
+
+## Issue 56: the walk asks to sprint
+- `toward` (and so `follow`) holds the sprint key; the pace gate ([[sprint]], `plan::sprint`) keeps it where the food and the ground allow. A bridge or a sneak at an edge clears it and sets `More.step`, which `Walk::pace` hands the gate for its "sprint refused" note. `Walk::left` is the route still to go.
 
 ## See also
 - [[pathfinding]] - the routes.

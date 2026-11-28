@@ -46,3 +46,14 @@ What this changes in the plan:
 - **The server never corrects a wrong sprint**, so the parity rows (S3) and the jar read are the only evidence the body is right.
 
 Not read: the client's side of a sprint hit (`MultiPlayerGameMode.attack` running `Player.attack` locally), swimming's speed (`Player.travel` in water), and `AttributeInstance.calculateValue` (the standard `value × (1 + amount)` is assumed for `add_multiplied_total`).
+
+## The pace policy (S5, `plan::sprint`, `config/sprint.toml` `[policy]`)
+Which moves sprint, as a closed `sprint::Pace` read from the task in hand; the gate (`Plan::pace_gate`) runs last in `Plan::step`.
+
+- **Ask**: walks (every task's walk), explores, retreats and the escape's move hold the sprint key. A retreat from a `never_fight` kind always asks.
+- **Food**: a sprint needs a point to spend over `hungry_below` (saturation first), one point per 40 metres (`metres_per_point`). A `never_fight` retreat skips this; the body's floor of 6 still holds.
+- **Ground**: no sprint in water (no swim model) or lava, nor toward or along a lava edge, a missing floor, the void's edge, water, awkward footing or an unloaded cell, `look_ahead` (2) blocks along the facing.
+- **Path**: bridges, sneaks at an edge and stairs or travel tunnels walk; a fight's close-in walks.
+- **Counted**: "sprint begun, <pace>" once a task and "sprint refused, <reason>" once a task for each reason, in the race summary's notes by kind; `Plan.pace` keeps the run's sprint and refused ticks.
+
+Unverified until a race: the sprint's effect on waypoint following at corners (0.28 a tick against `WAYPOINT_REACH` 0.35), and the first CI and race counts of each note.
