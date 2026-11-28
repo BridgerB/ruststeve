@@ -37,6 +37,27 @@ pub struct KeepCounts {
     /// The stash and fetch paths (plan::stash): which ran, and how each gate came out.
     #[serde(default)]
     pub chest: ChestCounts,
+    /// Want lines whose kind was last lost to a death, not dropped: a death clears the drop
+    /// memory, so these are never dropped-then-wanted (lead-77, race 46140744043: all six
+    /// dropped-then-wanted there had a death between the drop and the want).
+    #[serde(default)]
+    pub wanted_after_death: u64,
+    /// Deaths seen (the `Death` fact or the `died (...) and respawned` note, once a tick).
+    #[serde(default)]
+    pub deaths: u64,
+    /// Drops that left less than the kind's keep count (read from the item fact after the drop
+    /// and the keep table at the drop line's stage and contexts): to be 0.
+    #[serde(default)]
+    pub under_keep: Vec<UnderKeep>,
+}
+
+/// A drop that left less of its kind than the keep table keeps there.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnderKeep {
+    pub kind: String,
+    pub at: u64,
+    pub left: i32,
+    pub keep: i32,
 }
 
 /// One (source, kinds) of want lines: how many lines, and their counts summed.
@@ -190,6 +211,9 @@ impl KeepCounts {
             e.n += t.n;
         }
         self.chest.sum(&o.chest);
+        self.wanted_after_death += o.wanted_after_death;
+        self.deaths += o.deaths;
+        self.under_keep.extend(o.under_keep.iter().cloned());
     }
 }
 
@@ -236,41 +260,160 @@ fn want_n(what: &str) -> i64 {
         .unwrap_or(0)
 }
 
-/// The keep counts of one run's ledger.
+/// Ticks after a death in which an item's fall is the death's loss: the respawn's inventory
+/// comes within a second (race 46140744043 pale b12: died 46680, cobblestone 64 -> 0 at 46700).
+pub const DEATH_LOSS_TICKS: u64 = 100;
+/// Ticks after a drop line in which its kind's item fact is the drop's (the drop's click is
+/// answered within a round trip; the planner's drop clock is `EQUIP_TICKS`).
+pub const DROP_SETTLE_TICKS: u64 = 40;
+
+/// A ledger item name ("cobblestone") as the drop and want lines name it ("Cobblestone").
+fn line_name(item: &str) -> Option<String> {
+    data::ItemKind::from_name(item.strip_prefix("minecraft:").unwrap_or(item))
+        .map(|k| format!("{k:?}"))
+}
+
+/// The keep count a drop line's reason says held there: its stage and contexts, read against
+/// the keep table ("...; needed: 64 by win; stage nether; always+home_leg"). None for the old
+/// lists' fallback or a reason without them.
+fn keep_at(table: &plan::keep::Keep, kind: &str, why: &str) -> Option<i32> {
+    let parts: Vec<&str> = why.split("; ").collect();
+    let stage = parts.iter().find_map(|p| p.strip_prefix("stage "))?;
+    let reached = world::Stage::from_name(stage);
+    let ctx: Vec<plan::keep::Context> = parts
+        .last()?
+        .split('+')
+        .filter_map(|n| plan::keep::Context::ALL.into_iter().find(|c| c.name() == n))
+        .collect();
+    if ctx.is_empty() {
+        return None;
+    }
+    table
+        .junk(reached, &ctx)
+        .into_iter()
+        .find(|(k, _)| format!("{k:?}") == kind)
+        .map(|(_, n)| n)
+}
+
+/// One thing on a run's timeline, notes and facts merged by tick.
+enum Ev<'a> {
+    Death,
+    Item { item: &'a str, from: i32, to: i32 },
+    Note { what: &'a str, why: &'a str },
+}
+
+/// The keep counts of one run's ledger: its notes and its facts on one timeline. A death clears
+/// the drop memory (its kinds, and those it took, are then lost to the death, not dropped).
 pub fn keep_counts(l: &Ledger) -> KeepCounts {
-    let mut last_drop: BTreeMap<String, u64> = BTreeMap::new();
-    let mut c = KeepCounts::default();
+    let table = plan::keep::Keep::parse(plan::keep::KEEP_TOML).ok();
+    let mut evs: Vec<(u64, u8, Ev)> = Vec::new();
     for t in &l.tasks {
-        let plan::TaskRecord::Note { at, what, why } = t else {
-            continue;
-        };
-        if let Some(k) = drop_kind(what) {
-            c.drops += 1;
-            last_drop.insert(k.to_owned(), *at);
-        } else if let Some(kinds) = want_kinds(what) {
-            c.wants += 1;
-            let src = want_source(what).unwrap_or("?").to_owned();
-            *c.wants_by_source.entry(src.clone()).or_default() += 1;
-            let e = c.want_list.entry((src, kinds.join("|"))).or_default();
-            e.lines += 1;
-            e.n += want_n(what);
-            let hits: Vec<DropWant> = kinds
-                .iter()
-                .filter_map(|k| {
-                    last_drop.get(*k).filter(|d| *d < at).map(|d| DropWant {
-                        kind: (*k).to_owned(),
-                        dropped_at: *d,
-                        wanted_at: *at,
-                    })
-                })
-                .collect();
-            if !hits.is_empty() {
-                c.dropped_then_wanted += 1;
-                c.cases.push(format!("{at} {what}"));
-                c.pairs.extend(hits);
+        if let plan::TaskRecord::Note { at, what, why } = t {
+            evs.push((*at, 1, Ev::Note { what, why }));
+        }
+    }
+    for f in &l.facts {
+        match &f.fact {
+            observe::Fact::Death => evs.push((f.at, 0, Ev::Death)),
+            observe::Fact::Item { item, from, to } => evs.push((
+                f.at,
+                0,
+                Ev::Item {
+                    item,
+                    from: *from,
+                    to: *to,
+                },
+            )),
+            _ => {}
+        }
+    }
+    // By tick, facts before the notes of the same tick; stable within each.
+    evs.sort_by_key(|(at, order, _)| (*at, *order));
+    let mut last_drop: BTreeMap<String, u64> = BTreeMap::new();
+    let mut lost: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut death_at: Option<u64> = None;
+    // Drops waiting for their item fact: kind, tick, the keep there.
+    let mut pending: Vec<(String, u64, i32)> = Vec::new();
+    let mut c = KeepCounts::default();
+    for (at, _, ev) in evs {
+        pending.retain(|(_, d, _)| at <= d + DROP_SETTLE_TICKS);
+        match ev {
+            Ev::Death => {
+                if death_at != Some(at) {
+                    c.deaths += 1;
+                }
+                death_at = Some(at);
+                lost.extend(std::mem::take(&mut last_drop).into_keys());
+                pending.clear();
             }
-        } else {
-            c.chest.add(what, why);
+            Ev::Item { item, from, to } => {
+                let Some(name) = line_name(item) else {
+                    continue;
+                };
+                if to < from && death_at.is_some_and(|d| at <= d + DEATH_LOSS_TICKS) {
+                    last_drop.remove(&name);
+                    lost.insert(name.clone());
+                }
+                if to < from
+                    && let Some(i) = pending.iter().position(|(k, _, _)| *k == name)
+                {
+                    let (kind, d, keep) = pending.remove(i);
+                    if to < keep {
+                        c.under_keep.push(UnderKeep {
+                            kind,
+                            at: d,
+                            left: to,
+                            keep,
+                        });
+                    }
+                }
+            }
+            Ev::Note { what, why } => {
+                if what.starts_with("died (") && what.ends_with(") and respawned") {
+                    if death_at.is_none_or(|d| at > d + DEATH_LOSS_TICKS) {
+                        c.deaths += 1;
+                        death_at = Some(at);
+                    }
+                    lost.extend(std::mem::take(&mut last_drop).into_keys());
+                    pending.clear();
+                } else if let Some(k) = drop_kind(what) {
+                    c.drops += 1;
+                    last_drop.insert(k.to_owned(), at);
+                    lost.remove(k);
+                    // The base's drop has its own gate (whole stacks of its list): no keep.
+                    if !what.starts_with("base: ")
+                        && let Some(keep) = table.as_ref().and_then(|t| keep_at(t, k, why))
+                    {
+                        pending.push((k.to_owned(), at, keep));
+                    }
+                } else if let Some(kinds) = want_kinds(what) {
+                    c.wants += 1;
+                    let src = want_source(what).unwrap_or("?").to_owned();
+                    *c.wants_by_source.entry(src.clone()).or_default() += 1;
+                    let e = c.want_list.entry((src, kinds.join("|"))).or_default();
+                    e.lines += 1;
+                    e.n += want_n(what);
+                    let hits: Vec<DropWant> = kinds
+                        .iter()
+                        .filter_map(|k| {
+                            last_drop.get(*k).filter(|d| **d < at).map(|d| DropWant {
+                                kind: (*k).to_owned(),
+                                dropped_at: *d,
+                                wanted_at: at,
+                            })
+                        })
+                        .collect();
+                    if !hits.is_empty() {
+                        c.dropped_then_wanted += 1;
+                        c.cases.push(format!("{at} {what}"));
+                        c.pairs.extend(hits);
+                    } else if kinds.iter().any(|k| lost.contains(*k)) {
+                        c.wanted_after_death += 1;
+                    }
+                } else {
+                    c.chest.add(what, why);
+                }
+            }
         }
     }
     c
@@ -330,12 +473,27 @@ fn row_line(seed: &str, bot: &str, c: &KeepCounts) -> String {
             .collect::<Vec<_>>()
             .join("; ")
     };
+    let under = if c.under_keep.is_empty() {
+        "0".to_owned()
+    } else {
+        format!(
+            "{}: {}",
+            c.under_keep.len(),
+            c.under_keep
+                .iter()
+                .map(|u| format!("{} {}: {}/{}", u.kind, u.at, u.left, u.keep))
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    };
     format!(
-        "| {seed} | {bot} | {} | {} | {} | {} | {pairs} | {} |",
+        "| {seed} | {bot} | {} | {} | {} | {} | {pairs} | {} | {} | {under} | {} |",
         c.drops,
         c.wants,
         wants_text(&c.want_list),
         c.dropped_then_wanted,
+        c.deaths,
+        c.wanted_after_death,
         c.chest.text()
     )
 }
@@ -346,17 +504,13 @@ fn row_line(seed: &str, bot: &str, c: &KeepCounts) -> String {
 /// chests placed, the fetch after a respawn (b begun, s skipped, x not needed, w waits).
 pub fn render(runs: &[RunKeep]) -> String {
     let mut out = String::new();
-    out.push_str(
-        "## keep: drops, wants and dropped-then-wanted (issue 77; the bar is 0)
-
-",
-    );
-    out.push_str("| seed | bot | drops | wants | wants by source (source kinds lines x count) | dropped-then-wanted | dropped then wanted (kind, ticks) | chest |
-");
-    out.push_str(
-        "|---|---|---|---|---|---|---|---|
-",
-    );
+    out.push_str("## keep: drops, wants and dropped-then-wanted (issue 77; the bar is 0)\n\n");
+    out.push_str(concat!(
+        "| seed | bot | drops | wants | wants by source (source kinds lines x count) ",
+        "| dropped-then-wanted | dropped then wanted (kind, ticks) | deaths ",
+        "| wanted after a death | drops under keep (kind at: left/keep) | chest |\n",
+        "|---|---|---|---|---|---|---|---|---|---|---|\n",
+    ));
     let mut total = KeepCounts::default();
     let mut seeds: Vec<&str> = runs.iter().map(|r| r.seed.as_str()).collect();
     seeds.dedup();
@@ -373,6 +527,7 @@ pub fn render(runs: &[RunKeep]) -> String {
         out.push('\n');
         total.sum(&sum);
     }
+    let flag = |bad: bool| if bad { " !!" } else { "" };
     out.push('\n');
     out.push_str(&format!(
         "total: {} runs, {} drops, {} wants, dropped-then-wanted {}{}\n",
@@ -380,11 +535,14 @@ pub fn render(runs: &[RunKeep]) -> String {
         total.drops,
         total.wants,
         total.dropped_then_wanted,
-        if total.dropped_then_wanted == 0 {
-            ""
-        } else {
-            " !!"
-        }
+        flag(total.dropped_then_wanted > 0)
+    ));
+    out.push_str(&format!(
+        "total: {} deaths, {} wanted after a death, drops under keep {}{}\n",
+        total.deaths,
+        total.wanted_after_death,
+        total.under_keep.len(),
+        flag(!total.under_keep.is_empty())
     ));
     out.push_str(&format!("total chest: {}\n", total.chest.text()));
     out
@@ -420,6 +578,95 @@ mod tests {
             what: what.to_owned(),
             why: why.to_owned(),
         }
+    }
+
+    fn item(at: u64, item: &str, from: i32, to: i32) -> observe::Stamped {
+        observe::Stamped {
+            at,
+            fact: observe::Fact::Item {
+                item: item.to_owned(),
+                from,
+                to,
+            },
+        }
+    }
+
+    const WHY: &str = "fewer than 6 main slots free; needed: 64 by win; stage nether; always";
+
+    /// Drop K, die, want K: the death took it, not the drop (race 46140744043's six): 0
+    /// dropped-then-wanted, 1 wanted after a death. A drop of K after the death counts again.
+    #[test]
+    fn a_want_after_a_death_is_not_blamed_on_the_drop() {
+        let mut l = ledger(vec![
+            note_why(100, "drop Cobblestone from slot 12", WHY),
+            note(200, "died (Warden) and respawned"),
+            note(
+                300,
+                "want Cobblestone|Blackstone 3 for goal stone-pickaxe (stronghold)",
+            ),
+        ]);
+        l.facts = vec![
+            observe::Stamped {
+                at: 180,
+                fact: observe::Fact::Death,
+            },
+            item(190, "cobblestone", 64, 0),
+        ];
+        let c = keep_counts(&l);
+        assert_eq!(
+            (c.dropped_then_wanted, c.wanted_after_death, c.deaths),
+            (0, 1, 1)
+        );
+        l.tasks
+            .push(note_why(400, "drop Cobblestone from slot 12", WHY));
+        l.tasks
+            .push(note(500, "want Cobblestone 1 for craft furnace"));
+        let c = keep_counts(&l);
+        assert_eq!((c.dropped_then_wanted, c.wanted_after_death), (1, 1));
+        // Death with no drop before it: what it took is still "after a death".
+        let mut d = ledger(vec![note(300, "want Stick 2 for craft stone_pickaxe")]);
+        d.facts = vec![
+            observe::Stamped {
+                at: 100,
+                fact: observe::Fact::Death,
+            },
+            item(120, "stick", 4, 0),
+        ];
+        assert_eq!(keep_counts(&d).wanted_after_death, 1);
+    }
+
+    /// A drop that leaves less than the keep there (its line's stage and contexts read against
+    /// keep.toml) is reported with what it left; one that leaves the keep is not. The base's
+    /// drops have their own gate and are never checked.
+    #[test]
+    fn a_drop_under_its_keep_is_reported() {
+        let mut l = ledger(vec![
+            note_why(100, "drop Cobblestone from slot 12", WHY),
+            note_why(200, "drop Cobblestone from slot 13", WHY),
+            note(300, "base: drop Dirt from slot 14"),
+        ]);
+        l.facts = vec![
+            item(110, "cobblestone", 128, 64),
+            item(210, "cobblestone", 64, 0),
+            item(310, "dirt", 30, 0),
+        ];
+        let c = keep_counts(&l);
+        assert_eq!(
+            c.under_keep,
+            vec![UnderKeep {
+                kind: "Cobblestone".to_owned(),
+                at: 200,
+                left: 0,
+                keep: 64,
+            }]
+        );
+        let md = render(&[RunKeep {
+            seed: "cold".to_owned(),
+            bot: "b".to_owned(),
+            counts: c,
+        }]);
+        assert!(md.contains("| 1: Cobblestone 200: 0/64 |"), "{md}");
+        assert!(md.contains("drops under keep 1 !!"), "{md}");
     }
 
     /// The stash and fetch notes as stash.rs writes them are each counted once, in their cell.
@@ -520,7 +767,7 @@ mod tests {
         ];
         let md = render(&runs);
         assert!(
-            md.contains("| cold | rs-l00-b00 | 2 | 3 | craft Stick 2x4, stronghold Cobblestone|Blackstone 1x3 | 1 | Cobblestone dropped 30 wanted 40 | stash 1/0 "),
+            md.contains("| cold | rs-l00-b00 | 2 | 3 | craft Stick 2x4, stronghold Cobblestone|Blackstone 1x3 | 1 | Cobblestone dropped 30 wanted 40 | 0 | 0 | 0 | stash 1/0 "),
             "{md}"
         );
         assert!(md.contains("| cold | **2 runs** | 2 | 4 |"), "{md}");
