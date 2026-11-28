@@ -1011,6 +1011,11 @@ impl Plan {
             task_counts: TaskCounts::default(),
             low_digs_noted: false,
             table: None,
+            // >>> keep (issue 77)
+            keep: keep::Loaded::compiled(),
+            keep_noted: false,
+            keep_wants: (String::new(), Vec::new()),
+            // <<< keep
             met: false,
             digs: 0,
             crafts: 0,
@@ -1108,11 +1113,6 @@ impl Plan {
             // >>> E8
             bow: bow::BowState::default(),
             // <<< E8
-            // >>> keep (issue 77)
-            keep: keep::Loaded::compiled(),
-            keep_noted: false,
-            keep_wants: (String::new(), Vec::new()),
-            // <<< keep
             acts: Vec::new(),
         }
     }
