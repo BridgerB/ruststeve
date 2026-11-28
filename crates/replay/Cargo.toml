@@ -26,6 +26,10 @@ path = "src/bin/replan.rs"
 name = "gaze"
 path = "src/bin/gaze.rs"
 
+[[bin]]
+name = "whom"
+path = "src/bin/whom.rs"
+
 [dependencies]
 data = { path = "../data" }
 plan = { path = "../plan" }

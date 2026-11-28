@@ -2129,9 +2129,9 @@ pub fn whose(
     }
 }
 
-impl Plan {
-    fn whom_rules(&self) -> WhomRules {
-        let r = self.end_rules();
+impl WhomRules {
+    /// The numbers from `[end_kit]`.
+    pub fn of(r: &crate::end_portal::EndKitRules) -> Self {
         WhomRules {
             close: r.whom_close,
             close_ticks: r.whom_close_ticks,
@@ -2140,51 +2140,99 @@ impl Plan {
             melee: r.whom_melee,
         }
     }
+}
 
-    /// The angry endermen within `APPROACH_FROM` tracked, once a server tick: each one's place
-    /// and distance kept for `whom_close_ticks`, its behaviour judged, and its track dropped
-    /// once it is calm or gone. A judgement of the bot's is noted once.
-    pub(crate) fn whom_watch(&mut self, w: &World) {
-        let Some(body) = w.body else {
-            return;
+/// The angry endermen within `APPROACH_FROM` of the bot tracked, once a server tick: each one's
+/// place and distance kept for `close_ticks`, its behaviour judged (`came_at`), and its track
+/// dropped once it is calm or gone. The ones newly taken as the bot's, with why and how far.
+/// Pure over the world and the tracks, so a replay folds it as the planner does.
+pub fn whom_fold(
+    tracks: &mut Vec<WhomTrack>,
+    w: &World,
+    r: &WhomRules,
+) -> Vec<(i32, BotsWhy, f64)> {
+    let Some(body) = w.body else {
+        return Vec::new();
+    };
+    let now = w.session.server_ticks;
+    let angry: Vec<(i32, f64, [f64; 3])> = w
+        .entities
+        .iter()
+        .filter(|(_, e)| e.kind == EntityKind::Enderman && !e.dead && creepy(e))
+        .map(|(id, e)| (*id, distance(e.pos, body.pos), e.pos))
+        .filter(|x| x.1 <= APPROACH_FROM)
+        .collect();
+    tracks.retain(|t| angry.iter().any(|(id, _, _)| *id == t.id));
+    let mut said = Vec::new();
+    for (id, d, pos) in angry {
+        let i = match tracks.iter().position(|t| t.id == id) {
+            Some(i) => i,
+            None => {
+                tracks.push(WhomTrack {
+                    id,
+                    ..WhomTrack::default()
+                });
+                tracks.len() - 1
+            }
         };
-        let now = w.session.server_ticks;
-        let r = self.whom_rules();
-        let angry: Vec<(i32, f64, [f64; 3])> = w
-            .entities
-            .iter()
-            .filter(|(_, e)| e.kind == EntityKind::Enderman && !e.dead && creepy(e))
-            .map(|(id, e)| (*id, distance(e.pos, body.pos), e.pos))
-            .filter(|x| x.1 <= APPROACH_FROM)
-            .collect();
-        self.ender
-            .whom
-            .retain(|t| angry.iter().any(|(id, _, _)| *id == t.id));
-        let mut said: Vec<(i32, BotsWhy, f64)> = Vec::new();
-        for (id, d, pos) in angry {
-            let i = match self.ender.whom.iter().position(|t| t.id == id) {
-                Some(i) => i,
-                None => {
-                    self.ender.whom.push(WhomTrack {
-                        id,
-                        ..WhomTrack::default()
-                    });
-                    self.ender.whom.len() - 1
-                }
-            };
-            let t = &mut self.ender.whom[i];
-            if t.seen.last().is_some_and(|s| s.0 == now) {
-                continue;
-            }
-            t.seen.push((now, d, pos));
-            t.seen.retain(|s| now.saturating_sub(s.0) <= r.close_ticks);
-            if t.bots.is_none()
-                && let Some(why) = came_at(t, &r)
-            {
-                t.bots = Some(why);
-                said.push((id, why, d));
-            }
+        let Some(t) = tracks.get_mut(i) else {
+            continue;
+        };
+        if t.seen.last().is_some_and(|s| s.0 == now) {
+            continue;
         }
+        t.seen.push((now, d, pos));
+        t.seen.retain(|s| now.saturating_sub(s.0) <= r.close_ticks);
+        if t.bots.is_none()
+            && let Some(why) = came_at(t, r)
+        {
+            t.bots = Some(why);
+            said.push((id, why, d));
+        }
+    }
+    said
+}
+
+/// The nearest angry enderman within `reach` of `feet`.
+pub fn nearest_angry(w: &World, feet: [f64; 3], reach: f64) -> Option<i32> {
+    w.entities
+        .iter()
+        .filter(|(_, e)| e.kind == EntityKind::Enderman && !e.dead && creepy(e))
+        .map(|(id, e)| (distance(e.pos, feet), *id))
+        .filter(|x| x.0 <= reach)
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+        .map(|x| x.1)
+}
+
+/// `whose` with the tracks: a sticky verdict of the bot's kept in its track. Pure.
+pub fn judge(
+    tracks: &mut [WhomTrack],
+    w: &World,
+    id: i32,
+    provoked: &[i32],
+    nearest_in_melee: Option<i32>,
+) -> Whose {
+    let track = tracks.iter().find(|t| t.id == id);
+    let v = whose(w, id, track, provoked, nearest_in_melee);
+    if let Whose::Bots(why) = v
+        && why.sticky()
+        && let Some(t) = tracks.iter_mut().find(|t| t.id == id)
+        && t.bots.is_none()
+    {
+        t.bots = Some(why);
+    }
+    v
+}
+
+impl Plan {
+    fn whom_rules(&self) -> WhomRules {
+        WhomRules::of(&self.end_rules())
+    }
+
+    /// `whom_fold` on the plan's tracks, a judgement of the bot's noted once.
+    pub(crate) fn whom_watch(&mut self, w: &World) {
+        let r = self.whom_rules();
+        let said = whom_fold(&mut self.ender.whom, w, &r);
         for (id, why, d) in said {
             self.note(
                 w.ticks,
@@ -2194,19 +2242,14 @@ impl Plan {
         }
     }
 
-    /// Whose the angry enderman `id` is now (`whose`), its behaviour's verdict kept, and a
-    /// sticky one remembered.
     fn whose_now(&mut self, w: &World, id: i32, nearest_in_melee: Option<i32>) -> Whose {
-        let track = self.ender.whom.iter().find(|t| t.id == id);
-        let v = whose(w, id, track, &self.pearls.provoked, nearest_in_melee);
-        if let Whose::Bots(why) = v
-            && why.sticky()
-            && let Some(t) = self.ender.whom.iter_mut().find(|t| t.id == id)
-            && t.bots.is_none()
-        {
-            t.bots = Some(why);
-        }
-        v
+        judge(
+            &mut self.ender.whom,
+            w,
+            id,
+            &self.pearls.provoked,
+            nearest_in_melee,
+        )
     }
 
     /// The angry endermen within `reach` of `feet` that are the bot's, nearest first; each on
