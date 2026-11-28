@@ -103,6 +103,14 @@ fn the_kit_casts_and_lights_a_portal_beside_lava() {
             .block_at(BlockPos::new(inside.0, inside.1, inside.2)),
         Some(BlockKind::NetherPortal)
     );
+    // Issue 83: the lit frame is one vanilla's `PortalShape` accepts, whole (`isComplete`).
+    use plan::portal_shape::{Axis, any_shape};
+    let at = |(x, y, z): (i32, i32, i32)| run.world.block_at(BlockPos::new(x, y, z));
+    let shape = [Axis::X, Axis::Z]
+        .into_iter()
+        .find_map(|a| any_shape(&at, inside, a, -64));
+    let shape = shape.unwrap_or_else(|| panic!("PortalShape refuses the frame round {inside:?}"));
+    assert_eq!(shape.portal_blocks, shape.width * shape.height, "{shape:?}");
     assert!(!run.died, "died: {tail:#?}");
     assert!(run.sim.violations.is_empty(), "{:?}", run.sim.violations);
 }
