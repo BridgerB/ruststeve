@@ -116,3 +116,11 @@ Unverified until a race: the sprint's effect on waypoint following at corners (0
 - **Open: explores go back and forth** (CI 46126753035; old main behaviour): an explore's `Goal::Afar` ends anywhere far enough from its start, so two targets can alternate. A turn away from ground explored (cfc2d366, `explore_walk`'s check in `choose`) was tried and reverted: with every heading spent it waited, and `bot::wood` ran out of its 6,000 ticks (CI 46130367510). It needs a fallback that explores farther, not a wait.
 - **Open: a log only a pillar reaches.** A tree's log 3 or more over the only ground beside it has no `Goal::Reach` route (the arrival needs it at most 2 over the feet), and `stairs_to_log` cuts stairs only for a log roofed below. Such a log is refused and the planner looks for another; a pillar or stairs-up finish is a feature of its own, not issue 56's.
 - **A log too high to reach hid its tree** (CI 46128712142 against main's 8744ed3b, probe 46129792904): with `Goal::Reach` the log at (189, 75, 24) has no route, and `choose` refused it with a 6-block area, which hid the ground-level log (191, 72, 25) main reached at tick 1293. Fix: a log with a `Goal::Near` route and no `Goal::Reach` one is too high only; it is refused alone, noted "log too high to reach". Perception was not the cause: logs are read from the memory's exposed sightings, not the gaze.
+
+### Drownings in the sprint arm are not sprint (probe 46136554784)
+Sprint race 46132613146 had 4 drownings: rs-l00-b03, rs-l04-b00, rs-l04-b04 and rs-l04-b08. The last 1,200 ticks of each ledger:
+- **No sprint in or at water.** Every pace note in or next to water is a refusal ("sprint refused, swim", "water", "drop"). In rs-l04-b04 the last sprint ("sprint off (released)", tick 6000) ended 160 ticks before stairs cut into water (tick 6160), and the body was walking when it got in.
+- **The causes are the old water walls:**
+  - rs-l00-b03 and rs-l04-b04: `escape-water` that never reached a bank.
+  - rs-l04-b00 and rs-l04-b08 (the same lane, so the same world): boxed stairs at (-29, 22, 70), then `swim to (-37, 19, 58)` to relocate, then drowned. That is the swim wall that #71 owns.
+- So the policy's water refusal held. These count as noise for #56; the swim walls belong to #71.
