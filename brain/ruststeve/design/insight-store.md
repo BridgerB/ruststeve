@@ -6,7 +6,7 @@ tags: [insight, surrealdb, ingest, results, steve, contract]
 aliases: [ingest, insight store, seed_stage, seed_best, seed rows, results seeds, level-time, insight-latest, insight.surrealkv.tar.zst, insight-v1.surql, SurrealKV, kn view, deaths view, endings view, steve contract]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@0037dcc
+verifiedAgainst: ruststeve@f7516f3
 sourceRefs:
   - "ruststeve:crates/ingest/src/main.rs#async fn add_batch(db: &Surreal<Db>, path: &Path, b: &Batch) -> Res<bool> {"
   - "ruststeve:crates/ingest/src/main.rs#fn absent_nulls(v: Value) -> Value {"
@@ -45,6 +45,8 @@ Issue 07b: the race's files folded into an embedded SurrealDB 4 store, the patte
 ## Evidence
 - The first runner race (56 bots, run 43181608927) and the local `table` lane ingested: `kn` gives 56/56 `in_world` and 0/56 above, the same as `results summary`; a second add skipped all 4 lanes; `ingest case` prints a run's case read back from the store.
 - The crate's test folds a batch with a cap, a death and a cut run: k/n counts only counted runs, `deaths` holds the one killer, and the case reads back equal.
+
+- Probe 46118396226 (issue 69): the win snapshot's level.dat reads `Data.Time` 466,498; 26.1.2 keeps the world seed in `data/minecraft/world_gen_settings.dat` at `data.seed` (typecraft is 522995494), not in level.dat. The typecraft lineage's row runs log 342, ready 53,919, nether 78,888, rods_7 95,820, pearls_12 269,813, overworld 349,549, portal_room 405,104, end 444,365, crystals 449,459, win 466,498 game ticks (6:28 of game time).
 
 ## Gotchas
 - A JSON `null` is not SurrealDB's NONE: an `option<string>` field refuses it. Ingest drops null fields before writing (the test found it).

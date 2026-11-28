@@ -86,6 +86,8 @@ asset = "snapshot-pearls_12-45621953332-race-45621953332-lane-7.tar.zst"
 note = "frontier 91b5146f"
 
 # The trip home (frontier e901686d's how): at-16000, stuck, at-6000, at-5000, then overworld.
+# The last three snap.toml files say stage "fortress", not pearls_12 (probe 46118396226; why is
+# not read yet). An at/stuck link only bounds a cell, never sets one, so the row is unaffected.
 [[link]]
 stage = "pearls_12"
 tag = "race-45722775712"
