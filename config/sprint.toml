@@ -1,0 +1,145 @@
+# Sprint, every number read from the 26.1.2 jars (issue 56, S1 "measure").
+#
+# Source: probe 46115253148 on issue-56-s1-measure, `javap -c -p -constants` of the server's inner
+# jar (versions/26.1.2/server-26.1.2.jar: Entity, LivingEntity, Player, ServerPlayer,
+# ServerGamePacketListenerImpl, ServerboundPlayerCommandPacket and its Action, FoodData,
+# FoodConstants, AttributeModifier$Operation, Attributes) and of the 26.1.2 client jar from
+# Mojang's version manifest (LocalPlayer, ClientInput). Each value names the class and method it
+# was read from. The jar stores some numbers as floats: those are written as the float's exact
+# decimal, with the round value beside it. The prose is in brain/ruststeve/design/sprint.md;
+# what the bot does with them is in docs/problems/sprint.md.
+
+[speed]
+# Player.createAttributes: movement_speed base 0.10000000149011612 (the float 0.1). The physics
+# already walks on 0.1 (`physics::ground_acceleration`).
+movement_speed_base = 0.1
+# LivingEntity.<clinit>: SPEED_MODIFIER_SPRINTING = AttributeModifier("minecraft:sprinting",
+# 0.30000001192092896, ADD_MULTIPLIED_TOTAL); LivingEntity.setSprinting removes it and, when
+# sprinting, adds it as a transient modifier on movement_speed.
+sprint_modifier_id = "minecraft:sprinting"
+sprint_modifier_amount = 0.30000001192092896
+# AttributeModifier$Operation.<clinit>: add_value 0, add_multiplied_base 1, add_multiplied_total 2
+# (the id on the wire in update_attributes). Multiplied total: value × (1 + amount).
+sprint_modifier_operation = "add_multiplied_total"
+sprint_modifier_operation_id = 2
+# So the sprinting movement_speed is 0.1 × 1.3 (LivingEntity.getSpeed reads it as a float).
+sprint_movement_speed = 0.13
+# LivingEntity.getFrictionInfluencedSpeed(friction): on the ground getSpeed() × 0.21600002 /
+# friction³; 1.0 on a plain block (friction 0.6), so the ground acceleration is the speed itself,
+# times the 0.98 input (LocalPlayer.modifyInput). Ground inertia stays 0.6 × 0.91.
+friction_numerator = 0.21600002
+# Off the ground, LivingEntity.getFrictionInfluencedSpeed returns getFlyingSpeed(), and
+# Player.getFlyingSpeed (not flying with abilities) is `isSprinting ? 0.025999999f : 0.02f`.
+air_acceleration_walk = 0.02
+air_acceleration_sprint = 0.025999999
+# Derived, flat plain ground, forward held (0.98): the steady move a tick is
+# speed × 0.98 / (1 - 0.546). Walk 0.215859 (4.317 b/s), sprint 0.280617 (5.612 b/s).
+steady_walk_per_tick = 0.215859
+steady_sprint_per_tick = 0.280617
+
+[jump]
+# LivingEntity.jumpFromGround: the jump sets vy = max(jump power, vy); then, when sprinting,
+# f = yRot × 0.017453292f and addDeltaMovement(-Mth.sin(f) × 0.2, 0, Mth.cos(f) × 0.2).
+# Mth.sin and Mth.cos are the game's 65536-entry table, not libm.
+sprint_jump_boost = 0.2
+degrees_to_radians = 0.017453292
+
+[start]
+# LocalPlayer.aiStep: the sprint is decided before the body moves (AbstractClientPlayer.aiStep
+# comes after), from the input of this tick. With the sprint key held, setSprinting(true) when
+# canStartSprinting():
+#   not already sprinting, hasForwardImpulse, isSprintingPossible(flying), not
+#   isSlowDueToUsingItem (using an item whose use_effects say can_sprint false), not fall flying
+#   unless under water, and not isMovingSlowly (crouching or visually crawling) unless under water.
+# isSprintingPossible(flying): not isMobilityRestricted (Player: has BLINDNESS), and as a
+#   passenger a vehicle that can sprint, else hasEnoughFoodToDoExhaustiveManoeuvres; and, unless
+#   flying, not isInShallowWater (Entity: in water and the eye not under it).
+# ClientInput.hasForwardImpulse: moveVector.y > 1.0E-5.
+forward_impulse_min = 1.0e-5
+# Player.hasEnoughFoodToDoExhaustiveManoeuvres: FoodData.hasEnoughFood (foodLevel > 6.0, strictly)
+# or abilities.mayfly. FoodConstants.SPRINT_LEVEL = 6.
+food_above = 6
+# The double tap: a forward press within Options.sprintWindow ticks of the last one also starts it
+# (sprintTriggerTime). The bot holds the sprint key instead and never needs it.
+
+[stop]
+# LocalPlayer.aiStep, while sprinting, not swimming: setSprinting(false) when
+# shouldStopRunSprinting():
+#   not isSprintingPossible(flying) (blindness, food 6 or under, shallow water), or no forward
+#   impulse, or horizontalCollision and not minorHorizontalCollision.
+# Swimming: shouldStopSwimSprinting(): isSprintingPossible(true) fails, or out of water, or no
+# forward impulse while neither on the ground nor holding shift.
+# Not stop rules (they only refuse the start): sneaking, using an item, fall flying. A sprint
+# held into a crouch keeps the flag and moves at 0.13 × 0.3 input. Releasing the sprint key does
+# not stop it either; the flag holds until a stop rule.
+#
+# Entity.move: minorHorizontalCollision = horizontalCollision and isHorizontalCollisionMinor(the
+# move after collision). LocalPlayer.isHorizontalCollisionMinor: the input turned by the yaw,
+# (xxa·cos − zza·sin, zza·cos + xxa·sin), against the collided move (x, z): false if either
+# squared length is under 9.999999747378752E-6, else true when the angle between them, acos(dot /
+# sqrt(|a|²|b|²)), is under 0.13962633907794952 rad (8 degrees). So brushing along a wall keeps
+# the sprint; walking into it stops it. The collision read is the last tick's move.
+minor_collision_radians = 0.13962633907794952
+minor_collision_min_sq = 9.999999747378752e-6
+# Player.causeExtraKnockback: a hit with knockback > 0 (a sprint hit at attack strength > 0.9
+# adds 1, Player.attack) multiplies the attacker's velocity by (0.6, 1, 0.6) and sets sprinting
+# false. A sprinting hit is never a critical (Player.canCriticalAttack: not isSprinting).
+sprint_hit_slowdown = 0.6
+sprint_hit_strength_above = 0.9
+
+[packet]
+# How the server learns of it: only ServerboundPlayerCommandPacket. Id 42 in the play state
+# (data::generated::packets, PlayServerbound::PlayerCommand). Fields, in order (write): entity id
+# varint (the player's own), action varint (writeEnum: the ordinal), data varint (0 for sprint).
+player_command_id = 42
+# ServerboundPlayerCommandPacket$Action.$values: STOP_SLEEPING 0, START_SPRINTING 1,
+# STOP_SPRINTING 2, START_RIDING_JUMP 3, STOP_RIDING_JUMP 4, OPEN_INVENTORY 5, START_FALL_FLYING 6.
+action_start_sprinting = 1
+action_stop_sprinting = 2
+command_data = 0
+# LocalPlayer.tick: after the body's tick, player_input when the keys changed, then
+# sendPosition(), whose first act is sendIsSprintingIfNeeded() (START or STOP when isSprinting
+# differs from wasSprinting) and then the move packet. Order a tick: player_input,
+# player_command, move_player_*.
+order = ["player_input", "player_command", "move_player"]
+# Input (ServerboundPlayerInputPacket): sprint is bit 64. ServerGamePacketListenerImpl
+# .handlePlayerInput keeps the input and reads only shift from it: the sprint bit changes nothing
+# on the server.
+input_sprint_bit = 64
+# Entity.setSprinting: setSharedFlag(3, on), bit 0x08 of entity data index 0, which the server
+# echoes to every watcher.
+shared_flag_bit = 8
+
+[server]
+# ServerGamePacketListenerImpl.handlePlayerCommand: START_SPRINTING is setSprinting(true),
+# STOP_SPRINTING setSprinting(false), once the client has loaded; no food, collision or speed
+# check. The server never stops a sprint of its own accord except the sprint hit above.
+# handleMovePlayer never checks the speed against the sprint: it refuses only a move whose
+# squared length, less the squared expected velocity, is over 100 per packet since the last tick
+# (300 when fall flying) ("moved too quickly"), and a move the server's own sweep puts more than
+# 0.0625 squared from the report ("moved wrongly"). So the server takes the sprint from the client.
+moved_too_quickly_sq = 100.0
+moved_wrongly_sq = 0.0625
+
+[exhaustion]
+# ServerPlayer.checkMovementStatistics(dx, dy, dz), called by handleMovePlayer for each accepted
+# move, after setOnGroundWithMovement: the first branch that holds, distance rounded to whole
+# centimetres (Math.round(sqrt × 100)), exhaustion = per_metre × cm × 0.01:
+#   swimming: 3D, 0.01 a metre; eye in water: 3D, 0.01; in water: horizontal, 0.01;
+#   climbable: none; on the ground: horizontal, sprinting 0.1, crouching 0.0, walking 0.0;
+#   otherwise (in the air, fall flying, flying): none.
+# A sprint in the air costs nothing by distance; only its ground ticks and its jumps do.
+sprint_per_metre = 0.1
+swim_per_metre = 0.01
+walk_per_metre = 0.0
+crouch_per_metre = 0.0
+# ServerPlayer.jumpFromGround (the server calls it when the client leaves the ground going up:
+# on the ground before, not on the ground in the packet, dy > 0): 0.2 when sprinting, else 0.05.
+jump = 0.05
+sprint_jump = 0.2
+# FoodData.addExhaustion: min(level + amount, 40). FoodData.tick: over 4.0
+# (FoodConstants.EXHAUSTION_DROP) it takes 4 off and one saturation point, or, with saturation
+# at 0 and not on peaceful, one food point. So a flat sprint costs one
+# point every 40 metres, and a sprint-jump one every 20 jumps.
+cap = 40.0
+per_point = 4.0
