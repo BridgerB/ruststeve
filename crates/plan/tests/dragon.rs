@@ -2913,3 +2913,19 @@ fn by_the_perch_no_notch_is_begun_and_no_bunker_gone_into() {
     q.bunker = Some([14, 58, 2]);
     assert_eq!(q.bunker_now(&o), Some([14, 58, 2]));
 }
+
+#[test]
+fn the_flames_wait_is_at_the_head_stands_distance_and_the_fights_bunker_far_out_only() {
+    // Wall 64: race 46108868213, 1.4 strikes a perch, the walk to the head stand eating the scan.
+    // The wait out of the flame is at the head stand's own distance from the body.
+    let feet = [0.5, 64.0, 14.5];
+    let w = end_at(feet);
+    let v = sitting(0.0);
+    let c = dragon::flame_clear_cell(&w, &v, feet).expect("a cell out of the flame");
+    let d = dragon::flat(feet_of(c), v.pos);
+    assert!((9.0..=11.5).contains(&d), "{c:?} {d}");
+    // Wall 63: dev race 46108869796, both lanes dead of a cloud in the bunker's stair; the fight
+    // never waits in a bunker within 20 of the fountain.
+    assert!(dragon::bunker_barred([14, 58, 2]));
+    assert!(!dragon::bunker_barred([30, 61, 2]));
+}
