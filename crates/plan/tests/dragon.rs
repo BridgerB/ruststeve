@@ -2542,3 +2542,60 @@ fn walks_out_of_one_breath_are_capped_then_pressed_straight_away() {
     assert!(p.dragon.dug_failed.is_empty());
     assert_eq!(p.dragon.breath_episode_outs, 0);
 }
+
+#[test]
+fn a_rise_with_a_block_over_the_head_or_jumps_for_nothing_is_given_up() {
+    // Wall 51: dev race 46099602480 lane 0 jumped in the bunker's half-opened stair (x 14.0, the
+    // shut cell over one of its two columns) from tick 2020 to 2600, through a whole perch, and
+    // E3's open of the bunker stalled under it.
+    let coming = |w: &mut World| with_dragon(w, [-40.5, 90.0, 0.5], 2, 0.0);
+    let set = |w: &mut World, cells: &[(i32, i32, i32)], k: BlockKind| {
+        for c in cells {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: *c,
+                state: state(k),
+            }));
+        }
+    };
+    let pit = || {
+        let mut w = end_at([12.0, 62.0, 0.5]);
+        set(
+            &mut w,
+            &[(11, 62, 0), (11, 63, 0), (12, 62, 0), (12, 63, 0)],
+            BlockKind::Air,
+        );
+        coming(&mut w);
+        w.inventory.slots.insert(36, (data::ItemKind::EndStone, 64));
+        w.held = 0;
+        w
+    };
+    // The sky open over the feet's own column, a block two over the feet in the other one.
+    let mut shut = pit();
+    set(&mut shut, &[(11, 64, 0)], BlockKind::EndStone);
+    assert!(!dragon::rise_room(&shut, [12.0, 62.0, 0.5]));
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    assert!(p.charge_step(&shut, 0).is_none_or(|c| !c.jump));
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "rise: none from [12, 62, 0]"),
+        "{:?}",
+        p.events_since(0)
+    );
+    // Room over the head, but no block goes in: `RISE_JUMPS_MAX` jumps, then given up there.
+    let open = pit();
+    assert!(dragon::rise_room(&open, [12.0, 62.0, 0.5]));
+    let mut q = Plan::new(Aim::Race);
+    q.bunker = Some([60, FLOOR - 4, 60]);
+    let jumps = (0..10u64)
+        .filter(|t| q.charge_step(&open, *t).is_some_and(|c| c.jump))
+        .count();
+    assert_eq!(jumps, dragon::RISE_JUMPS_MAX as usize);
+    assert!(
+        q.events_since(0)
+            .iter()
+            .any(|e| e.what == "rise: given up at [12, 62, 0]")
+    );
+    assert!(q.dragon.rise_failed.contains(&[12, 62, 0]));
+}

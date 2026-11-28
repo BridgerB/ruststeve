@@ -566,9 +566,32 @@ pub const ENDER_BUNKER_REACH: f64 = 24.0;
 /// Ticks a fight whose walk failed in cover waits before it plans again.
 pub const COVERED_RETRY_TICKS: u64 = 200;
 
+/// Is there room over the head for a rise by a block: the cell two over the feet open (air) in
+/// every column the body's box stands in. A body on a cell's edge stands in two or four columns
+/// (wall 51: x 14.0 in the bunker's stair, the shut cell over one column).
+pub fn rise_room(w: &World, feet: [f64; 3]) -> bool {
+    let y = feet[1].floor() as i32 + 2;
+    let h = physics::HALF_WIDTH - 1e-3;
+    [(-h, -h), (-h, h), (h, -h), (h, h)].iter().all(|(dx, dz)| {
+        let (x, z) = ((feet[0] + dx).floor() as i32, (feet[2] + dz).floor() as i32);
+        matches!(
+            w.block_at(world::BlockPos::new(x, y, z)),
+            Some(BlockKind::Air | BlockKind::CaveAir) | None
+        )
+    })
+}
+
 /// Blocks the feet rise over the cell a jump left before its block goes in (clojurecraft
 /// `dragon/clear-rise`).
 pub const RISE_CLEAR: f64 = 1.05;
+
+/// Jumps from one cell with no block gone in under them before a rise there is given up (wall
+/// 51: dev race 46099602480 lane 0 jumped in the bunker's half-opened stair from tick 2020 to
+/// 2600, the head under the stair's shut cell, through a whole perch; a block goes in on the
+/// first or second jump when there is room).
+pub const RISE_JUMPS_MAX: u32 = 4;
+/// Cells a rise was given up at, kept at most.
+pub const RISE_FAILED_KEPT: usize = 16;
 
 /// Ticks between the notch roof's clicks, and the clicks it may take in all.
 pub const ROOF_CLICK_TICKS: u64 = 6;
@@ -2019,6 +2042,15 @@ pub struct DragonState {
     pub climb_out: bool,
     #[serde(default)]
     pub rise_from: Option<[i32; 3]>,
+    /// The cell the rise's jumps left and how many left it with no block gone in (wall 51).
+    #[serde(default)]
+    pub rise_jumps: Option<([i32; 3], u32)>,
+    /// Cells a rise was given up at: no room over the head, or `RISE_JUMPS_MAX` jumps for nothing.
+    #[serde(default)]
+    pub rise_failed: Vec<[i32; 3]>,
+    /// The last cell a rise was noted refused at.
+    #[serde(default)]
+    pub rise_refused_noted: Option<[i32; 3]>,
     /// The wall cell dug to get out of a pocket in a breath.
     #[serde(default)]
     pub breath_wall: Option<[i32; 3]>,
@@ -2476,7 +2508,15 @@ impl Plan {
                         .charge_dig_step(w, tick, head)
                         .unwrap_or_else(|| looking_down(w));
                 }
-                return self.rise_step(w, tick, body);
+                if let Some(c) = self.rise_step(w, tick, body) {
+                    return c;
+                }
+                self.dragon.climb_out = false;
+                self.note(
+                    tick,
+                    "dragon: no way up out of cover".to_owned(),
+                    format!("at {fc:?}; the fight plans again"),
+                );
             }
         }
         let want = decide(w, &ask);
@@ -3500,7 +3540,9 @@ impl Plan {
                     ),
                 );
             }
-            return Some(Some(self.rise_step(w, tick, body)));
+            if let Some(c) = self.rise_step(w, tick, body) {
+                return Some(Some(c));
+            }
         }
         // In sight with a task in hand (E3's, E4's work): it goes on; the dodge begins when the
         // fire is due (`fire_imminent`). Paced only with nothing in hand (frontier race 45974410172
@@ -3738,8 +3780,9 @@ impl Plan {
             }
             if let Some(from) = self.dragon.dodge_from
                 && cell_of(feet)[1] < from[1] + DODGE_RISES
+                && let Some(c) = self.rise_step(w, tick, body)
             {
-                return Some(self.rise_step(w, tick, body));
+                return Some(c);
             }
             return Some(stand);
         };
@@ -4008,7 +4051,10 @@ impl Plan {
                 );
                 return None;
             }
-            return Some(self.rise_step(w, tick, body));
+            if let Some(c) = self.rise_step(w, tick, body) {
+                return Some(c);
+            }
+            self.dragon.notch_rise_to = None;
         }
         if let Some(s) = self.dragon.notch_step {
             if w.block_at(world::BlockPos::new(s[0], s[1], s[2])) == Some(BlockKind::Air) {
@@ -4028,15 +4074,41 @@ impl Plan {
 
     /// One tick of a rise by a block under the feet: the block held, a jump from the ground, and
     /// once the feet are `RISE_CLEAR` over the cell they left, the block clicked onto the top of
-    /// the one under it.
-    fn rise_step(&mut self, w: &World, tick: u64, body: physics::Body) -> Controls {
+    /// the one under it. `None` when no rise can go on from here (wall 51): a block over the head
+    /// in any column the body stands in (`rise_room`), or `RISE_JUMPS_MAX` jumps from one cell with
+    /// no block gone in; noted, and that cell is never risen from again. The caller goes on as if
+    /// it had nothing to do.
+    fn rise_step(&mut self, w: &World, tick: u64, body: physics::Body) -> Option<Controls> {
         let down = Controls {
             yaw: f64::from(w.player.yaw),
             pitch: Some(90.0),
             ..Controls::default()
         };
+        let fc = cell_of(body.pos);
+        if body.on_ground {
+            let refused = if self.dragon.rise_failed.contains(&fc) {
+                Some("given up here before")
+            } else if !rise_room(w, body.pos) {
+                Some("a block over the head")
+            } else {
+                None
+            };
+            if let Some(why) = refused {
+                self.dragon.rise_from = None;
+                self.dragon.rise_jumps = None;
+                if self.dragon.rise_refused_noted != Some(fc) {
+                    self.dragon.rise_refused_noted = Some(fc);
+                    self.note(
+                        tick,
+                        format!("rise: none from {fc:?}"),
+                        format!("{why}; on as if nothing were to be done"),
+                    );
+                }
+                return None;
+            }
+        }
         let Some(item) = crate::spikes::pillar_item(w) else {
-            return down;
+            return Some(down);
         };
         match hold::toward(w, item) {
             Hold::Held => {}
@@ -4044,14 +4116,36 @@ impl Plan {
                 if self.acts.is_empty() {
                     self.acts.push(a);
                 }
-                return down;
+                return Some(down);
             }
-            Hold::Wait | Hold::Missing => return down,
+            Hold::Wait | Hold::Missing => return Some(down),
         }
-        let left = self.dragon.rise_from.unwrap_or_else(|| cell_of(body.pos));
+        let left = self.dragon.rise_from.unwrap_or(fc);
         if body.on_ground {
-            self.dragon.rise_from = Some(cell_of(body.pos));
-            return Controls { jump: true, ..down };
+            // A jump from the cell the last one left: no block went in under it.
+            let jumps = match self.dragon.rise_jumps {
+                Some((c, n)) if c == fc => n + 1,
+                _ => 1,
+            };
+            if jumps > RISE_JUMPS_MAX {
+                self.dragon.rise_from = None;
+                self.dragon.rise_jumps = None;
+                if self.dragon.rise_failed.len() >= RISE_FAILED_KEPT {
+                    self.dragon.rise_failed.remove(0);
+                }
+                self.dragon.rise_failed.push(fc);
+                self.note(
+                    tick,
+                    format!("rise: given up at {fc:?}"),
+                    format!(
+                        "{RISE_JUMPS_MAX} jumps with no block gone in; never risen from here again"
+                    ),
+                );
+                return None;
+            }
+            self.dragon.rise_jumps = Some((fc, jumps));
+            self.dragon.rise_from = Some(fc);
+            return Some(Controls { jump: true, ..down });
         }
         if body.pos[1] >= f64::from(left[1]) + RISE_CLEAR
             && w.block_at(world::BlockPos::new(left[0], left[1], left[2])) == Some(BlockKind::Air)
@@ -4065,7 +4159,7 @@ impl Plan {
                 face: 1,
             });
         }
-        down
+        Some(down)
     }
 
     /// The notch's roof over the head at `roof`: a block on a side of it first when nothing holds
@@ -5033,7 +5127,9 @@ impl Plan {
             return self.charge_dig_step(w, tick, n);
         }
         let from = *self.dragon.ready_rise_from.get_or_insert(fc[1]);
-        (fc[1] < from + DODGE_RISES).then(|| self.rise_step(w, tick, body))
+        (fc[1] < from + DODGE_RISES)
+            .then(|| self.rise_step(w, tick, body))
+            .flatten()
     }
 
     /// A meal in hand (`running` the eat row) cut, its use let go and noted, when the dragon comes
