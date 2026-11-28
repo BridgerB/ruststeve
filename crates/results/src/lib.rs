@@ -787,6 +787,24 @@ pub fn read_case(path: &Path) -> Result<Case, String> {
     Ok(c)
 }
 
+/// Fills the stage ticks of rows that have none (batches from before issue 56) from each bot's
+/// ledger beside the batch, `<dir>/<bot>.ledger.rsl`, so an old race gets its per-stage ticks
+/// too. A row with no ledger there stays as it was. Returns the rows filled.
+pub fn fill_stage_ticks(batch: &mut Batch, dir: &Path) -> usize {
+    let mut filled = 0;
+    for row in batch.rows.iter_mut().filter(|r| r.stage_ticks.is_empty()) {
+        let path = dir.join(format!("{}.ledger.rsl", row.bot));
+        if !path.is_file() {
+            continue;
+        }
+        if let Ok(l) = read::<Ledger>(&path) {
+            row.stage_ticks = story::stage_ticks(&l);
+            filled += usize::from(!row.stage_ticks.is_empty());
+        }
+    }
+    filled
+}
+
 /// k/n for one stage in one (commit, start, source) group: k runs reached it, of n counted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Kn {

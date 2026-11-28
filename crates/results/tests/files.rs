@@ -150,3 +150,43 @@ fn a_typo_in_a_start_is_refused() {
     let bad = "[[start]]\nname = \"x\"\nstage = \"table\"\nplace = \"spawn\"\nkit = [[\"oak_logg\", 1]]\n";
     assert!(Starts::parse(bad).is_err());
 }
+
+/// Issue 56: a batch from before the stage ticks gets them from the ledgers beside it, and a row
+/// with no ledger there stays empty.
+#[test]
+fn an_old_batch_takes_its_stage_ticks_from_the_ledgers() {
+    let dir = std::env::temp_dir().join(format!("results-ticks-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stage = |at: u64, s: &str| observe::Stamped {
+        at,
+        fact: observe::Fact::Stage {
+            reached: s.to_owned(),
+        },
+    };
+    let ledger = results::Ledger {
+        format_version: FORMAT_VERSION,
+        run: "local-1".to_owned(),
+        bot: "a".to_owned(),
+        commit: "abc1234".to_owned(),
+        tasks: Vec::new(),
+        dropped: 0,
+        facts: vec![stage(4, "in_world"), stage(700, "table")],
+    };
+    results::write(&dir.join("a.ledger.rsl"), &ledger).unwrap();
+    let mut b = batch(vec![
+        case("a", Some(Stage::Table), Ending::Cap),
+        case("b", Some(Stage::InWorld), Ending::Cap),
+    ]);
+    assert_eq!(results::fill_stage_ticks(&mut b, &dir), 1);
+    assert_eq!(
+        b.rows[0].stage_ticks,
+        vec![(Stage::InWorld, 4), (Stage::Log, 700), (Stage::Table, 700)]
+    );
+    assert!(b.rows[1].stage_ticks.is_empty());
+    let text = results::stage_tick_lines(&[b]).join("\n");
+    assert!(
+        text.contains("| abc1234 | spawn | table | 1/2 | 700 | 700 | 700 |"),
+        "{text}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}

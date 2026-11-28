@@ -43,10 +43,14 @@ fn run(args: &[String]) -> Result<(), String> {
             if files.is_empty() {
                 return Err("no batch.rsb found".to_owned());
             }
-            let batches = files
+            let mut batches = files
                 .iter()
                 .map(|f| results::read_batch(f))
                 .collect::<Result<Vec<_>, _>>()?;
+            // Rows from before issue 56 carry no stage ticks: read them from the ledgers.
+            for (b, f) in batches.iter_mut().zip(&files) {
+                results::fill_stage_ticks(b, f.parent().unwrap_or(Path::new(".")));
+            }
             print!(
                 "{}",
                 results::render_summary(
