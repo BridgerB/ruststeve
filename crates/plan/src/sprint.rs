@@ -47,6 +47,17 @@ pub const CLEAR_BLOCKS: f64 = 3.0;
 /// Each stop in a task doubles the next hold, this many times at most (`[policy] max_doublings`:
 /// 20, 40, 80, 160 ticks).
 pub const MAX_DOUBLINGS: u32 = 3;
+/// Blocks a body falls with no damage (`[policy] safe_drop`: `LivingEntity.calculateFallDamage`,
+/// `ceil(fallDistance − safeFallDistance)`, the `safe_fall_distance` attribute 3). A step down of
+/// this or less is no drop: a walk down a slope or a cave floor sprints on (probe 46153338301:
+/// "drop" refused walk-to-log 1,289 to 4,159 ticks a race at every one-block step).
+pub const SAFE_DROP: i32 = 3;
+/// With nothing edible held, a sprint never takes the food under this (`[policy] regen_floor`):
+/// `FoodData.tick` heals a point every 80 ticks only at food 18 or more, so food spent under it
+/// with nothing to eat ends healing for the rest of the run (probe 46154734789: on cold the
+/// sprint arm had 29 of 84 runs at food 13 or under against the walk's 2, and most of its arrow
+/// deaths came after "sprint refused, food budget"). The walk's own `eat::HEALS_FROM`.
+pub const REGEN_FLOOR: i32 = 18;
 
 /// Every pace note's `what` begins with this ("sprint begun, walk", "sprint refused, lava",
 /// "sprint restarted, 2"). The notes are counted in the ledger, but they are about a task's
@@ -111,6 +122,8 @@ pub enum Refusal {
     /// Walking into a wall (a collision that is not minor), which stops a sprint
     /// (`LocalPlayer.shouldStopRunSprinting`): not asked again until the hold is out.
     Wall,
+    /// Nothing edible held and no point left over `REGEN_FLOOR`: healing would stop.
+    Regen,
     /// A step-by-step move.
     Path(Step),
 }
@@ -129,6 +142,7 @@ impl Refusal {
             Refusal::Footing => "footing",
             Refusal::Unseen => "unseen",
             Refusal::Wall => "wall",
+            Refusal::Regen => "regen",
             Refusal::Path(Step::Bridge) => "bridge",
             Refusal::Path(Step::Sneak) => "sneak",
             Refusal::Path(Step::Stairs) => "stairs",
@@ -172,9 +186,16 @@ pub fn points_to_spend(food: Option<i32>, saturation: Option<f32>, hungry_below:
     (f - hungry_below).max(0) + sat
 }
 
-/// The policy: does this tick's move sprint? `c` is the controls the task made, its `sprint`
-/// the wish.
+/// The policy with something edible held (the budget down to `hungry_below`, eating restores it):
+/// `judge_fed` with `edible` true.
 pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict {
+    judge_fed(w, hungry_below, true, pace, c)
+}
+
+/// The policy: does this tick's move sprint? `c` is the controls the task made, its `sprint`
+/// the wish; `edible`, whether safe food is held. With none, the budget stops at `REGEN_FLOOR`.
+/// Retreats from a `never_fight` kind and escapes are safety, not travel: no budget.
+pub fn judge_fed(w: &World, hungry_below: i32, edible: bool, pace: Pace, c: &Controls) -> Verdict {
     let Some(body) = w.body else {
         return Verdict::NotAsked;
     };
@@ -184,11 +205,17 @@ pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict 
     let budgeted = match pace {
         Pace::Still | Pace::Fight => return Verdict::NotAsked,
         Pace::Step(s) => return Verdict::Refused(Refusal::Path(s)),
-        Pace::Walk | Pace::Explore | Pace::Escape => {
+        Pace::Walk | Pace::Explore => {
             if !c.sprint {
                 return Verdict::NotAsked;
             }
             true
+        }
+        Pace::Escape => {
+            if !c.sprint {
+                return Verdict::NotAsked;
+            }
+            false
         }
         // A retreat from a `never_fight` kind always asks.
         Pace::Retreat { never_fight } => {
@@ -218,6 +245,9 @@ pub fn judge(w: &World, hungry_below: i32, pace: Pace, c: &Controls) -> Verdict 
     }
     if points_to_spend(w.player.food, w.player.saturation, hungry_below) < 1 {
         return Verdict::Refused(Refusal::Budget);
+    }
+    if !edible && points_to_spend(w.player.food, w.player.saturation, REGEN_FLOOR) < 1 {
+        return Verdict::Refused(Refusal::Regen);
     }
     Verdict::Sprint
 }
@@ -269,7 +299,12 @@ pub fn ground_ahead(w: &World, body: &physics::Body, yaw: f64) -> Option<Refusal
         };
         match floor {
             None | Some(Class::Solid) => {}
-            Some(Class::Clear) => return Some(Refusal::Drop),
+            // Open under the cell ahead: a step down, a drop only past `SAFE_DROP`.
+            Some(Class::Clear) => {
+                if let Some(r) = fall(&mut cells, under) {
+                    return Some(r);
+                }
+            }
             Some(Class::Lava) => return Some(Refusal::Lava),
             Some(Class::Water) => return Some(Refusal::Water),
             Some(Class::Awkward) => return Some(Refusal::Footing),
@@ -280,6 +315,43 @@ pub fn ground_ahead(w: &World, body: &physics::Body, yaw: f64) -> Option<Refusal
         }
     }
     None
+}
+
+/// What a fall into the open cell `top` (under the cell ahead) lands on: nothing to refuse on a
+/// floor within `SAFE_DROP` blocks, else a drop; lava, water, awkward footing or an unloaded cell
+/// as the landing is that refusal.
+fn fall(cells: &mut path::Cells, top: Cell) -> Option<Refusal> {
+    for depth in 1..=SAFE_DROP {
+        match cells.at((top.0, top.1 - depth, top.2)) {
+            Class::Clear => {}
+            Class::Solid => return None,
+            Class::Lava => return Some(Refusal::Lava),
+            Class::Water => return Some(Refusal::Water),
+            Class::Awkward => return Some(Refusal::Footing),
+            Class::Unknown => return Some(Refusal::Unseen),
+        }
+    }
+    Some(Refusal::Drop)
+}
+
+/// The body meeting a step it climbs: the cell ahead along `yaw` at the feet is solid with two
+/// clear over it (`path`'s `JumpUp`). A collision with it is the step, not a wall: the jump
+/// takes it.
+pub fn step_up_ahead(w: &World, body: &physics::Body, yaw: f64) -> bool {
+    let mut cells = path::Cells::new(w);
+    let feet = path::stand_cell(w, body.pos);
+    let rad = yaw.to_radians();
+    let at = [
+        body.pos[0] - rad.sin(),
+        body.pos[1],
+        body.pos[2] + rad.cos(),
+    ];
+    let (x, _, z) = path::feet_cell(at);
+    let c = (x, feet.1, z);
+    c != feet
+        && cells.at(c) == Class::Solid
+        && cells.at((c.0, c.1 + 1, c.2)) == Class::Clear
+        && cells.at((c.0, c.1 + 2, c.2)) == Class::Clear
 }
 
 /// The pace gate's state for the task in hand: which task it is for, what it has noted, and the
@@ -389,13 +461,25 @@ impl Plan {
             |t| t.survival.hungry_below,
         );
         let airborne = w.body.is_some_and(|b| !b.on_ground && !b.in_water);
-        let verdict = match judge(w, hungry_below, pace, &c) {
+        // Safe food held (the goal table's unsafe foods left out; with no table, any food).
+        let edible = match self.table.as_ref() {
+            Some(t) => crate::eat::best_food(w, &t.survival).is_some(),
+            None => crate::held(w)
+                .iter()
+                .any(|(k, n)| *n > 0 && data::generated::item_props::food_of(*k).is_some()),
+        };
+        let verdict = match judge_fed(w, hungry_below, edible, pace, &c) {
             // The ground ahead is read from the ground; in a jump the last answer holds.
             Verdict::Refused(Refusal::Drop) if airborne && self.pace.last => Verdict::Sprint,
             // Into a wall: the body stops the sprint; asking again would start it each tick.
+            // A step up the body is about to climb is not a wall (probe 46153338301: "wall"
+            // refused walk-to-log 1,128 to 1,317 ticks a race at its own step-ups).
             Verdict::Sprint
-                if w.body
-                    .is_some_and(|b| b.horizontal_collision && !b.minor_horizontal_collision) =>
+                if w.body.is_some_and(|b| {
+                    b.horizontal_collision
+                        && !b.minor_horizontal_collision
+                        && !step_up_ahead(w, &b, c.yaw)
+                }) =>
             {
                 Verdict::Refused(Refusal::Wall)
             }
@@ -656,12 +740,21 @@ mod tests {
 
     #[test]
     fn a_drop_or_water_ahead_refuses() {
+        // A hole ahead open past `SAFE_DROP` is a drop.
         let mut w = flat();
-        put(&mut w, (0, 63, 2), BlockKind::Air);
-        put(&mut w, (0, 62, 2), BlockKind::Air);
+        for y in 59..=63 {
+            put(&mut w, (0, y, 2), BlockKind::Air);
+        }
         assert_eq!(
             judge(&w, HUNGRY, Pace::Walk, &ahead()),
             Verdict::Refused(Refusal::Drop)
+        );
+        // One whose floor is not loaded is not known safe.
+        let mut w = flat();
+        put(&mut w, (0, 63, 2), BlockKind::Air);
+        assert_eq!(
+            judge(&w, HUNGRY, Pace::Walk, &ahead()),
+            Verdict::Refused(Refusal::Unseen)
         );
         let mut w = flat();
         put(&mut w, (0, 63, 1), BlockKind::Water);
@@ -872,6 +965,178 @@ mod tests {
         assert_eq!(plan.why(), "the nearest log");
     }
 
+    /// A world of stone under `floor(z)` (from y 55 up), air above it to y 70, x -4 to 20, z -4
+    /// to 40; the body on its floor at (0.5, z0), facing south.
+    fn floored(floor: impl Fn(i32) -> i32, z0: f64) -> World {
+        let mut w = World::new();
+        for x in -4..=20 {
+            for z in -4..=40 {
+                let f = floor(z);
+                for y in 55..=70 {
+                    put(
+                        &mut w,
+                        (x, y, z),
+                        if y <= f {
+                            BlockKind::Stone
+                        } else {
+                            BlockKind::Air
+                        },
+                    );
+                }
+            }
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let y = f64::from(floor(z0.floor() as i32) + 1);
+        w.body = Some(physics::Body {
+            pos: [0.5, y, z0],
+            on_ground: true,
+            ..physics::Body::default()
+        });
+        w.player.food = Some(20);
+        w.player.saturation = Some(5.0);
+        w
+    }
+
+    /// Down a staircase of one-block steps (one every two blocks): every step sprints.
+    #[test]
+    fn a_walk_down_one_block_steps_sprints_all_the_way() {
+        let floor = |z: i32| 66 - z.max(0) / 2;
+        for i in 0..24 {
+            let z0 = 0.5 + f64::from(i) * 0.5;
+            let w = floored(floor, z0);
+            assert_eq!(
+                judge(&w, HUNGRY, Pace::Walk, &ahead()),
+                Verdict::Sprint,
+                "at z {z0}"
+            );
+        }
+    }
+
+    /// A ledge four blocks down (past `SAFE_DROP`) refuses; three down does not.
+    #[test]
+    fn a_four_block_ledge_refuses() {
+        let w = floored(|z| if z >= 2 { 59 } else { 63 }, 0.5);
+        assert_eq!(
+            judge(&w, HUNGRY, Pace::Walk, &ahead()),
+            Verdict::Refused(Refusal::Drop)
+        );
+        let w = floored(|z| if z >= 2 { 60 } else { 63 }, 0.5);
+        assert_eq!(judge(&w, HUNGRY, Pace::Walk, &ahead()), Verdict::Sprint);
+    }
+
+    /// Against a one-block step up (the walk's `JumpUp`), the collision is the step: the sprint
+    /// is kept, no "wall" noted. Against a wall two high it is a wall.
+    #[test]
+    fn a_step_up_is_not_a_wall() {
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        let mut w = floored(|z| if z >= 1 { 64 } else { 63 }, 0.5);
+        w.body = w.body.map(|b| physics::Body {
+            pos: [0.5, 64.0, 0.7],
+            horizontal_collision: true,
+            ..b
+        });
+        for t in 0..5 {
+            w.ticks = t;
+            assert!(plan.pace_gate(&w, ahead()).sprint, "tick {t}");
+        }
+        assert!(plan.events.iter().all(|e| e.what != "sprint refused, wall"));
+        let mut w = floored(|z| if z >= 1 { 65 } else { 63 }, 0.5);
+        w.body = w.body.map(|b| physics::Body {
+            pos: [0.5, 64.0, 0.7],
+            horizontal_collision: true,
+            ..b
+        });
+        w.ticks = 10;
+        assert!(!plan.pace_gate(&w, ahead()).sprint);
+        assert!(plan.events.iter().any(|e| e.what == "sprint refused, wall"));
+    }
+
+    /// Probe 46154734789: with nothing edible held a walk keeps food at the regen line (18);
+    /// with bread held the old budget applies; a creeper retreat and an escape sprint anyway.
+    #[test]
+    fn with_nothing_to_eat_a_walk_keeps_food_at_the_regen_line() {
+        let mut w = flat();
+        w.player.saturation = Some(0.0);
+        w.player.food = Some(REGEN_FLOOR);
+        assert_eq!(
+            judge_fed(&w, HUNGRY, false, Pace::Walk, &ahead()),
+            Verdict::Refused(Refusal::Regen)
+        );
+        assert_eq!(
+            judge_fed(&w, HUNGRY, true, Pace::Walk, &ahead()),
+            Verdict::Sprint
+        );
+        w.player.food = Some(17);
+        assert_eq!(
+            judge_fed(
+                &w,
+                HUNGRY,
+                false,
+                Pace::Retreat { never_fight: true },
+                &ahead()
+            ),
+            Verdict::Sprint
+        );
+        assert_eq!(
+            judge_fed(&w, HUNGRY, false, Pace::Escape, &ahead()),
+            Verdict::Sprint
+        );
+        // From 20 with nothing to eat: the FoodData model, about 2 points' 80 metres sprinted,
+        // and the food never under 18.
+        w.player.food = Some(20);
+        let step = 0.280_617;
+        let (mut exhaustion, mut sprinted) = (0.0f64, 0.0f64);
+        for _ in 0..4000 {
+            if judge_fed(&w, HUNGRY, false, Pace::Walk, &ahead()) == Verdict::Sprint {
+                sprinted += step;
+                exhaustion += 0.1 * step;
+            }
+            if exhaustion > 4.0 {
+                exhaustion -= 4.0;
+                w.player.food = w.player.food.map(|f| f - 1);
+            }
+            assert!(w.player.food.is_some_and(|f| f >= REGEN_FLOOR));
+        }
+        let budget = f64::from(20 - REGEN_FLOOR) * METRES_PER_POINT;
+        assert!((sprinted - budget).abs() <= step, "sprinted {sprinted}");
+    }
+
+    /// The gate reads what is held: no food, then bread.
+    #[test]
+    fn the_gate_reads_whether_food_is_held() {
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        let mut w = flat();
+        w.player.food = Some(REGEN_FLOOR);
+        w.player.saturation = Some(0.0);
+        assert!(!plan.pace_gate(&w, ahead()).sprint);
+        assert!(
+            plan.events
+                .iter()
+                .any(|e| e.what == "sprint refused, regen")
+        );
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        w.inventory.slots.insert(36, (data::ItemKind::Bread, 3));
+        assert!(plan.pace_gate(&w, ahead()).sprint);
+    }
+
     /// The gate only ever writes `sprint`: every other key, the look and the pitch are the
     /// task's own, whatever the verdict (lead-56 on the planner test's walk under the log).
     #[test]
@@ -975,6 +1240,9 @@ mod tests {
         assert_eq!(get("policy", "look_ahead"), Some(f64::from(LOOK_AHEAD)));
         assert_eq!(get("policy", "hold_ticks"), Some(HOLD_TICKS as f64));
         assert_eq!(get("policy", "clear_blocks"), Some(CLEAR_BLOCKS));
+        assert_eq!(get("policy", "safe_drop"), Some(f64::from(SAFE_DROP)));
+        assert_eq!(get("policy", "regen_floor"), Some(f64::from(REGEN_FLOOR)));
+        assert_eq!(REGEN_FLOOR, crate::eat::HEALS_FROM);
         assert_eq!(
             get("policy", "max_doublings"),
             Some(f64::from(MAX_DOUBLINGS))
