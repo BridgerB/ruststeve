@@ -420,6 +420,8 @@ pub fn dragon_down_or_charging(w: &World) -> bool {
 /// A full air supply (the player's metadata index 1), and how recent a drown hit counts.
 pub const FULL_AIR: i32 = 300;
 pub const DROWN_RECENT: u64 = 40;
+/// The guard acts only under this much air (about a third of the 300: time to swim out yet).
+pub const LOW_AIR: i32 = 100;
 
 /// E4's "too few blocks" notes count this many ticks back.
 pub const WANTED_RECENT: u64 = 200;
@@ -2942,7 +2944,7 @@ impl Plan {
     /// or a drown hit within `DROWN_RECENT` ticks: the head out at once. Up when the cell over the
     /// eye is open (a swim up, pressing into the side whose top is free for the bank's lift); with
     /// it shut, that cell dug. Every task but a live fireball dodge (E5's) waits on it.
-    pub(crate) fn drown_guard(&mut self, w: &World, tick: u64) -> Option<Controls> {
+    pub fn drown_guard(&mut self, w: &World, tick: u64) -> Option<Controls> {
         if !in_end(w) || self.dragon.dodge_walk.is_some() {
             return None;
         }
@@ -2958,8 +2960,12 @@ impl Plan {
         let hit = w.hits.iter().any(|h| {
             h.damage_type.contains("drown") && now.saturating_sub(h.at_tick) <= DROWN_RECENT
         });
-        let short = w.player.air.is_some_and(|a| a < FULL_AIR);
-        if !((wet && short) || hit) {
+        // Low air only (race 46103123144 lane 3: fired at 299 of 300 and held the bot in place
+        // through 6.0 breath blows), and never with a cloud's reach on the feet: E5's breath walk
+        // goes first (it presses out and up anyway).
+        let short = w.player.air.is_some_and(|a| a < LOW_AIR);
+        let cloud = cloud_on(w, &[path::stand_cell(w, body.pos)]).is_some();
+        if cloud || !((wet && short) || hit) {
             self.end.drown_dig = None;
             self.end.drowning = false;
             return None;

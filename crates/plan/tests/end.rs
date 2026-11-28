@@ -1552,7 +1552,7 @@ fn in_a_two_deep_water_pit_with_air_running_out_the_head_comes_out() {
     for y in 62..=63 {
         set(&mut w, (50, y, 0), BlockKind::Water);
     }
-    w.player.air = Some(200);
+    w.player.air = Some(80);
     let mut p = racer();
     p.end.bridged = true;
     let c = p.step(&w);
@@ -1569,7 +1569,7 @@ fn in_a_two_deep_water_pit_with_air_running_out_the_head_comes_out() {
         set(&mut w, (50, y, 0), BlockKind::Water);
     }
     set(&mut w, (50, 64, 0), BlockKind::EndStone);
-    w.player.air = Some(200);
+    w.player.air = Some(80);
     w.held = 2;
     let mut p = racer();
     p.end.bridged = true;
@@ -1801,4 +1801,31 @@ fn in_a_pit_more_than_one_deep_the_bot_climbs_out_by_stairs_and_digs_nothing() {
     assert!(!noted(&p, "end: surface end stone at"), "{:?}", notes(&p));
     // A pit one deep: mining goes on.
     assert_eq!(plan::end::pit_depth(&w, (51, 64, 0)), None);
+}
+
+#[test]
+fn the_drowning_guard_waits_for_low_air_and_never_holds_against_a_cloud() {
+    // Race 46103123144 lane 3: the guard fired at 299 of 300 and held the bot in a breath cloud.
+    let pit = || {
+        let mut w = world(4, 0..=7, [50.5, 62.0, 0.5]);
+        for y in 62..=63 {
+            set(&mut w, (50, y, 0), BlockKind::Water);
+        }
+        w
+    };
+    let mut w = pit();
+    w.player.air = Some(299);
+    let mut p = racer();
+    p.end.bridged = true;
+    p.step(&w);
+    assert!(!noted(&p, "end: head out of the water"), "{:?}", notes(&p));
+    let mut w = pit();
+    w.player.air = Some(60);
+    with_entity(&mut w, 13, EntityKind::AreaEffectCloud, [50.5, 62.0, 0.5]);
+    if let Some(e) = w.entities.get_mut(&13) {
+        e.metadata.insert(8, MetaValue::Float(3.0));
+    }
+    let mut p = racer();
+    p.end.bridged = true;
+    assert!(p.drown_guard(&w, 0).is_none(), "{:?}", notes(&p));
 }
