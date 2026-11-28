@@ -306,6 +306,21 @@ mod tests {
         assert_eq!(r.remaining(), 0, "the stack read to the packet's end");
     }
 
+    /// Race 46124595679 lane 0 (rs-l00-b11, cuts probe 46152583531): a tipped arrow put in the
+    /// inventory (`container_set_slot`: window 0, state id 9, slot 40). Its potion_contents
+    /// (potion 28) had cut the slot and every slot after it in a window's content.
+    #[test]
+    fn a_tipped_arrow_in_a_window_slot_reads_whole() {
+        let packet: [u8; 15] = [
+            0x00, 0x09, 0x00, 0x28, 0x01, 0x8e, 0x0a, 0x01, 0x00, 0x33, 0x01, 0x1c, 0x00, 0x00,
+            0x00,
+        ];
+        let mut r = Reader::new(&packet);
+        assert_eq!((r.varint(), r.varint(), r.i16()), (Ok(0), Ok(9), Ok(40)));
+        assert_eq!(read_slot(&mut r), Ok(Slot::item(1294, 1)));
+        assert_eq!(r.remaining(), 0);
+    }
+
     /// A colour and a name are stepped over; custom effects stop the slot, counted.
     #[test]
     fn potion_contents_steps_its_colour_and_name_and_stops_at_effects() {

@@ -52,7 +52,7 @@ Which other components appear in a speedrun inventory (enchantments, custom name
   - an optional custom name, `STRING_UTF8`.
   Each optional is a bool, then the value. A witch's potion is `01 0d 00 00 00`: potion 13, no colour, no effects, no name.
 - `protocol::slot` steps over the potion, colour and name. A list of custom effects that is not empty is left unread: a `MobEffectInstance` is its effect then a recursive `Details`, whose codec has not been read from the jar here. The slot then ends as `Truncated` at `potion_contents`, counted and never guessed.
-- Test: `a_witchs_potion_reads_whole`, with the real equipment packet's bytes.
+- Tests built from real packets: `a_witchs_potion_reads_whole` (equipment) and `a_tipped_arrow_in_a_window_slot_reads_whole` (an inventory slot), with `a_thrown_potions_stack_reads_whole` in metadata. The cuts rerun (probe 46152583531) matched the coverage counts exactly: 131 ITEM_STACK in race 46140744043 lane 2; 44 ITEM_STACK and 8 window slots in race 46124595679 lane 0. Every one of them was `potion_contents`.
 
 ## See also
 - [[entities-and-inventory]] - ruststeve's reader (`protocol::slot`): clojurecraft's component codecs, `Slot::Truncated` for the rest.

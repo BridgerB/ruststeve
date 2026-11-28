@@ -5,14 +5,15 @@ type: reference
 tags: [wire, entities, metadata]
 aliases: [set-entity-data, entity data serializers, read-metadata, index 255, health index 9]
 status: verified
-lastUpdated: 2026-11-22
-verifiedAgainst: clojurecraft@be85a92 steve@46c1264
+lastUpdated: 2026-11-28
+verifiedAgainst: clojurecraft@be85a92 steve@46c1264 ruststeve@81480c0
 sourceRefs:
   - "clojurecraft:src/clojurecraft/packet.clj#\"How the metadata values the bot steps over are written, by serializer id: the game's"
   - "clojurecraft:src/clojurecraft/packet.clj#(def metadata-end 255)"
   - "clojurecraft:src/clojurecraft/dodge.clj#The blaze's charge flag (metadata index 16) is set 1.4 to 3.5 s before its fireballs spawn, with no direction in it."
   - "clojurecraft:src/clojurecraft/packet.clj#\"An entity's metadata as {index value}: entries of [index u8][serializer varint][value] up to"
   - "steve:CLAUDE.md#typecraft entity-metadata ordering is load-bearing"
+  - "ruststeve:crates/protocol/src/metadata.rs#fn a_thrown_potions_stack_reads_whole() {"
 related:
   - "[[wire/_moc|Wire]]"
   - "[[wire-slots]]"
@@ -41,6 +42,12 @@ The full serializer list (components, particles, block positions, variants) is n
 ## Issue 16e
 - Readers for COMPONENT and OPTIONAL_COMPONENT (network NBT, kept as plain text), ROTATIONS, BLOCK_POS, OPTIONAL_BLOCK_POS, OPTIONAL_LIVING_ENTITY_REFERENCE, BLOCK_STATE, OPTIONAL_UNSIGNED_INT, VILLAGER_DATA, the varint state enums (sniffer, armadillo, copper golem, weathering copper, humanoid arm), OPTIONAL_GLOBAL_POS, VECTOR3 and QUATERNION. Still unread on purpose: PARTICLE(S), RESOLVABLE_PROFILE and the mob variants held by registry or inline, whose widths were not confirmed.
 - A stop is no longer silent: the list ends with `MetaValue::Unread(serializer)`, and coverage counts stops by serializer.
+
+## Issue 77: ITEM_STACK stops were potions
+- **The cause**: the coverage row's "entity data cut short at ITEM_STACK" had one cause: an item stack whose `potion_contents` the slot reader could not step over. The read of a stack that ends `Truncated` ends the entries with `Unread("ITEM_STACK")`.
+- **The evidence**: `replay cuts` on CI (probe 46152583531) re-read the recordings and matched each lane's coverage exactly. In race 46140744043 lane 2, 131 ITEM_STACK stops were 131 stacks cut at `potion_contents`, mostly thrown splash potions. In race 46124595679 lane 0 they were 44, matching its coverage, and that lane also had 8 inventory slots (tipped arrows).
+- **The fix**: `potion_contents` is now stepped over ([[wire-slots]]), and the test `a_thrown_potions_stack_reads_whole` uses a splash potion's real entity data.
+- The same lanes stop at `PARTICLES` (581 and 177). That stop is on purpose and listed apart in the coverage row (`SKIPPED_SERIALIZERS`), not a `!!`.
 
 ## See also
 - [[entities-and-inventory]] - ruststeve's skim (`protocol::metadata`): serializers looked up by name in the generated table, stopping at the first without a reader.
