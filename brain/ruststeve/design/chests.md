@@ -14,6 +14,7 @@ sourceRefs:
   - "ruststeve:crates/sim/src/survival.rs#fn chest_quick_move(&mut self, i: usize, l: Loc, stack: Stack) {"
   - "ruststeve:crates/plan/src/stash.rs#pub struct Transfer {"
   - "ruststeve:crates/plan/tests/stash.rs#fn a_stash_then_a_fetch_round_trips_the_counts() {"
+  - "ruststeve:config/moments.toml#id = \"k00-half\""
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[entities-and-inventory]]"
@@ -62,6 +63,11 @@ Issue 77. A chest lets the bot leave what it does not need yet and come back for
 - `sim` `quick_move_goes_chest_to_inventory_end_and_inventory_to_chest_start`: the jar's rule.
 - `plan/tests/stash.rs`: a chest placed by `use_item_on`, then 74 cobblestone (64 + 10, never the other 64) and 3 string stashed and fetched back. The counts are checked in the model's chest, in the bot's pack and in memory. A second test fills the chest: 27 stacks go in and the task says the chest is full.
 
+## Parity rows
+`config/moments.toml` `k00-half` and `k00-round` (`Script::Chest`, `chest:<in>:<out>` in `crates/bot/src/script.rs`). Each gives a chest, two stacks of 64 cobblestone, one of 10 and 3 string. The chest is placed east of the feet and opened. Four inventory stacks are shift-clicked in, then two (half) or four (round) chest slots are shift-clicked out. The outcome's counts show the server's order. In half, the two stacks fetched from chest slots 0 and 1 are the two 64s if the server fills the chest from its start, as the model does. These rows click a fixed sequence and do not run the `Stash`/`Fetch` tasks. **The `Stash` and `Fetch` tasks are unverified on a real server**: only the model test (`plan/tests/stash.rs`) has run them. They get their first real run when the planner runs them.
+
+Parity run 46120883534 (6b6cc39f, `only=c00-`), on the race seed's vanilla 26.1.2 server: real and model agree in every field. `k00-half` (then named `c00-half`) ends with 128 cobblestone held on both sides (the two 64s came back, so the server fills the chest from slot 0 and keeps the 10 in a slot of its own). `k00-round` (then `c00-round`) ends with 138 cobblestone and 3 string on both sides. The run reports FAIL only because `only` was given without a `tolerance`, so the full table's 179 applied to 3 rows; it also took in the older `c00-planks`, which is why the rows were renamed to a `k0` prefix. The evidence run is `-f only=k0 -f tolerance=3`, with the task row `k01-task` (on the planner's dev aim `plan:chest-trip`, 77-stash's) once that aim lands.
+
 ## Limits
-- No real-server run yet. The probe planned for issue 77 places a chest, stashes, fetches and reads the counts back.
+- The chest parity rows agree with the real server (run 46120883534); the Stash and Fetch tasks have not yet run there.
 - The planner that crafts and places the home chest and decides what to stash and when is 77-stash's part (the planner section to come).

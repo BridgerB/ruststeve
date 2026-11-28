@@ -405,6 +405,12 @@ pub enum Script {
     /// 0) placed east of the feet and opened; the fuel (hotbar 2) then the input (hotbar 1) put
     /// in whole; at script tick `take` the result shift-clicked out, then the window closed.
     Smelt { take: u64 },
+    /// Standing still, a chest's shift-clicks (issue 77, brain/ruststeve/design/chests.md):
+    /// `chest:<in>:<out>`. The given chest (hotbar 0) placed east of the feet and opened; `in`
+    /// shift-clicks of the first inventory slot holding anything but the chest's own kind, then
+    /// `out` of the first chest slot holding anything; then the window closed. The server's
+    /// `ChestMenu.quickMoveStack` order is what the parity row compares.
+    Chest { stash: u8, fetch: u8 },
     /// Standing still looking along `yaw` and `pitch` from the start, use the held item at tick
     /// `at` (issue 14a: a bucket): `use:<tick>:<yaw>:<pitch>`.
     Use { at: u64, yaw: f64, pitch: f32 },
@@ -592,6 +598,7 @@ impl Script {
             | Script::Craft(_)
             | Script::Eat { .. }
             | Script::Smelt { .. }
+            | Script::Chest { .. }
             | Script::Light { .. }
             | Script::Burrow(_) => Controls::default(),
             Script::Break { dx, dy, dz, .. } => {
@@ -788,6 +795,51 @@ impl Script {
                     (_, _, _) => Vec::new(),
                 }
             }
+            Script::Chest { stash, fetch } => {
+                let Some(body) = w.body else {
+                    return Vec::new();
+                };
+                let (fx, fy, fz) = (
+                    body.pos[0].floor() as i32,
+                    (body.pos[1] + 0.01).floor() as i32,
+                    body.pos[2].floor() as i32,
+                );
+                let sent = w.clicks_sent;
+                let (stash, fetch) = (u64::from(stash), u64::from(fetch));
+                match (w.sequence_sent, &w.window, w.click.is_none()) {
+                    (0, None, _) => vec![Act::UseOn {
+                        pos: world::BlockPos::new(fx + 1, fy - 1, fz),
+                        face: 1,
+                    }],
+                    (1, None, _) if sent == 0 && tick >= 5 => vec![Act::UseOn {
+                        pos: world::BlockPos::new(fx + 1, fy, fz),
+                        face: 4,
+                    }],
+                    (_, Some(win), true) => {
+                        // A chest's window: its 27 (or 54) slots, then the inventory's 36.
+                        let own = (win.size - 36).max(0);
+                        let first = |range: std::ops::Range<i16>| {
+                            win.slots.range(range).map(|(s, _)| *s).next()
+                        };
+                        let slot = if sent < stash {
+                            first(own..win.size)
+                        } else if sent < stash + fetch {
+                            first(0..own)
+                        } else {
+                            None
+                        };
+                        match slot {
+                            Some(slot) => vec![Act::Click {
+                                slot,
+                                button: 0,
+                                mode: 1,
+                            }],
+                            None => vec![Act::CloseWindow],
+                        }
+                    }
+                    (_, _, _) => Vec::new(),
+                }
+            }
             Script::Craft(c) if c.at_table() => {
                 let Some(body) = w.body else {
                     return Vec::new();
@@ -908,6 +960,7 @@ impl Script {
             Script::Attack { every, yaw } => format!("attack:{every}:{yaw}"),
             Script::Eat { at } => format!("eat:{at}"),
             Script::Smelt { take } => format!("smelt:{take}"),
+            Script::Chest { stash, fetch } => format!("chest:{stash}:{fetch}"),
             Script::Use { at, yaw, pitch } => format!("use:{at}:{yaw}:{pitch}"),
             Script::Light {
                 at,
@@ -984,6 +1037,13 @@ impl Script {
         if let Some(take) = s.strip_prefix("smelt:") {
             return Some(Script::Smelt {
                 take: take.parse().ok()?,
+            });
+        }
+        if let Some(rest) = s.strip_prefix("chest:") {
+            let (stash, fetch) = rest.split_once(':')?;
+            return Some(Script::Chest {
+                stash: stash.parse().ok()?,
+                fetch: fetch.parse().ok()?,
             });
         }
         if let Some(rest) = s.strip_prefix("break:") {
@@ -1086,6 +1146,7 @@ mod tests {
             },
             Script::Eat { at: 220 },
             Script::Smelt { take: 460 },
+            Script::Chest { stash: 4, fetch: 2 },
             Script::Burrow(BurrowMode::Hold),
             Script::Burrow(BurrowMode::Strike),
             Script::Burrow(BurrowMode::Eye),
