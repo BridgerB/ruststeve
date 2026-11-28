@@ -9,6 +9,7 @@
 pub mod census;
 pub mod config;
 pub mod diagnose;
+pub mod keep;
 pub mod observe;
 pub mod parity;
 pub mod region;

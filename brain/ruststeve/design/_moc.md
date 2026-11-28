@@ -3,7 +3,7 @@ title: Design
 type: moc
 tags: [moc, design]
 status: verified
-lastUpdated: 2026-11-25
+lastUpdated: 2026-11-27
 related:
   - "[[ruststeve/_moc|ruststeve]]"
 ---
@@ -28,6 +28,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[workspace-crates]] - the crates and the one-way dependency rule.
 - [[replay-and-why]] - record a run, verify it replays exactly, export it, ask `why` at any moment.
 - [[entities-and-inventory]] - how the world folds entities and window 0; what is counted rather than invented.
+- [[keep-rule]] - what a full pack drops first: config/keep.toml's needs by stage, ranked least needed first; the want line.
 - [[memory-sightings]] - watched blocks remembered as sightings with time, only when seen with an exposed face.
 - [[physics]] - the body moves: a bit-exact port of clojurecraft's physics step, the movement packets, zero server corrections live.
 - [[race-and-results]] - the race on runners, starts as data, the stage ladder, case and batch files, coverage, k/n.

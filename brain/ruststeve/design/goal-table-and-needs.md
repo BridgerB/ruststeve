@@ -6,7 +6,7 @@ tags: [plan, goals, needs, make, crafting]
 aliases: [block needs, holds, place-table, mine-stone, stone-tools, goals.toml, goal table, needs planner, plan::make, make, producer rows, craft rows, kit, wood, Aim::Table, --goal table, producer order, craft-now, make differential]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+verifiedAgainst: ruststeve@f2408e5 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#pub fn make<'a>("
   - "ruststeve:crates/plan/src/make.rs#fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {"
@@ -58,7 +58,7 @@ Smelt rows, the `fuel:ticks` need and `spares` are in [[fuel-and-smelt-needs]], 
 ## Issues 14c to 16: the portal, gear, stock and the Nether kit
 - Rows `portal` (a water bucket, a bucket, flint and steel; holds a pickaxe, spares 24 sticks), `gear` (an iron helmet, chestplate, leggings and sword; holds a pickaxe; worn armour counts as held), `stock` (`tag:logs 12`, held before going underground) and `nether-kit` (4 stone pickaxes and a crafting table, held before the portal is entered: the Nether has no wood, blaze wall 18).
 - The race does not plan toward one `until`: `Plan::decide` picks the row each time it is idle (`nether-kit` with a portal standing, `stock` while the clean flow stocks, `gear` until geared, else `portal`).
-- `[survival]` also carries the planner's numbers that are not always-rows': `spare_uses` and `travel_reserve_digs` ([[fuel-and-smelt-needs]]), `stock_logs`, `provision_ticks`, and `junk` (item and how many to keep, dropped when the main inventory is nearly full; an unknown item name fails `Table::new`). Issue 17 adds `travel_health` (14: rest in cover before travel when a ticking blaze or ghast sees the bot), `pickaxe_reserve` (40 uses no leg of travel spends below; the heading reads it too) `forest_wait_ticks` and `valley_wait_ticks` (12,000: the soul sand valley wait) ([[planner]]).
+- `[survival]` also carries the planner's numbers that are not always-rows': `spare_uses` and `travel_reserve_digs` ([[fuel-and-smelt-needs]]), `stock_logs`, `provision_ticks`, and `junk` (item and how many to keep; an unknown item name fails `Table::new`). Since issue 77 the drop rule reads `config/keep.toml` instead ([[keep-rule]]), whose rows hold the same counts (a test keeps the two in step); the lists stay for `junk_place` and the stone pressing. Issue 17 adds `travel_health` (14: rest in cover before travel when a ticking blaze or ghast sees the bot), `pickaxe_reserve` (40 uses no leg of travel spends below; the heading reads it too) `forest_wait_ticks` and `valley_wait_ticks` (12,000: the soul sand valley wait) ([[planner]]).
 - Issue 18: `[pearls]` (`Goals::pearls`, `Table::pearls`, `pearls::PearlRules`, every field defaulted) holds the hunt's numbers: provoke ticks and range, the fight's windows, the kill window, the burrow's idle and move, the bounce counter ([[pearl-hunt]]).
 
 ## Issue 18d: the forest base

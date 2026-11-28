@@ -13,10 +13,11 @@ physics = { path = "../physics" }
 # Entity metadata values (an enderman's creepy and stared-at flags, issue 17).
 protocol = { path = "../protocol" }
 serde = { version = "1", features = ["derive"] }
+# config/keep.toml, compiled in and parsed at construction (issue 77, plan::keep): no I/O.
+toml = "1"
 world = { path = "../world" }
 
 [dev-dependencies]
-toml = "1"
 proptest = "1"
 sim = { path = "../sim" }
 # The build differential's fixture is zstd text (issue 14c: 4.9 MB plain).
