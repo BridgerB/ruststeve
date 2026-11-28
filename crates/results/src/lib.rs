@@ -950,46 +950,76 @@ pub fn quartiles(sorted: &[u64]) -> Option<[u64; 3]> {
 }
 
 /// The per-stage ticks table (issue 56): for each `(commit, start, source)` group and each stage
-/// some run reached, k runs that reached it of n counted, and the tick it was first reached at
-/// over those k: median, p25 and p75 (`Row::stage_ticks`, the ledger's session ticks). A start
-/// held its own stages at its first tick, so they read near zero. Empty when no row kept ticks
-/// (batches from before issue 56), so an old race prints no table rather than a wrong one.
+/// some run reached after its start, k runs that reached it of n counted, and the tick it was first
+/// reached at over those k: median, p25 and p75 (`Row::stage_ticks`, the ledger's session ticks).
+/// A stage a run held from its first stage tick (a snapshot's own ladder, `in_world` at spawn) is
+/// held at the start, not reached: it would read as tick 20 for every run, so those stages are one
+/// row, `<first> to <last>, held at the start`, with the runs that held any. Empty when no row
+/// kept ticks (batches from before issue 56 with no ledgers), not a table of zeros.
 pub fn stage_tick_lines(batches: &[Batch]) -> Vec<String> {
-    type Group = (u64, BTreeMap<Stage, Vec<u64>>);
+    #[derive(Default)]
+    struct Group {
+        n: u64,
+        reached: BTreeMap<Stage, Vec<u64>>,
+        held: BTreeMap<Stage, u64>,
+        held_runs: u64,
+    }
     let mut groups: BTreeMap<(String, String, Source), Group> = BTreeMap::new();
     for b in batches {
         let g = groups
             .entry((b.commit.clone(), b.start.clone(), b.source))
             .or_default();
         for row in b.rows.iter().filter(|r| r.ending.counted()) {
-            g.0 += 1;
+            g.n += 1;
+            let first = row.stage_ticks.iter().map(|t| t.1).min();
+            g.held_runs += u64::from(first.is_some());
             for (stage, at) in &row.stage_ticks {
-                g.1.entry(*stage).or_default().push(*at);
+                if Some(*at) == first {
+                    *g.held.entry(*stage).or_default() += 1;
+                } else {
+                    g.reached.entry(*stage).or_default().push(*at);
+                }
             }
         }
     }
-    if groups.values().all(|g| g.1.is_empty()) {
+    if groups
+        .values()
+        .all(|g| g.reached.is_empty() && g.held.is_empty())
+    {
         return Vec::new();
     }
     let mut lines = vec![
         "| commit | start | stage | k/n | median tick | p25 | p75 |".to_owned(),
         "|---|---|---|---|---|---|---|".to_owned(),
     ];
-    for ((commit, start, source), (n, stages)) in &mut groups {
+    for ((commit, start, source), g) in &mut groups {
         let short = commit.get(..7).unwrap_or(commit);
         let start = match source {
             Source::Real => start.clone(),
             Source::Sim => format!("{start} (sim)"),
         };
-        for (stage, at) in stages.iter_mut() {
+        let held: Vec<&Stage> = g.held.keys().collect();
+        if let (Some(lo), Some(hi)) = (held.first(), held.last()) {
+            let span = if lo == hi {
+                lo.name().to_owned()
+            } else {
+                format!("{} to {}", lo.name(), hi.name())
+            };
+            lines.push(format!(
+                "| {short} | {start} | {span}, held at the start | {}/{} | - | - | - |",
+                g.held_runs, g.n
+            ));
+        }
+        for (stage, at) in g.reached.iter_mut() {
             at.sort_unstable();
             let Some([p25, median, p75]) = quartiles(at) else {
                 continue;
             };
             lines.push(format!(
-                "| {short} | {start} | {} | {}/{n} | {median} | {p25} | {p75} |",
+                "| {short} | {start} | {} | {}/{} | {median} | {p25} | {p75} |",
                 stage.name(),
-                at.len()
+                at.len(),
+                g.n
             ));
         }
     }
@@ -1580,7 +1610,8 @@ mod stage_tick_tests {
     }
 
     /// The table: k is the runs that reached a stage of the n counted, the ticks are over those k
-    /// only, a cut run is in neither, and a stage no run reached has no row.
+    /// only, a cut run is in neither, a stage no run reached has no row, and the stages held from
+    /// the start are one row with no ticks.
     #[test]
     fn the_table_gives_each_stage_its_median_and_quartiles() {
         let b = batch(vec![
@@ -1609,7 +1640,7 @@ mod stage_tick_tests {
             vec![
                 "| commit | start | stage | k/n | median tick | p25 | p75 |".to_owned(),
                 "|---|---|---|---|---|---|---|".to_owned(),
-                "| abcdef0 | ready | ready | 4/4 | 10 | 9 | 11 |".to_owned(),
+                "| abcdef0 | ready | ready, held at the start | 4/4 | - | - | - |".to_owned(),
                 "| abcdef0 | ready | iron_kit | 3/4 | 3000 | 2000 | 4000 |".to_owned(),
             ]
         );

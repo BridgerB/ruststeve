@@ -188,5 +188,9 @@ fn an_old_batch_takes_its_stage_ticks_from_the_ledgers() {
         text.contains("| abc1234 | spawn | table | 1/2 | 700 | 700 | 700 |"),
         "{text}"
     );
+    assert!(
+        text.contains("| abc1234 | spawn | in_world, held at the start | 1/2 | - | - | - |"),
+        "{text}"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
