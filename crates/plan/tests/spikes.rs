@@ -2541,10 +2541,12 @@ fn no_climb_on_through_the_dragon_inside_64_or_not_holding() {
         base: 64,
     });
     p.spikes_task(&w, 100);
+    // Down by the clutch either way: a strafe within its reach drops the bot with the clutch.
     assert!(
         notes(&p)
             .iter()
-            .any(|n| n == "spikes: clutch down from (8, 67, 5)"),
+            .any(|n| n == "spikes: clutch down from (8, 67, 5)"
+                || n == "spikes: drop with the clutch from (8, 67, 5)"),
         "{:?}",
         notes(&p)
     );
