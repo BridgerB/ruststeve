@@ -6,11 +6,12 @@ tags: [wire, windows, crafting, clicks]
 aliases: [container-click, state id, changed slots, predict nothing, set-cursor-item, container-set-content]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@a5a7aa4
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@bd9b55c
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#w.varint(0); // no changed slots: nothing predicted"
   - "ruststeve:crates/world/src/lib.rs#fn window_moved(&mut self, window: i32, state_id: i32) {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_click_predicts_nothing() {"
+  - "ruststeve:crates/sim/src/chest.rs#pub fn quick_move_target(slot: usize) -> (std::ops::Range<usize>, bool) {"
   - "clojurecraft:src/clojurecraft/packet.clj#;; 775 clicks carry the client's prediction as hashed slots; we always predict nothing"
   - "clojurecraft:src/clojurecraft/packet.clj#[[:window-id :varint] [:state-id :varint] [:slot :i16] [:button :i8] [:mode :varint]"
   - "ruststeve-v1:src/bot/inventory.rs#// Send EMPTY changedSlots so the server ALWAYS sees a prediction mismatch and"
@@ -21,6 +22,7 @@ related:
   - "[[wire-slots]]"
   - "[[cc-window-clicks]]"
   - "[[hist-v1-load-bearing-fixes]]"
+  - "[[chests]]"
 ---
 
 # Container clicks
@@ -47,6 +49,7 @@ A click is `container-click`: window id, **state id**, slot (i16), button (i8), 
 
 - **A click's answer can outlive its window** (issue 13a): a furnace take's answer came over two ticks, the inventory slot 30 ticks after the result slot. Close a window only once its clicks are answered, or keep what the late answer brings: the world keeps the last closed window (`closed_window`) and puts its slot updates into the player's slots. A vanilla client predicts the click, so it never notices.
 - **`container_set_data`** carries a window's properties (a furnace's progress) with no state id.
+- **A chest's shift-click** (issue 77, `ChestMenu.quickMoveStack`): mode 1 on chest slots 0-26 sends the stack to the inventory from its end (slots 62 back to 27). Mode 1 on an inventory slot (27-62) sends it into the chest from slot 0. A shift-click with no room on the far side changes nothing and gets no reply, so the chest tasks check for room in the window before clicking and never send one ([[chests]]).
 
 ## See also
 - [[cc-window-clicks]] - clojurecraft's click rules and the 3 s stale-window deadline.
