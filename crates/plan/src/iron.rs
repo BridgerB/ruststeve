@@ -11,14 +11,17 @@
 //!    and the middle band thins to nothing at y -24).
 //! 2. **Takes a cave seen**: open cells in a cross with room over them and a floor under them (a
 //!    one-wide tunnel never makes one), beyond the 24 blocks `exposed_near` reads and within
-//!    `cave_reach`: walked to, or dug toward with no route. Its walls are then read from inside.
+//!    `cave_reach`, with a clear line of sight from the eye through cells seen open
+//!    (`defend::sight`): walked to, or dug toward with no route. A cave sealed behind rock is air
+//!    in the chunk data and is never sought. Its walls are then read from inside.
 //! 3. **Cuts a strip in fresh rock**: only on a heading whose next `fresh_ahead` columns are rock
 //!    and whose first step is not refused. A strip ends after `strip_len` blocks, or after
 //!    `strip_stalls` tunnels in a row no further along, and turns a quarter, left and right in turn.
 //! 4. **With no fresh rock on any heading**, stairs to another level, never the shuttle.
 //!
-//! Strict no X-ray: only open cells and blocks with an open face are read (the rule of
-//! `exposed_near`, `tunnel.rs` and `Stairs::rock`); ore is still only taken through `exposed_near`.
+//! Strict no X-ray: a cave counts only when seen along a line of open cells, and a strip's fresh
+//! rock counts air the eye has no line to as rock (`defend::sight`); ore is still only taken through
+//! `exposed_near`.
 //! Every choice writes a ledger note.
 
 use data::{BlockKind, ItemKind};
@@ -55,6 +58,8 @@ pub struct IronRules {
     pub cave_every: u64,
     /// Dig-toward tasks spent on one cave with no route before it is given up.
     pub cave_cuts: u32,
+    /// Lines of sight traced to cave candidates in one search, nearest first.
+    pub cave_rays: u32,
 }
 
 impl Default for IronRules {
@@ -71,6 +76,7 @@ impl Default for IronRules {
             cave_apart: 16,
             cave_every: 200,
             cave_cuts: 8,
+            cave_rays: 64,
         }
     }
 }
@@ -173,12 +179,29 @@ pub fn left((dx, dz): (i32, i32)) -> (i32, i32) {
     (dz, -dx)
 }
 
-/// A heading is fresh from `feet` when the feet and head cells of its next `ahead` columns are
-/// rock (loaded, not open, no fluid: a full block) and its first level step is not refused by the
-/// stairs' own rules. Only whether a cell is open is read past the first step: no X-ray.
+/// A cell seen open from the eye: no full block, and the line from the eye to its middle crosses
+/// only cells seen open (`defend::sight`). Air the bot has no line to (a pocket sealed in the
+/// rock ahead) counts as rock.
+fn seen_open(w: &World, eye: [f64; 3], (x, y, z): Cell) -> bool {
+    !full(kind(w, (x, y, z)))
+        && crate::defend::sight(
+            w,
+            eye,
+            [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5],
+        )
+}
+
+/// A heading is fresh from `feet` when none of the feet and head cells of its next `ahead`
+/// columns is seen open from the eye (unseen air is rock, so it neither steers the strip toward
+/// it nor away from it) and its first level step is not refused by the stairs' own rules.
 pub fn fresh(w: &World, feet: Cell, dir: (i32, i32), ahead: i32) -> bool {
     let (x, y, z) = feet;
     let (dx, dz) = dir;
+    let eye = [
+        f64::from(x) + 0.5,
+        f64::from(y) + physics::EYE_HEIGHT,
+        f64::from(z) + 0.5,
+    ];
     let to = (x + dx, y, z + dz);
     let cells = [(x + dx, y + 1, z + dz), to];
     if stairs::refusal(w, &cells, (to.0, to.1 - 1, to.2)).is_some() {
@@ -189,7 +212,7 @@ pub fn fresh(w: &World, feet: Cell, dir: (i32, i32), ahead: i32) -> bool {
             let c = (x + dx * k, y + h, z + dz * k);
             w.columns
                 .contains_key(&BlockPos::new(c.0, c.1, c.2).chunk())
-                && full(kind(w, c))
+                && !seen_open(w, eye, c)
         })
     })
 }
@@ -213,10 +236,30 @@ pub fn cave_cell(w: &World, (x, y, z): Cell) -> bool {
             .all(|(dx, dz)| open(kind(w, (x + dx, y, z + dz))))
 }
 
-/// The nearest cave cell from `cave_from` to `cave_reach` blocks off on the plane (Chebyshev,
-/// every second column), within `SEARCH_HEIGHT` of the feet and inside the band, and not within
-/// `cave_apart` of a cave already taken.
-pub fn cave_near(w: &World, feet: Cell, rules: &IronRules, taken: &[Cell]) -> Option<Cell> {
+/// Whether the cave cell is seen from the eye: the line from the eye to the cell's middle crosses
+/// only cells seen open (`defend::sight`: a cell never seen exposed is rock). A cave sealed
+/// behind rock is air in the chunk data, never seen, and is not sought.
+pub fn cave_seen(w: &World, eye: [f64; 3], (x, y, z): Cell) -> bool {
+    crate::defend::sight(
+        w,
+        eye,
+        [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5],
+    )
+}
+
+/// The nearest cave cell seen from the eye, from `cave_from` to `cave_reach` blocks off on the
+/// plane (Chebyshev, every second column), within `SEARCH_HEIGHT` of the feet and inside the
+/// band, and not within `cave_apart` of a cave already taken. A candidate is acted on only once
+/// `cave_seen` says the bot sees it; at most `cave_rays` lines are traced a search, nearest
+/// first.
+pub fn cave_near(
+    w: &World,
+    feet: Cell,
+    eye: [f64; 3],
+    rules: &IronRules,
+    taken: &[Cell],
+) -> Option<Cell> {
+    let mut rays = rules.cave_rays;
     let (fx, fy, fz) = feet;
     let lo = (fy - crate::SEARCH_HEIGHT).max(rules.cave_low);
     let hi = (fy + crate::SEARCH_HEIGHT).min(rules.cave_high);
@@ -246,8 +289,14 @@ pub fn cave_near(w: &World, feet: Cell, rules: &IronRules, taken: &[Cell]) -> Op
             }
         }
         found.sort();
-        if let Some((_, c)) = found.first() {
-            return Some(*c);
+        for (_, c) in found {
+            if rays == 0 {
+                return None;
+            }
+            rays -= 1;
+            if cave_seen(w, eye, c) {
+                return Some(c);
+            }
         }
     }
     None
@@ -436,7 +485,12 @@ impl Plan {
                     return None;
                 }
                 self.iron.cave_next = tick + rules.cave_every;
-                (cave_near(w, feet, rules, &self.iron.caves)?, 0)
+                {
+                    let eye = w
+                        .body
+                        .map(|b| [b.pos[0], b.pos[1] + physics::EYE_HEIGHT, b.pos[2]])?;
+                    (cave_near(w, feet, eye, rules, &self.iron.caves)?, 0)
+                }
             }
         };
         let flat = (aim.0 - feet.0).abs().max((aim.2 - feet.2).abs());

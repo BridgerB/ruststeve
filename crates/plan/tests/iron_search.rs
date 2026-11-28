@@ -183,34 +183,76 @@ fn open_cells_on_every_side_leave_no_fresh_heading() {
     assert!(!iron::no_fresh_down((0, 5, 0), Some(16), &rules));
 }
 
+/// The eye over the feet at (0, 20, 0).
+const EYE: [f64; 3] = [0.5, 21.62, 0.5];
+
+/// A room 5 by 5 by 3 (feet y 20 to 22) round (cx, 20, cz).
+fn room(w: &mut World, cx: i32, cz: i32) {
+    for x in cx - 2..=cx + 2 {
+        for z in cz - 2..=cz + 2 {
+            for y in 20..=22 {
+                carve(w, (x, y, z));
+            }
+        }
+    }
+}
+
 #[test]
-fn a_cave_beyond_view_is_found_and_a_tunnel_is_not() {
+fn a_cave_sealed_behind_rock_is_not_sought() {
+    let mut w = world();
+    let rules = IronRules::default();
+    // A room 30 south, in the chunk data, behind 27 blocks of rock no face of which was seen.
+    room(&mut w, 0, 30);
+    assert!(iron::cave_cell(&w, (0, 20, 30)), "a cave by its shape");
+    assert!(!iron::cave_seen(&w, EYE, (0, 20, 30)), "but not seen");
+    assert_eq!(iron::cave_near(&w, (0, 20, 0), EYE, &rules, &[]), None);
+}
+
+#[test]
+fn a_cave_seen_beyond_view_is_found_and_a_tunnel_is_not() {
     let mut w = world();
     let rules = IronRules::default();
     // A one-wide tunnel 30 east: no cross of open cells, not a cave.
     tunnel_x(&mut w, 26, 34, 20, 0);
-    assert_eq!(iron::cave_near(&w, (0, 20, 0), &rules, &[]), None);
-    // A room 5 by 5 by 3 centred 30 south.
-    for x in -2..=2 {
-        for z in 28..=32 {
-            for y in 20..=22 {
-                carve(&mut w, (x, y, z));
-            }
-        }
+    assert_eq!(iron::cave_near(&w, (0, 20, 0), EYE, &rules, &[]), None);
+    // A room 30 south, open to the feet along a corridor: seen.
+    room(&mut w, 0, 30);
+    for z in 0..=28 {
+        carve(&mut w, (0, 20, z));
+        carve(&mut w, (0, 21, z));
     }
-    assert!(iron::cave_cell(&w, (0, 20, 30)));
+    // A second room 30 west, sealed: never chosen, though as near.
+    room(&mut w, -30, 0);
+    assert!(iron::cave_seen(&w, EYE, (0, 20, 30)));
+    assert!(!iron::cave_seen(&w, EYE, (-30, 20, 0)));
     assert!(!iron::cave_cell(&w, (30, 20, 0)));
     assert_eq!(
-        iron::cave_near(&w, (0, 20, 0), &rules, &[]),
+        iron::cave_near(&w, (0, 20, 0), EYE, &rules, &[]),
         Some((0, 20, 30))
     );
     // Taken already: not sought again.
     assert_eq!(
-        iron::cave_near(&w, (0, 20, 0), &rules, &[(0, 20, 31)]),
+        iron::cave_near(&w, (0, 20, 0), EYE, &rules, &[(0, 20, 31)]),
         None
     );
     // Nearer than `cave_from`: its walls are already in view, not sought.
-    assert_eq!(iron::cave_near(&w, (0, 20, 20), &rules, &[]), None);
+    let eye = [0.5, 21.62, 20.5];
+    assert_eq!(iron::cave_near(&w, (0, 20, 20), eye, &rules, &[]), None);
+}
+
+#[test]
+fn unseen_air_ahead_is_rock_to_a_strip() {
+    let mut w = world();
+    // A pocket two blocks east, sealed: never seen, so no reason to turn from it.
+    for y in 20..=21 {
+        carve(&mut w, (2, y, 0));
+        carve(&mut w, (3, y, 0));
+    }
+    assert!(iron::fresh(&w, (0, 20, 0), (1, 0), 3));
+    // Opened to the feet, it is seen, and the strip turns from it.
+    carve(&mut w, (1, 20, 0));
+    carve(&mut w, (1, 21, 0));
+    assert!(!iron::fresh(&w, (0, 20, 0), (1, 0), 3));
 }
 
 #[test]

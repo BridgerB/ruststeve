@@ -1178,4 +1178,9 @@ cave_apart = 16
 cave_every = 200
 # Dig-toward tasks of six steps on one cave with no route: 8 × 6 = 48, the reach.
 cave_cuts = 8
+# Lines of sight traced to cave candidates in one search, nearest first: a cave counts only when
+# seen along open cells (defend::sight), never as loaded-chunk air (the director's no-X-ray catch on
+# the first version). A line of 48 blocks crosses about 100 cells, so 64 bound a search to about
+# 6,400 cell reads on top of the ring scan.
+cave_rays = 64
 # <<< iron search (gen)

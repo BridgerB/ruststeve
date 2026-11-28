@@ -10,7 +10,8 @@ verifiedAgainst: ruststeve@201dfcf
 sourceRefs:
   - "ruststeve:crates/plan/src/iron.rs#pub fn fresh(w: &World, feet: Cell, dir: (i32, i32), ahead: i32) -> bool {"
   - "ruststeve:crates/plan/src/iron.rs#pub fn cave_cell(w: &World, (x, y, z): Cell) -> bool {"
-  - "ruststeve:crates/plan/src/iron.rs#pub fn cave_near(w: &World, feet: Cell, rules: &IronRules, taken: &[Cell]) -> Option<Cell> {"
+  - "ruststeve:crates/plan/src/iron.rs#pub fn cave_seen(w: &World, eye: [f64; 3], (x, y, z): Cell) -> bool {"
+  - "ruststeve:crates/bot/tests/no_xray.rs#fn no_target_in_rock_never_seen() {"
   - "ruststeve:crates/plan/src/iron.rs#pub fn next_strip("
   - "ruststeve:crates/plan/src/iron.rs#pub(crate) fn iron_search("
   - "ruststeve:crates/plan/tests/iron_search.rs#fn a_heading_into_its_own_tunnel_is_turned_from() {"
@@ -37,8 +38,8 @@ The old fallback at the depth was `Stairs::level` on the held heading, and a tun
 ## How it works
 Only for a row whose blocks name iron ore, with the feet at or under its depth (16), and only when no exposed iron has a walk or a dig toward it. In order:
 1. **Rise**: feet under `rise_below` (y 0) cut `Stairs::up` on the heading ("rise toward iron's band from y …"). Under y 0 the rock is deepslate (hardness 3, stone's 1.5) and the middle band thins to nothing at -24.
-2. **A cave**: `cave_near` looks ring by ring, every second column, from `cave_from` (24, `exposed_near`'s radius: nearer caves' walls are already read) to `cave_reach` (48), within 12 of the feet and inside y -24 to 56, for a `cave_cell`: open, open over it, a full block under it, and open on all four sides on the plane. A one-wide tunnel or staircase never has that cross. The search runs at most every `cave_every` (200) ticks. A cave with a route is walked into (`Task::Explore`, "walk into the cave at …"); with none it is dug toward through `Plan::dig_toward` ("dig toward a cave at … (cut n of 8)"), given up after `cave_cuts`. Caves taken (walked to, reached, refused, given up) are kept (64) and one within `cave_apart` (16) of them is the same cave.
-3. **A strip in fresh rock**: a heading is fresh when its first level step passes `stairs::refusal` and the feet and head cells of its next `fresh_ahead` (3) columns are full blocks. `fresh_heading` tries the wanted heading, a quarter right, a quarter left, then back. The strip keeps its heading, its start, how far along it the feet have been and the raw iron held when it began. It ends:
+2. **A cave**: `cave_near` looks ring by ring, every second column, from `cave_from` (24, `exposed_near`'s radius: nearer caves' walls are already read) to `cave_reach` (48), within 12 of the feet and inside y -24 to 56, for a `cave_cell`: open, open over it, a full block under it, and open on all four sides on the plane. A one-wide tunnel or staircase never has that cross. **A candidate counts only when seen** (`cave_seen`): the line from the eye to its middle crosses only cells seen open (`defend::sight`; a cell never seen exposed is rock), at most `cave_rays` (64) lines a search, nearest first. A cave sealed in rock is air in the chunk data and is never sought. The search runs at most every `cave_every` (200) ticks. A cave with a route is walked into (`Task::Explore`, "walk into the cave at …"); with none it is dug toward through `Plan::dig_toward` ("dig toward a cave at … (cut n of 8)"), given up after `cave_cuts`. Caves taken (walked to, reached, refused, given up) are kept (64) and one within `cave_apart` (16) of them is the same cave.
+3. **A strip in fresh rock**: a heading is fresh when its first level step passes `stairs::refusal` and none of the feet and head cells of its next `fresh_ahead` (3) columns is seen open from the eye (air with no line to it is rock). `fresh_heading` tries the wanted heading, a quarter right, a quarter left, then back. The strip keeps its heading, its start, how far along it the feet have been and the raw iron held when it began. It ends:
    - after `strip_len` (24) blocks: turned a quarter, left and right in turn, so strips step across new ground and never close a square ("strip turned after 24 blocks", with the raw iron it gave);
    - after `strip_stalls` (2) tunnels in a row no further along ("strip turned, stalled at …");
    - when the cells ahead are open ("strip turned from open cells ahead …");
@@ -46,7 +47,10 @@ Only for a row whose blocks name iron ore, with the feet at or under its depth (
 4. **No fresh rock on any heading**: stairs down while the feet are over both the depth and the rise line plus six, else up ("stairs down for fresh rock"), never the old shuttle.
 
 ## No X-ray
-The search reads what the repository already counts as seen: open cells and blocks with an open face (the rule of `exposed_near`, `tunnel.rs` and `Stairs::rock`'s cave test). `fresh` reads only whether cells ahead are open or full; it never reads the kind of a block with no open face. Ore is still taken only through `exposed_near`.
+- A cave is seen only along a line of open cells from the eye; air in loaded chunk data is not seen. The first version (8f26631f) read caves from `w.block_at` within 48 blocks; the director caught it before any judging and its races were cancelled (docs/problems/iron-search.md, the near miss).
+- `fresh` acts on air only when the eye has a line to it; unseen air is rock, so it steers the strip neither toward nor away.
+- Ore is still taken only through `exposed_near`.
+- **The fleet guard** (`crates/bot/tests/no_xray.rs`): the whole planner closed loop against the model, sealed caves and sealed iron ore in the rock round the descent; every target the planner holds each tick (a walk's goal, a dig's cell, the dig toward's aim, the cave aim) must not lie in a sealed feature the bot has not opened.
 
 ## Limits
 - Not raced yet on this branch: the judging races (8-seed relay snapshots, paired against `stack`, cap 72,000) are the lead's.
