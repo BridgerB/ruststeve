@@ -461,6 +461,10 @@ pub enum Script {
     /// and let go `plan::bow::DRAW_HOLD` ticks later: does an arrow from the ground destroy it?
     Bow { at: u64 },
     // <<< E8
+    /// Issue 56's p02 rows (`sprint:<yaw>`, `sprint:<yaw>:<from>`, `sprintjump:<yaw>`): standing
+    /// still until script tick `from`, then forward along `yaw` with the sprint key held (and
+    /// jump, for a sprint-jump). The body sprints only while `physics::sprint_allowed` holds.
+    SprintForward { yaw: f64, jump: bool, from: u64 },
 }
 
 // >>> E8 (issue 20, the bow line)
@@ -586,6 +590,13 @@ impl Script {
                 yaw,
                 pitch: None,
                 sprint: false,
+            },
+            Script::SprintForward { yaw, jump, from } => Controls {
+                forward: tick >= from,
+                jump: jump && tick >= from,
+                sprint: tick >= from,
+                yaw,
+                ..Controls::default()
             },
             Script::Crouch => Controls {
                 sneak: true,
@@ -894,6 +905,7 @@ impl Script {
             | Script::Straight { .. }
             | Script::JumpForward { .. }
             | Script::SneakForward { .. }
+            | Script::SprintForward { .. }
             | Script::Crouch
             | Script::Still => Vec::new(),
         }
@@ -907,6 +919,14 @@ impl Script {
             Script::JumpForward { yaw } => format!("jump:{yaw}"),
             Script::Still => "still".to_owned(),
             Script::SneakForward { yaw } => format!("sneak:{yaw}"),
+            Script::SprintForward { yaw, jump, from } => {
+                let verb = if jump { "sprintjump" } else { "sprint" };
+                if from == 0 {
+                    format!("{verb}:{yaw}")
+                } else {
+                    format!("{verb}:{yaw}:{from}")
+                }
+            }
             Script::Crouch => "crouch".to_owned(),
             Script::DigDown { finish } => format!("dig:{finish}"),
             Script::Craft(c) => format!("craft:{}", c.name()),
@@ -949,8 +969,24 @@ impl Script {
             ("dig", Some(f)) if f >= 0.0 && f.fract() == 0.0 => {
                 Some(Script::DigDown { finish: f as u64 })
             }
-            _ => Self::parse_use(s).or_else(|| Self::parse_craft(s)),
+            _ => Self::parse_sprint(s)
+                .or_else(|| Self::parse_use(s))
+                .or_else(|| Self::parse_craft(s)),
         }
+    }
+
+    /// `sprint:<yaw>[:<from>]`, `sprintjump:<yaw>[:<from>]`.
+    fn parse_sprint(s: &str) -> Option<Script> {
+        let (jump, rest) = match s.split_once(':')? {
+            ("sprint", rest) => (false, rest),
+            ("sprintjump", rest) => (true, rest),
+            _ => return None,
+        };
+        let (yaw, from) = match rest.split_once(':') {
+            Some((yaw, from)) => (yaw.parse().ok()?, from.parse().ok()?),
+            None => (rest.parse().ok()?, 0),
+        };
+        Some(Script::SprintForward { yaw, jump, from })
     }
 
     fn parse_use(s: &str) -> Option<Script> {
@@ -1078,6 +1114,21 @@ mod tests {
             Script::Straight { yaw: 90.0 },
             Script::JumpForward { yaw: -45.0 },
             Script::SneakForward { yaw: 90.0 },
+            Script::SprintForward {
+                yaw: 0.0,
+                jump: false,
+                from: 0,
+            },
+            Script::SprintForward {
+                yaw: 180.0,
+                jump: false,
+                from: 100,
+            },
+            Script::SprintForward {
+                yaw: -90.0,
+                jump: true,
+                from: 0,
+            },
             Script::Crouch,
             Script::DigDown { finish: 30 },
             Script::Craft(Craft::Planks),
