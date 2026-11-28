@@ -999,15 +999,14 @@ pub fn chosen_approach(w: &World, st: &SpikeState, pos: [f64; 3], tick: u64) -> 
 
 /// The blocks a pillar wants held before its walk and its climb begin: from its foot to its
 /// stand, plus `PILLAR_SPARE` (the stand's two wall blocks and two for a lost click).
-pub fn pillar_wants(st: &SpikeState, a: &Approach) -> i32 {
-    // A stub of the bot's own: the whole pillar from its base (the side pillar to its top and the
-    // rest from there).
-    let base = st
-        .stubs
-        .iter()
-        .find(|r| (r.x, r.z) == a.plan.column)
-        .map_or(a.foot.1, |r| r.base);
-    a.plan.stand.1 - base + PILLAR_SPARE
+pub fn pillar_wants(w: &World, st: &SpikeState, a: &Approach) -> i32 {
+    // A stub of the bot's own: from the stub's top to the stand, plus the side pillar's height
+    // still to put up to reach that top (from the side column's top now: a side pillar begun
+    // lowers it; the orchestrator, after race 46099479836: ~520 "too few blocks").
+    let floor = stub_side(w, st, a).map_or(a.foot.1, |side| {
+        ground(w, side.0, side.2, a.foot.1).map_or(side.1, |g| g.max(side.1))
+    });
+    a.plan.stand.1 - floor + PILLAR_SPARE
 }
 
 /// The foot of the side pillar a stub of the bot's own is climbed back onto: a column beside the
@@ -1042,7 +1041,7 @@ pub fn stub_side(w: &World, st: &SpikeState, a: &Approach) -> Option<Cell> {
 pub fn blocks_wanted(plan: &crate::Plan, w: &World) -> Option<i32> {
     let body = w.body?;
     chosen_approach(w, &plan.spikes, body.pos, plan.spikes.now)
-        .map(|(_, (_, a))| pillar_wants(&plan.spikes, &a))
+        .map(|(_, (_, a))| pillar_wants(w, &plan.spikes, &a))
 }
 
 /// The crystals' next step from where the world says the bot is (clojurecraft's
@@ -2463,7 +2462,7 @@ impl Plan {
                     && (to == a.foot || stub_side(w, &self.spikes, &a) == Some(to))
                     && to.1 < a.plan.stand.1
                 {
-                    let need = pillar_wants(&self.spikes, &a);
+                    let need = pillar_wants(w, &self.spikes, &a);
                     let held = pillar_blocks(w);
                     if held < need {
                         self.spikes_note(
@@ -2538,7 +2537,7 @@ impl Plan {
                             || stub_side(w, &self.spikes, a).is_some_and(|s| (s.0, s.2) == column)
                     })
                     .map_or(top - feet.1 + PILLAR_SPARE, |(_, (_, a))| {
-                        pillar_wants(&self.spikes, &a)
+                        pillar_wants(w, &self.spikes, &a)
                     });
                 let held = pillar_blocks(w);
                 if !climbing && held < need {
@@ -2673,6 +2672,17 @@ impl Plan {
                             format!("{why}; at {feet:?}, {} under {top}", top - feet.1),
                         );
                     } else {
+                        // Calm (the refusal health's) and no fireball: down by the dig, the blocks
+                        // back; the water only when the dragon is not calm.
+                        if self.calm(w, tick) && fireball_near(w, body.pos).is_none() {
+                            let c = (feet.0, feet.1 - 1, feet.2);
+                            self.spikes_note(
+                                tick,
+                                "spikes: climb stopped: down by the dig, calm".to_owned(),
+                                format!("{why}; at {feet:?}"),
+                            );
+                            return Some(Task::Dig(dig_down(w, c, tick)));
+                        }
                         if let Some(rec) = self
                             .spikes
                             .pillars
@@ -3297,6 +3307,21 @@ impl Plan {
         // slow to ride, 10 blocks in 400 ticks, and the bot drowned in it): at the top with the
         // crystal gone, a step off the side over the landing water poured at the pillar's foot
         // before the climb, a free fall into it (water at the landing cancels the fall).
+        // Calm and no fireball: the way down is the dig, its blocks back to the stock (the
+        // orchestrator, after race 46099479836: every stop came down by water and left its stub,
+        // ~520 "too few blocks"); the water only when the dragon is not calm or a fireball near.
+        if let Next::DigDown(_) = n
+            && body.on_ground
+            && self.calm(w, tick)
+            && fireball_near(w, body.pos).is_none()
+        {
+            self.spikes_note(
+                tick,
+                "spikes: down by the dig, calm".to_owned(),
+                format!("at {feet:?}: the blocks back to the stock"),
+            );
+            return None;
+        }
         // No drop while the dragon would knock the bot out of it: held crouched until it passes.
         if let Next::DigDown(_) = n
             && body.on_ground
@@ -3673,11 +3698,14 @@ impl Plan {
                 .iter()
                 .copied()
                 .filter(|c| {
-                    !self
-                        .spikes
-                        .left_water_fails
-                        .iter()
-                        .any(|(x, _, at)| x == c && tick.saturating_sub(*at) < LEFT_WATER_RETRY)
+                    !self.spikes.left_water_fails.iter().any(|(x, n, at)| {
+                        let wait = if *n >= LEFT_WATER_TRIES {
+                            LEFT_WATER_RETRY * 5
+                        } else {
+                            LEFT_WATER_RETRY
+                        };
+                        x == c && tick.saturating_sub(*at) < wait
+                    })
                 })
                 .min_by_key(|c| (c.0 - feet.0).abs() + (c.1 - feet.1).abs() + (c.2 - feet.2).abs())
         {
@@ -3752,6 +3780,11 @@ impl Plan {
                 self.expanded += walk.expanded;
             }
             // Kept for a later try; dropped only after `LEFT_WATER_TRIES` failed walks.
+            // A walk failed shut in (a notch, a pit) is no count against the water (race
+            // 46099479836 lane 2: 5 walks from one stuck cell 22 off, then dropped, then "no
+            // climb: no water" from 17,060); and the record is never dropped for walks, only
+            // when its source is gone.
+            let pocket = shut_in(w, feet);
             let n = match self
                 .spikes
                 .left_water_fails
@@ -3759,30 +3792,32 @@ impl Plan {
                 .find(|(x, _, _)| *x == c)
             {
                 Some((_, n, at)) => {
-                    *n += 1;
+                    if !pocket {
+                        *n += 1;
+                    }
                     *at = tick;
                     *n
                 }
                 None => {
-                    self.spikes.left_water_fails.push((c, 1, tick));
-                    1
+                    self.spikes
+                        .left_water_fails
+                        .push((c, u32::from(!pocket), tick));
+                    u32::from(!pocket)
                 }
             };
-            if n >= LEFT_WATER_TRIES {
-                self.spikes.left_water.retain(|x| *x != c);
-                self.spikes.left_water_fails.retain(|(x, _, _)| *x != c);
-                self.note(
-                    tick,
-                    format!("spikes: no way to the water left at {c:?}"),
-                    format!("from {feet:?}; {n} walks failed, dropped from the record"),
-                );
-            } else {
-                self.spikes_note(
-                    tick,
-                    format!("spikes: no way yet to the water left at {c:?}"),
-                    format!("from {feet:?}; walk {n} of {LEFT_WATER_TRIES} failed, kept"),
-                );
-            }
+            // Past `LEFT_WATER_TRIES` the retries come further apart, never stop.
+            self.spikes_note(
+                tick,
+                format!("spikes: no way yet to the water left at {c:?}"),
+                format!(
+                    "from {feet:?}; {n} walks failed{}, kept",
+                    if pocket {
+                        " (this one shut in, not counted)"
+                    } else {
+                        ""
+                    }
+                ),
+            );
         }
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).

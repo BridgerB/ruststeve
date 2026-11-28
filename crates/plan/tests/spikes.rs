@@ -2667,8 +2667,9 @@ fn stubs_of_its_own_on_all_four_axes_are_climbed_back_onto() {
     }
     let a = spikes::approach_along(&w, &sp, axis).expect("the approach");
     assert_eq!(
-        spikes::pillar_wants(&st, &a),
-        spikes::stand(&sp, axis).stand.1 - 64 + spikes::PILLAR_SPARE
+        spikes::pillar_wants(&w, &st, &a),
+        spikes::stand(&sp, axis).stand.1 - 67 + spikes::PILLAR_SPARE,
+        "the side pillar up: from the stub's top"
     );
 }
 
