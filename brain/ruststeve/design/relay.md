@@ -59,6 +59,8 @@ Issue 69: the win came from one lineage of one world, so every later issue is ju
 - A relay leg's lanes job builds xtask (with the race cache), which takes a minute or two before the matrix exists.
 - A `relay_from` release without a file for a selected seed fails the `lanes` job by name. Keep `seed` the same across legs, which the dispatch does.
 - The frontier files are moved by hand (by the lead) after a relay. The relay never commits.
+- **The leg cap must be longer than the slowest stage.** The first full relay (races 46124595679 to 46134115367, cap 36,000) marked 6 seeds stalled at `stone_pickaxe`. One-hour checks from the same snapshots then geared 4 of them; gear took a median of 29,740 to 44,280 run ticks, with a p75 up to 62,080 ([[seeds]], `docs/problems/seeds.md` G3). Run the relay with `cap` 72,000 or more (`minutes` 90). A stalled seed is the slowest stage the leg was too short for, until a leg longer than that stage says otherwise.
+- **The relay ref moves.** Each leg dispatches the next on the ref, not on a commit, so a push to the branch mid-relay changes the bot for the later legs. Push nothing but docs while a relay runs.
 
 ## See also
 - [[race-and-results]]: the race, its snapshots and the frontier.

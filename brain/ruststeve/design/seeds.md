@@ -5,7 +5,7 @@ type: reference
 tags: [seeds, worlds, race, relay, measurement, generalising]
 aliases: [seeds.toml, xtask seeds, xtask seed, server --seed, level-seed, race seed, typecraft, seed coupling, known geography]
 status: verified
-lastUpdated: 2026-11-27
+lastUpdated: 2026-11-28
 verifiedAgainst: ruststeve@d30112b7
 sourceRefs:
   - "ruststeve:crates/results/src/config.rs#pub struct Seeds {"
@@ -72,6 +72,11 @@ The End is not the same on every seed. The spike centres (the jar's ring), the a
 - the ground at (0, 0) from 58 to 64.
 
 So on another seed every `[[spike]]` row matches a centre but carries the wrong height and the wrong cage, and the bridge's floor 52 meets the island's side or passes over the void. Everything else fitted to `typecraft` is a fixture: development starts' places, landings, the capture's default label and the frontier files.
+
+## The seeds baseline
+- The first relay on every seed (2026-11-28) ran the bot at issue-69-seeds 4a1bda89, before #56 (sprint). That commit is the seeds baseline every later issue is compared against. Its table, one row per seed with game ticks from spawn to each stage and the issue-20 lineage first, is in `docs/problems/seeds.md` ("The seeds baseline").
+- Furthest stages: far-fortress `nether`; typecraft, far-stronghold, cold and pale-garden `gear`; badlands and jungle `stone_pickaxe`; shore `spawn`. The general walls G1 to G4 hold each seed there, and none of the seven seed-coupled walls was reached.
+- Each seed's furthest snapshot is its frontier, `config/frontier/<seed>.toml` ([[relay]]).
 
 ## Gotchas
 - **A wrong geography value is a slow stage, not a crash.** Read the ledger lines that name it (`toward [1648.0, -16.0]`, `known geography (travel_way ...)`) before blaming behaviour.

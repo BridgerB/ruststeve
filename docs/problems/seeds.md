@@ -190,3 +190,32 @@ These come from the full relay on the seeds baseline: issue-69-seeds at 4a1bda89
 - **Reading:** with strict no X-ray, a bot mines only the iron it has seen exposed. Its tunnels at one depth find little, so fewer than a quarter of bots gear in a game hour on any seed, and none on badlands or jungle. Gear's median is 29,740 to 44,280 run ticks where it happens. The relay is right that the bot is slow here, but the leg was shorter than the stage.
 - **Needs:** iron found faster without X-ray: caves and ravines sought by sight (exposed stone faces, air pockets), and branch-mining at the depth where iron is densest, with a progress invariant on ore seen per block dug. On badlands, logs carried from the start for the later tools. This is backlog for #84 (structures and caves) or a mining issue.
 - **The relay's leg cap:** the next relay runs with `cap` 72,000 (minutes 90), longer than gear's p75. A leg shorter than the slowest stage calls a slow stage a stall.
+
+### G4. far-fortress: no fortress in view, 697 blocks off
+- **Seed:** `far-fortress` (value "ruststeve"). Its nearest fortress is 697 blocks from the spawn's Nether position (probe 46118069221), against `typecraft`'s 182.
+- **Where it stalled:** stage `nether`. All 14 counted runs of relay leg 4 (race 46134115367) reached it, resumed from leg 3's `nether` snapshot.
+- **What the bots did:**
+  - 11 runs hit the cap on the heading's tunnel: `tunnel level toward the heading at … (no fortress in view; step … of … y … blocks off on the plane)` x9, plus a stairs-down and a stairs-up.
+  - The best bot, rs-l00-b00, was at step 12 of 22 at (-193, 54, -134) when the run ended.
+  - The rest died: hoglins x2, lava while escaping a hoglin x1, and a ghast's fire x1.
+- **Needs:** a fortress search that reaches 700 blocks within a leg. The heading's tunnel holds the bearing, so it needs a faster way along: walking open ground, bridging, or tunnelling with fewer refusals, plus a hoglin and ghast plan on the way. The heading's reach constants (`[fortress_way] reach` 250, listed under fixtures) are worth reading against this distance. This is backlog for the Nether leg.
+
+## The seeds baseline: furthest stage and game ticks per seed
+The bot is the seeds baseline, 4a1bda89 (the relay and its checks; the checks ran on 7f1af997, which changes only docs). Cells are game ticks from the world's creation (`Data.Time` in each snapshot's `level.dat`), with h:mm of game time. "≤" is a bound from a later stage's snapshot. The first row is the issue-20 win's lineage, `crates/results/lineage/typecraft.toml`, read by probe 46118396226. The other rows come from probe 46137396233: `results seeds` over the relay's four legs (races 46124595679, 46127598383, 46130812202, 46134115367) and the six one-hour checks (races 46130982111, 46130984192, 46130986262, 46130988348, 46130990489, 46130992689).
+
+| seed | furthest | stall (wall) | log | table | stone_pickaxe | gear | nether | win |
+|---|---|---|---|---|---|---|---|---|
+| typecraft (issue-20 lineage) | win | - | 342 | 4,975 | 5,959 | 32,798 (0:27) | 78,888 (1:05) | 466,498 (6:28) |
+| typecraft (baseline) | gear | gear 2/14 (G3) | 807 | 6,343 | 6,968 | 41,503 (0:34) | - | - |
+| far-fortress | nether | nether 14/14 (G4) | 285 | 18,510 | 19,004 | 53,861 (0:44) | 83,027 (1:09) | - |
+| far-stronghold | gear | gear 1/14 (G3) | 424 | 18,640 | 19,428 | 49,288 (0:41) | - | - |
+| cold | gear | gear 3/14 (G3) | 230 | 18,477 | 19,471 | 59,436 (0:49) | - | - |
+| pale-garden | gear | gear 3/14 (G3) | 262 | 18,465 | 19,106 | 56,973 (0:47) | - | - |
+| badlands | stone_pickaxe | gear 0/14 (G3: no logs, boxed stairs) | 768 | 18,446 | 19,511 | - | - | - |
+| jungle | stone_pickaxe | gear 0/14 (G3: creepers, no exposed iron) | 255 | 18,249 | 18,858 | - | - | - |
+| shore | spawn | log 0/14 (G2) | - | - | - | - | - | - |
+
+- **Every seed's table waits for G1:** the table comes at about 18,500 game ticks on every seed but typecraft's first bot (whose run-tick median is still 18,680).
+- **None of the seven seed-coupled walls was reached.** They sit at `endermen` and later, and the furthest seed stopped at `nether`. They wait for a bot that gets that far on another world.
+- **The per-seed frontiers:** `config/frontier/<seed>.toml`, for a later race to resume each seed at its furthest stage. `typecraft` keeps `config/frontier.toml` (win).
+- **Run ticks per stage** (session ticks, k/n, median, p25, p75) are in probe 46137396233's output, the `### seeds: run ticks to each stage` table, and in each race's release `summary.md`.
