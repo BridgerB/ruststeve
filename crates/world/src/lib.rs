@@ -1059,7 +1059,16 @@ impl World {
         let solid = |x, y, z| self.solid(x, y, z);
         let fluid = |x, y, z| self.fluid(x, y, z);
         let surface = |x, y, z| self.surface(x, y, z);
-        let moved = physics::step_on(&solid, &fluid, &surface, &body, &self.controls);
+        // The food the server last told decides whether the sprint goes on (food 6 or less stops
+        // it, `LocalPlayer.aiStep`); before the first `set_health` it is unknown and lets it.
+        let moved = physics::step_fed(
+            &solid,
+            &fluid,
+            &surface,
+            &body,
+            &self.controls,
+            self.player.food,
+        );
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
         let mut out = self.report_sprint(moved.sprinting);
@@ -2524,6 +2533,103 @@ mod body_tests {
             command(9, PlayerCommandAction::StopSprinting)
         );
         assert!(w.report_sprint(false).is_empty());
+    }
+
+    /// Issue 56, through the tick: on stone, forward and sprint held, the first tick sends
+    /// START_SPRINTING before its move, the next sends none, food 6 (`set_health`) stops it with
+    /// STOP_SPRINTING (the world steps with the food it holds, `step_fed`), and a tick with the
+    /// sprint still refused sends nothing more. As vanilla, the action is `player_command`'s,
+    /// with the player's entity id and data 0.
+    #[test]
+    fn a_tick_reports_the_sprint_on_each_change_and_hunger_stops_it() {
+        use protocol::chunk::{Paletted, Section};
+        let stone = BlockKind::Stone.info().map(|i| i.first_state).unwrap();
+        // An overworld column: stone up to y 63 (sections 0 to 7, y -64 to 63), air above.
+        let sections = (0..24)
+            .map(|i| Section {
+                block_count: if i < 8 { 4096 } else { 0 },
+                fluid_count: 0,
+                blocks: Paletted::Single(if i < 8 { stone } else { 0 }),
+                biomes: Paletted::Single(0),
+            })
+            .collect();
+        let mut w = World::new();
+        w.step(&Event::Packet(S2c::Login {
+            entity_id: 9,
+            view_distance: 8,
+            simulation_distance: 3,
+            dimension_type: 0,
+            dimension: "minecraft:overworld".to_owned(),
+            game_type: 0,
+        }));
+        w.step(&Event::Packet(S2c::LevelChunkWithLight {
+            x: 0,
+            z: 0,
+            column: Arc::new(Column {
+                min_y: -64,
+                sections,
+            }),
+        }));
+        w.body = Some(Body {
+            pos: [8.5, 64.0, 8.5],
+            on_ground: true,
+            ..Body::default()
+        });
+        w.step(&Event::Controls(Controls {
+            forward: true,
+            sprint: true,
+            ..Controls::default()
+        }));
+        let tick = |w: &mut World, n: u64| {
+            w.step(&Event::Tick {
+                now_ms: n * 50,
+                seed: n,
+            })
+        };
+        let commands = |out: &[Effect]| -> Vec<PlayerCommandAction> {
+            out.iter()
+                .filter_map(|e| match e {
+                    Effect::Send(C2s::PlayerCommand {
+                        entity: 9,
+                        action,
+                        data: 0,
+                    }) => Some(*action),
+                    _ => None,
+                })
+                .collect()
+        };
+        let first = tick(&mut w, 1);
+        assert_eq!(
+            commands(&first),
+            vec![PlayerCommandAction::StartSprinting],
+            "{first:?}"
+        );
+        let start = first
+            .iter()
+            .position(|e| matches!(e, Effect::Send(C2s::PlayerCommand { .. })));
+        let mv = first
+            .iter()
+            .position(|e| matches!(e, Effect::Send(C2s::MovePlayerPosRot { .. })));
+        assert!(
+            start < mv && mv.is_some(),
+            "START before the move: {first:?}"
+        );
+        assert!(w.body.is_some_and(|b| b.sprinting));
+        assert!(commands(&tick(&mut w, 2)).is_empty(), "unchanged: nothing");
+        w.step(&Event::Packet(S2c::SetHealth {
+            health: 20.0,
+            food: 6,
+            saturation: 0.0,
+        }));
+        assert_eq!(
+            commands(&tick(&mut w, 3)),
+            vec![PlayerCommandAction::StopSprinting]
+        );
+        assert!(w.body.is_some_and(|b| !b.sprinting));
+        assert!(
+            commands(&tick(&mut w, 4)).is_empty(),
+            "still refused: nothing"
+        );
     }
 
     /// Issue 16e: effects, attributes, chat, the boss bar and the win reach the world by name.
