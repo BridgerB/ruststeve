@@ -41,6 +41,10 @@ pub struct Moment {
     /// loot in real, and the same in the model.
     #[serde(default)]
     pub summon: Vec<(String, i32, i32, i32)>,
+    /// Ledger substrings, each with how many times it must fire on both sides (issue 77: the
+    /// chest trip's stash, fetch and end once each), checked by `parity_notes`.
+    #[serde(default)]
+    pub notes: Vec<(String, u32)>,
     /// Cells from the feet cell whose blocks join the outcome class (issue 14a: a source
     /// scooped, obsidian made, a portal lit).
     #[serde(default)]
@@ -240,6 +244,10 @@ pub struct MomentResult {
     /// Corrections counted, and why the run ended, for reading a mismatch.
     pub corrections: u64,
     pub ending: String,
+    /// The planner's notes, every one in order (`what` only), for `parity_notes` (issue 77).
+    /// Empty for a scripted row and for results from before.
+    #[serde(default)]
+    pub notes: Vec<String>,
     pub final_pos: Option<[f64; 3]>,
 }
 

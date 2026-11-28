@@ -12,6 +12,7 @@ pub mod diagnose;
 pub mod keep;
 pub mod observe;
 pub mod parity;
+pub mod parity_notes;
 pub mod region;
 pub mod snapshot;
 pub mod story;
