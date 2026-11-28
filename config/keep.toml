@@ -5,6 +5,10 @@
 # item no counting stage needs is surplus, and so is anything held over that count. Within the
 # count it is needed, and the nearer stage the more. An item with no row is never dropped.
 #
+# `during` lists counts a stage uses while it runs (a leg's bridges and seals): only
+# Keep::need_in reads it, for a stash (77-stash), and the drop rule never sees it (lead-77,
+# 2026-11-28: changing rank to see in-leg needs is a later change, judged on races).
+#
 # `when` is where a row applies (plan::keep::Context, default ["always"]): the old drop gates,
 # kept exactly (lead-77, 2026-11-27: widening them is a later change, judged on races).
 #   always           the [survival] junk list: everywhere but in the overland hut
@@ -27,20 +31,26 @@
 [[item]]
 name = "cobblestone"
 needs = [["win", 64]]
+# The Nether leg uses the same 64 (77-stash): stairs' floors and seals there.
+during = [["nether", 64]]
 
 [[item]]
 name = "cobbled_deepslate"
 needs = [["win", 64]]
+during = [["nether", 64]]
 
 # The old list's 16 (blaze wall 13).
 [[item]]
 name = "dirt"
 needs = [["win", 16]]
+during = [["nether", 16]]
 
 # 16 for the flint redig (E8: the armed pack's 15).
 [[item]]
 name = "gravel"
 needs = [["win", 16]]
+# In the Nether, flint for a relight of the portal home (77-stash).
+during = [["nether", 16]]
 
 # The bow's (E8, race 46047707279 lane 1 dropped every feather of four chickens): 16 feathers
 # and 8 string, kept to the end as the old list did. bow_armed is the bow line's own stage, so
