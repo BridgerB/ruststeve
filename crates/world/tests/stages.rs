@@ -239,6 +239,64 @@ fn the_keys_held_are_reported_when_they_change() {
     assert_eq!(inputs(&w.step(&tick())), [0], "let go");
 }
 
+/// Issue 56: the sprint key is bit 64 of `player_input`, and a sprint that ends is reported as
+/// vanilla's `sendPosition` does: `player_command` STOP_SPRINTING after the keys and before
+/// the tick's move packet.
+#[test]
+fn a_sprint_ending_is_reported_between_the_keys_and_the_move() {
+    use physics::Controls;
+    use protocol::{C2s, PlayerCommandAction};
+    use world::Effect;
+    let mut w = World::new();
+    w.step(&login("minecraft:overworld"));
+    w.step(&column_with(0, 0, state(data::BlockKind::Stone)));
+    w.step(&teleport());
+    w.step(&Event::Controls(Controls {
+        forward: true,
+        sprint: true,
+        ..Controls::default()
+    }));
+    let out = w.step(&tick());
+    assert!(
+        out.contains(&Effect::Send(C2s::PlayerInput { flags: 0x41 })),
+        "forward and the sprint key: {out:?}"
+    );
+    // Told it sprints, the body lets go of every key: the sprint stops and is reported.
+    w.sent_sprinting = true;
+    w.step(&Event::Controls(Controls::default()));
+    let out = w.step(&tick());
+    let sends: Vec<&C2s> = out
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(p) => Some(p),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(
+            sends.as_slice(),
+            [
+                C2s::PlayerInput { flags: 0 },
+                C2s::PlayerCommand {
+                    entity: 7,
+                    action: PlayerCommandAction::StopSprinting,
+                    data: 0,
+                },
+                C2s::MovePlayerPosRot { .. },
+            ]
+        ),
+        "{sends:?}"
+    );
+    assert!(!w.sent_sprinting);
+    let again = w.step(&tick());
+    assert!(
+        !again
+            .iter()
+            .any(|e| matches!(e, Effect::Send(C2s::PlayerCommand { .. }))),
+        "sent once: {again:?}"
+    );
+}
+
 fn enderman(id: i32, x: f64, z: f64) -> Event {
     Event::Packet(S2c::AddEntity {
         id,

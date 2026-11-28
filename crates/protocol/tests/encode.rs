@@ -295,6 +295,77 @@ fn the_keys_held_are_one_byte_of_flags() {
 }
 
 #[test]
+fn a_player_command_is_entity_action_and_data() {
+    use protocol::{C2s, PlayerCommandAction};
+    let p = C2s::PlayerCommand {
+        entity: 300,
+        action: PlayerCommandAction::StartSprinting,
+        data: 0,
+    };
+    assert_eq!(p.state(), State::Play);
+    assert_eq!(State::Play.after_send(&p), State::Play);
+    let (id, body) = p.encode().unwrap();
+    // `player_command` is serverbound play packet 42 (0x2a) in 26.1.2's packet report.
+    assert_eq!(id, 42);
+    assert_eq!(
+        id,
+        data::generated::packets::PlayServerbound::PlayerCommand.id()
+    );
+    // Three varints: 300 is two bytes (0xac 0x02), START_SPRINTING 1, data 0.
+    assert_eq!(body, [0xac, 0x02, 1, 0]);
+    let (_, stop) = C2s::PlayerCommand {
+        entity: 1,
+        action: PlayerCommandAction::StopSprinting,
+        data: 0,
+    }
+    .encode()
+    .unwrap();
+    assert_eq!(stop, [1, 2, 0]);
+}
+
+/// Every operation of an attribute's modifiers counts: sprinting is a multiply_total.
+#[test]
+fn attribute_modifiers_fold_by_operation() {
+    let mut w = protocol::Writer::new();
+    w.varint(7); // entity
+    w.varint(1); // one attribute
+    w.varint(3); // its id
+    w.f64(0.1); // base: the player's movement_speed
+    w.varint(3); // three modifiers
+    for (name, amount, op) in [
+        ("a", 0.02, 0),
+        ("b", 0.5, 1),
+        ("minecraft:sprinting", 0.3, 2),
+    ] {
+        w.string(name).unwrap();
+        w.f64(amount);
+        w.varint(op);
+    }
+    let id = data::generated::packets::PlayClientbound::UpdateAttributes.id();
+    let S2c::UpdateAttributes { id: 7, attributes } =
+        protocol::decode(State::Play, id, &w.buf).unwrap()
+    else {
+        panic!("not update_attributes");
+    };
+    let a = attributes[0];
+    assert_eq!((a.add, a.multiply_base, a.multiply_total), (0.02, 0.5, 1.3));
+    // (0.1 + 0.02) * (1 + 0.5) * 1.3
+    assert!((a.value() - 0.234).abs() < 1e-12);
+    // Walking speed with the sprint modifier alone: 0.13.
+    assert!(
+        (protocol::Attribute {
+            add: 0.0,
+            multiply_base: 0.0,
+            ..a
+        }
+        .value()
+            - 0.13)
+            .abs()
+            < 1e-12
+    );
+}
+
+#[test]
 fn a_dig_carries_its_sequence() {
     let (_, body) = protocol::C2s::PlayerAction {
         status: 2,

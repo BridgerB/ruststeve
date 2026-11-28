@@ -3038,6 +3038,7 @@ impl Plan {
             sneak: false,
             yaw,
             pitch: Some(crate::endermen::EYES_DOWN),
+            sprint: false,
         })
     }
 
