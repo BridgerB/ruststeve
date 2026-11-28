@@ -17,6 +17,44 @@ use crate::slot::{Slot, read_slot};
 use crate::state::State;
 use crate::{EncodeError, ParseError};
 
+/// One attribute of `update_attributes`: its registry id, its base, and its modifiers folded by
+/// operation (`AttributeModifier.Operation`: 0 `add_value`, 1 `add_multiplied_base`, 2
+/// `add_multiplied_total`). Sprinting is a multiply_total of 0.3 on `movement_speed`, so the
+/// add-only sum clojurecraft's hear.clj kept could not see it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Attribute {
+    pub id: i32,
+    pub base: f64,
+    /// The sum of the `add_value` amounts.
+    pub add: f64,
+    /// The sum of the `add_multiplied_base` amounts.
+    pub multiply_base: f64,
+    /// The product of `1 + amount` over the `add_multiplied_total` modifiers (1 with none).
+    pub multiply_total: f64,
+}
+
+impl Attribute {
+    /// An attribute with no modifiers but `add`.
+    pub fn added(id: i32, base: f64, add: f64) -> Self {
+        Attribute {
+            id,
+            base,
+            add,
+            multiply_base: 0.0,
+            multiply_total: 1.0,
+        }
+    }
+
+    /// The value the game computes (`AttributeInstance.calculateValue`): the adds on the
+    /// base, then the base-multipliers on that sum, then each total-multiplier in turn. The
+    /// game's last step, the attribute's clamp (`sanitizeValue`), is the server's: it sends
+    /// the base only, so the clamp is not applied here.
+    pub fn value(&self) -> f64 {
+        let added = self.base + self.add;
+        (added + added * self.multiply_base) * self.multiply_total
+    }
+}
+
 /// A packet from the server.
 #[derive(Clone, Debug, PartialEq)]
 pub enum S2c {
@@ -341,10 +379,10 @@ pub enum S2c {
         id: i32,
         effect: i32,
     },
-    /// Attribute values: (registry id, base, the sum of the add-value modifiers).
+    /// Attribute values: each its base and its modifiers folded by operation.
     UpdateAttributes {
         id: i32,
-        attributes: Vec<(i32, f64, f64)>,
+        attributes: Vec<Attribute>,
     },
     PlayerCombatEnter,
     PlayerCombatEnd {
@@ -942,17 +980,20 @@ pub fn decode(state: State, id: u32, body: &[u8]) -> Result<S2c, ParseError> {
                     let attr = r.varint()?;
                     let base = r.f64()?;
                     let mods = r.length()?;
-                    let mut add = 0.0;
+                    let mut a = Attribute::added(attr, base, 0.0);
                     for _ in 0..mods {
                         let _id = r.string()?;
                         let amount = r.f64()?;
-                        // Operation 0 adds its amount; the multiplying ones are left out, as
-                        // clojurecraft's hear.clj does.
-                        if r.varint()? == 0 {
-                            add += amount;
+                        // The operation's id (`AttributeModifier.Operation`); an id past the
+                        // three is read as 0, add, as the game's `ByIdMap` with
+                        // `OutOfBoundsStrategy.ZERO` reads it.
+                        match r.varint()? {
+                            1 => a.multiply_base += amount,
+                            2 => a.multiply_total *= 1.0 + amount,
+                            _ => a.add += amount,
                         }
                     }
-                    attributes.push((attr, base, add));
+                    attributes.push(a);
                 }
                 S2c::UpdateAttributes { id, attributes }
             }
@@ -1182,6 +1223,45 @@ pub enum C2s {
         yaw: f32,
         pitch: f32,
     },
+    /// `player_command` (`ServerboundPlayerCommandPacket`): the player's own entity id, an
+    /// action and its data (a horse jump's strength, else 0). Sprinting is reported here, not in
+    /// `PlayerInput`: the server sets the player's sprint flag, and with it the sprint speed
+    /// modifier, only from START and STOP (`handlePlayerCommand`).
+    PlayerCommand {
+        entity: i32,
+        action: PlayerCommandAction,
+        data: i32,
+    },
+}
+
+/// The actions of `C2s::PlayerCommand`, in the game's `ServerboundPlayerCommandPacket.Action`
+/// order, which is the wire id (read with javap from the 26.1.2 server jar, probe
+/// 46115273200; the packet writes a varint entity id, `writeEnum`'s varint ordinal, a varint
+/// data). Since 1.21.6 the shift keys are gone from it, to `PlayerInput`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayerCommandAction {
+    StopSleeping,
+    StartSprinting,
+    StopSprinting,
+    StartRidingJump,
+    StopRidingJump,
+    OpenInventory,
+    StartFallFlying,
+}
+
+impl PlayerCommandAction {
+    /// The wire id: the action's ordinal.
+    pub fn id(self) -> i32 {
+        match self {
+            PlayerCommandAction::StopSleeping => 0,
+            PlayerCommandAction::StartSprinting => 1,
+            PlayerCommandAction::StopSprinting => 2,
+            PlayerCommandAction::StartRidingJump => 3,
+            PlayerCommandAction::StopRidingJump => 4,
+            PlayerCommandAction::OpenInventory => 5,
+            PlayerCommandAction::StartFallFlying => 6,
+        }
+    }
 }
 
 /// The bits of `C2s::PlayerInput`: the constants of the game's `Input` record (`FLAG_FORWARD` 1,
@@ -1223,6 +1303,7 @@ impl C2s {
             | C2s::ContainerClick { .. }
             | C2s::ContainerClose { .. }
             | C2s::Swing { .. }
+            | C2s::PlayerCommand { .. }
             | C2s::ConfigurationAcknowledged => State::Play,
         }
     }
@@ -1400,6 +1481,16 @@ impl C2s {
                 w.f32(*yaw);
                 w.f32(*pitch);
                 PlayOut::UseItem.id()
+            }
+            C2s::PlayerCommand {
+                entity,
+                action,
+                data,
+            } => {
+                w.varint(*entity);
+                w.varint(action.id());
+                w.varint(*data);
+                PlayOut::PlayerCommand.id()
             }
         };
         Ok((id, w.buf))
@@ -1889,16 +1980,22 @@ impl S2c {
             S2c::UpdateAttributes { id, attributes } => {
                 w.varint(*id);
                 w.varint(i32::try_from(attributes.len()).unwrap_or(0));
-                for (attr, base, add) in attributes {
-                    w.varint(*attr);
-                    w.f64(*base);
-                    if *add == 0.0 {
-                        w.varint(0);
-                    } else {
-                        w.varint(1);
-                        w.string("ruststeve:model")?;
-                        w.f64(*add);
-                        w.varint(0);
+                for a in attributes {
+                    w.varint(a.id);
+                    w.f64(a.base);
+                    // One modifier per operation that changes anything, the total-multipliers as
+                    // one whose `1 + amount` is their product.
+                    let mods = [
+                        ("ruststeve:model", a.add, 0.0, 0),
+                        ("ruststeve:model_base", a.multiply_base, 0.0, 1),
+                        ("ruststeve:model_total", a.multiply_total - 1.0, 0.0, 2),
+                    ];
+                    let mods: Vec<_> = mods.iter().filter(|m| m.1 != m.2).collect();
+                    w.varint(i32::try_from(mods.len()).unwrap_or(0));
+                    for (name, amount, _, op) in mods {
+                        w.string(name)?;
+                        w.f64(*amount);
+                        w.varint(*op);
                     }
                 }
                 PlayIn::UpdateAttributes.id()
