@@ -5,8 +5,8 @@ type: how-to
 tags: [protocol, net, bot, connection, keep-alive, threads]
 aliases: [protocol crate, net crate, bot binary, Session, keep-alive, xtask server, run a bot locally, local server, receive-side state]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/protocol/src/session.rs#pub fn on_packet(&mut self, p: &S2c) -> Vec<Out> {"
   - "ruststeve:crates/protocol/src/state.rs#pub fn after_receive(self, p: &S2c) -> State {"

@@ -1,12 +1,12 @@
 ---
 title: The parity table
-description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 178 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender, the End's rows), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
+description: How ruststeve checks the server model against a real server before any sim number counts - captured worlds, the 234 moments (walks, digs, crafts, stone and the table, air, fire, lava, eating and melee, smelting, buckets, endermen, the burrow, eyes of ender, the End's rows), running them in real and in the model, the outcome classes compared field by field, the stated tolerance, what the table found, and what it leaves out.
 type: reference
 tags: [parity, sim, measurement, capture, moments, real]
 aliases: [end rows, e03-strike, crystal script, lift, summon_nbt, report rows, eye rows, y01-throw, y02-fetch, stronghold field, eye class, burrow rows, e04-mouth, fill rows, trace, enderman rows, frozen row, stare row, difficulty rows, drown rows, fire rows, lava rows, eat rows, cow rows, breathe, dig rows, craft rows, give, random drops, parity table, parity report, moments, capture, captured world, landings, outcome class, tolerance, moments compare, parity.yml, simrace, simrace.yml]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@5ee8adb
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/bot/src/bin/capture.rs#fn capture(a: &Args) -> Result<(), String> {"
   - "ruststeve:crates/bot/src/bin/moments.rs#/// script saw, so when a peaceful heal lands (every 20 ticks) cannot flip it."
@@ -31,7 +31,7 @@ A sim number counts only after the model agrees with a real server at the same m
 ## Key files
 - `crates/bot/src/bin/capture.rs`, `src/captured.rs`: captured worlds.
 - `crates/bot/src/bin/moments.rs` (`real`, `sim`, `compare`), `crates/results/src/parity.rs`.
-- `config/landings.toml` (10 landings), `config/moments.toml` (164 moments).
+- `config/landings.toml` (11 landings), `config/moments.toml` (234 moments).
 - `.github/workflows/parity.yml`; `crates/bot/src/bin/simrace.rs` and `simrace.yml` for sim races.
 
 ## How it works
@@ -95,7 +95,7 @@ Issue 13a's 9 smelting rows (`smelt:<take>`, [[smelting]]) found the bot's tick 
 ## Eye rows (issue 19)
 - Rows `y01-throw-N` (landings 0 to 3 and 8) and `y02-fetch-N` (landings 0, 4, 5) (`docs/problems/eyes-model.md`), on the peaceful table, 40 off their landing's centre, the bot given one eye. A row's `stronghold = [x, z]` is the point RCON's `locate structure minecraft:stronghold` names from the landing (the model is told it; the real line is judged against it). `use:20:0:-20` throws looking up; `fetch:<tick>` (`Script::Fetch`) throws, then walks to the dropped eye.
 - The class gains `eye`: seen, on the line (the line from its first place to its farthest on the plane within 1 degree of the bearing to the stronghold), ended, and for a fetch row none left on the ground. Drop or shatter is the jar's 4 in 5 roll: an ender eye held is out of the inventory class, and the end is written in `<id>.<real|sim>.eye.txt` with every place, the line, its error and the flight's numbers.
-- Tolerance 176 of 178.
+- Tolerance 176 of 178; then 179 of 181 with the portal room rows (`y04` differs until silverfish are modelled: `TOLERANCE` 179). The End rows below have not moved the constant: they run with parity.yml's `only` and `tolerance` inputs.
 
 ## End rows (issue 20)
 - Rows `e01-frame` to `e06-drop` (`docs/problems/end-model.md`), development setups laid by RCON in the overworld (never evidence), 40 off their landing's centre, at Normal, in full iron with boots. They measure the End's dangerous geometry before any race: an eye into a frame and the portal lit, the portal's arrival, a crystal struck by reach through a wall or its cage, the enderman's stare cone, the perched dragon's head and its blow, the water clutch.

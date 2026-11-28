@@ -5,8 +5,8 @@ type: reference
 tags: [plan, base, forest, pearls, crafting]
 aliases: [spare_pick, wood picks, wooden pickaxe, fungus cap, on_cap, dig_down, base_task, base_done, forest base, forest kit, base rows, weapon kills, plan::base, Aim::Base, --goal base]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@25a0729
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/base.rs#pub fn base_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:crates/plan/src/base.rs#pub fn weapon_kills(w: &World, base: &Base) -> i32 {"
@@ -41,7 +41,7 @@ Issue 18d (`docs/problems/pearls-base.md`). The frontier bot reaches a warped fo
 - **Swords in kills**: uses left over hits a kill (`hits_per_kill`: iron 7, stone 8, from 40 health over 6 and 5), a sword under 10 uses counting for nothing.
 - **Never waits long** (race 45542558792: 8 bots waited 2,400 ticks a step on missing wood and no hunt began): a wait of `wait_ticks` 200 in a row pauses the base for `pause_ticks` 6,000 or until `Plan::base_resume` (the hunt's call after a kill), and `base_task` returns `None` so the hunt runs ("base paused: the hunt goes on with what is held"). A step that waits that long again after `pause_max` 1 pause gives up. A step given up skips at once every step it was to supply (`starved_by`: with no logs or planks, every craft and the smelt; with no table, the 3x3 crafts and the smelt), with one note ("base: no wood: the hunt goes on with what is held").
 - **Never** with an angry enderman (`endermen::angry`): the base waits, noted. Under 4 free main slots a stack of `drop` goes (granite, tuff, dirt first), never pearls, rods, powder or eyes. Every look leaves through `Plan::keep_look`.
-- **Other step lists** (issue 19d, [[way-home]]): `BaseState::steps` set runs that list instead of the forest's: `HOME_STEPS` (eyes, stems to `home_logs`, a table placed, spare wooden pickaxes, sticks, a table carried) before the trip back, `CLIMB_STEPS` (a table placed, stone pickaxes) on the overworld climb. The eyes step uses Q3's `eyes` row when the table has it, else `home-eyes`.
+- **Other step lists** (issue 19d, [[way-home]]): `BaseState::steps` set runs that list instead of the forest's: `HOME_STEPS` (eyes, stems to `home_logs`, a table placed, spare wooden pickaxes, sticks, a table carried) before the trip back, `CLIMB_STEPS` (a table placed, stone pickaxes) on the overworld climb. The eyes step uses Q3's `eyes` row when the table has it, else `home-eyes`. `[base]` sets the trip's kit: `home_logs` 48, `home_sticks` 8, `home_picks` 2 with `home_pick_uses` 40 or more. On the way home with no main slot free, the biggest stack of the Nether's blocks (netherrack, basalt, soul soil and the like) is dropped before a craft begins (`home_free_slot`; every wooden pickaxe craft failed `StaleWindow` on a full pack in race 45766983995).
 - **The hunt** calls `base_task` in its `base` row; `Aim::Base` (`--goal base`) runs it alone for development and tests.
 
 ## Gotchas

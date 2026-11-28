@@ -5,8 +5,8 @@ type: reference
 tags: [recording, replay, determinism, format]
 aliases: [Record, Header, Checkpoint, EventRecord, EffectRecord, Recorder, replay verify, .rsr]
 status: verified
-lastUpdated: 2026-11-12
-verifiedAgainst: ruststeve@3fa1b05 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/record/src/lib.rs#    Controls(physics::Controls),"
   - "ruststeve:crates/record/src/lib.rs#pub enum Record {"
@@ -36,7 +36,7 @@ A zstd stream of length-prefixed MessagePack records with named fields ([[record
 1. **`Header`**: format version, commit, dirty, Minecraft version, protocol, bot name, server label, seed, target triple, previous segment.
 2. **`Event`**: either a server packet **as it arrived** (the state it was read in, its id, its decompressed bytes; replay decodes it again, so chunk columns are never stored twice), a **tick** (the loop's clock and a fresh seed, every 50 ms: time and randomness are inputs, [[sync-core-and-time]]), or **controls** (what the body presses: forward, jump, sneak, yaw; [[physics]]), added by accretion in issue 06, or an **act** (dig, hold, click, close, swing; [[wire-actions]]), added in issue 10a.
 3. **`Effects`**: what that step produced, each packet as its encoded bytes.
-4. **`Checkpoint`**: the whole `World` (serde on every world type; kinds as protocol ids) every 1,200 server ticks, a minute of game time.
+4. **`Checkpoint`**: the whole `World` (serde on every world type; kinds as protocol ids) every 1,200 server ticks (`CHECKPOINT_TICKS`), a minute of game time. A run resumed from a snapshot writes one before its first event (event index 0): the snapshot's memory, which no event carries; `Folder::take_start` begins the fold from it.
 5. `Note`.
 
 ## How verify works

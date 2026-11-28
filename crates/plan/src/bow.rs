@@ -44,11 +44,14 @@ pub const CRYSTAL_HEIGHT: f64 = 2.0;
 /// No shot from nearer than this to the crystal: its blast (power 6) hurts within 12
 /// (`ServerExplosion`: impact `1 - distance / 12`), and the crystal's blocks fly.
 pub const SAFE_RANGE: f64 = 16.0;
-/// No shot from farther than this: the spread's deviation is 0.0070 of the range an axis (0.34
-/// at 48), against the box's half width 1.3 with the margin; and the entity is sent within 112.
-pub const MAX_RANGE: f64 = 48.0;
-/// The flight followed at most this many ticks (a shot of 48 at 3.0 a tick takes about 20).
-pub const FLIGHT_TICKS: usize = 80;
+/// No shot from farther than this: the spread's deviation is 0.0070 of the range an axis (0.50
+/// at 72), against the box's half width 1.3 with the margin; and the entity is sent within 112.
+/// Far enough for a low arc over a tall spike's edge (the orchestrator: from 45 to 70 off a
+/// crystal 25 to 40 up rises shallow enough).
+pub const MAX_RANGE: f64 = 72.0;
+/// The flight followed at most this many ticks (a low shot of 48 takes about 20; a high arc onto
+/// a tall spike up to about 70).
+pub const FLIGHT_TICKS: usize = 120;
 /// Samples a block along each tick's segment when looking for a block in the way.
 const STEP: f64 = 0.1;
 
@@ -179,6 +182,37 @@ pub fn solve_pitch(flat: f64, rise: f64) -> Option<f64> {
     None
 }
 
+/// The high arc's pitch through the same point: scanned from 88 up down a degree at a time for
+/// the first that reaches the height, then bisected toward the steep side. It comes down onto
+/// the crystal from above, over its spike's top (race 46078921264: every low arc from the ground
+/// at a tall spike met the obsidian's edge under the box). `None` when none reaches it.
+pub fn solve_pitch_high(flat: f64, rise: f64) -> Option<f64> {
+    let reaches = |p: f64| height_at(flat, p).is_some_and(|y| y >= rise);
+    let mut steep = -88.0f64;
+    if reaches(steep) {
+        return Some(steep);
+    }
+    let mut p = steep;
+    while p < 60.0 {
+        let next = p + 1.0;
+        if reaches(next) {
+            let mut lower = next;
+            for _ in 0..40 {
+                let mid = (steep + lower) / 2.0;
+                if reaches(mid) {
+                    lower = mid;
+                } else {
+                    steep = mid;
+                }
+            }
+            return Some(lower);
+        }
+        steep = next;
+        p = next;
+    }
+    None
+}
+
 /// Why no shot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Miss {
@@ -203,12 +237,26 @@ pub struct Aim {
     pub ticks: u32,
     /// Feet to the crystal's position.
     pub range: f64,
+    /// The high arc (down onto the crystal from above), not the low.
+    #[serde(default)]
+    pub high: bool,
 }
 
 /// The aim from feet at `feet` at the crystal whose position is `crystal`: the yaw to its middle,
 /// the low arc's pitch, then the whole flight checked: it meets the box (grown by the margin for
 /// each tick's age) before any cell `blocked` says no arrow passes. Pure.
 pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Result<Aim, Miss> {
+    aim_with(feet, crystal, blocked, true)
+}
+
+/// `aim`, the high arc tried only when `high` (the low arc spreads far less: a stand with a
+/// clear low arc is looked for before any high one).
+pub fn aim_with(
+    feet: P,
+    crystal: P,
+    blocked: &mut impl FnMut(Cell) -> bool,
+    high: bool,
+) -> Result<Aim, Miss> {
     let from = start(feet);
     let mid = crystal_middle(crystal);
     let range = (0..3)
@@ -222,7 +270,29 @@ pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Resul
         return Err(Miss::Far);
     }
     let flat = (mid[0] - from[0]).hypot(mid[2] - from[2]);
-    let pitch = solve_pitch(flat, mid[1] - from[1]).ok_or(Miss::NoArc)?;
+    let low = solve_pitch(flat, mid[1] - from[1]).ok_or(Miss::NoArc)?;
+    match fly_check(from, crystal, flat, range, low, blocked) {
+        Err(Miss::Blocked(c)) if high => match solve_pitch_high(flat, mid[1] - from[1]) {
+            Some(p) if (p - low).abs() > 1.0 => fly_check(from, crystal, flat, range, p, blocked)
+                .map(|a| Aim { high: true, ..a })
+                .map_err(|_| Miss::Blocked(c)),
+            _ => Err(Miss::Blocked(c)),
+        },
+        other => other,
+    }
+}
+
+/// The flight along `pitch` from `from` toward the crystal's middle, checked against its box
+/// and the cells `blocked` says no arrow passes.
+fn fly_check(
+    from: P,
+    crystal: P,
+    flat: f64,
+    range: f64,
+    pitch: f64,
+    blocked: &mut impl FnMut(Cell) -> bool,
+) -> Result<Aim, Miss> {
+    let mid = crystal_middle(crystal);
     let yaw = yaw_toward(from, mid);
     // The pitch as it is sent (f32), so the check flies what the server will.
     #[allow(clippy::cast_possible_truncation)]
@@ -260,6 +330,7 @@ pub fn aim(feet: P, crystal: P, blocked: &mut impl FnMut(Cell) -> bool) -> Resul
                 pitch: sent,
                 ticks: u32::try_from(i + 1).unwrap_or(u32::MAX),
                 range,
+                high: false,
             });
         }
         // Past the crystal across: it went wide (never by height alone: a shot from the
@@ -282,7 +353,9 @@ pub fn stand_columns(centre: [i32; 2], toward: [f64; 2]) -> Vec<[i32; 2]> {
         // 0, +15, -15, +30, -30, ... up to 90.
         let step = f64::from((k + 1) / 2) * 15.0;
         let off = if k % 2 == 1 { step } else { -step };
-        for r in [18.0, 22.0, 26.0, 30.0, 34.0, 40.0] {
+        for r in [
+            18.0, 22.0, 26.0, 30.0, 34.0, 40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0,
+        ] {
             let a = base + f64::to_radians(off);
             #[allow(clippy::cast_possible_truncation)]
             let c = [
@@ -430,6 +503,35 @@ fn ground_in(w: &World, cells: &mut path::Cells, x: i32, z: i32) -> Option<Cell>
     })
 }
 
+/// The standing cells round a spike with a clear arc at the crystal (the low only unless
+/// `high`), each keyed by its flight's ticks then its walk from `feet`: the shortest flight
+/// first, since the spread grows with it.
+pub fn stands_for(
+    w: &World,
+    centre: [i32; 2],
+    crystal: P,
+    feet: Cell,
+    high: bool,
+) -> Vec<(u32, i32, Cell)> {
+    let mut cells = path::Cells::new(w);
+    let mut out = Vec::new();
+    for col in stand_columns(centre, [0.0, 0.0]) {
+        let Some(c) = ground_in(w, &mut cells, col[0], col[1]) else {
+            continue;
+        };
+        let mut blocked = |q: Cell| blocks_arrow(&mut cells, q);
+        let Ok(a) = aim_with(centre_of(c), crystal, &mut blocked, high) else {
+            continue;
+        };
+        if a.high != high {
+            continue;
+        }
+        let d = (c.0 - feet.0).abs() + (c.2 - feet.2).abs() + 2 * (c.1 - feet.1).abs();
+        out.push((a.ticks, d, c));
+    }
+    out
+}
+
 fn centre_of(c: Cell) -> P {
     [f64::from(c.0) + 0.5, f64::from(c.1), f64::from(c.2) + 0.5]
 }
@@ -514,51 +616,74 @@ impl Plan {
         if targets.is_empty() {
             return None;
         }
-        let mut cells = path::Cells::new(w);
-        let mut blocked = |c: Cell| blocks_arrow(&mut cells, c);
-        // A shot from here, at any of them.
-        let mut first_miss = None;
-        for (id, pos) in &targets {
-            match aim(body.pos, *pos, &mut blocked) {
-                Ok(a) => {
-                    self.bow.doing = Some(Shot {
-                        target: *id,
-                        at: *pos,
-                        aim: a,
-                        stage: Stage::Hold,
-                        begun: tick,
-                        released_server: 0,
-                        gone_at: None,
-                    });
-                    self.bow.driven_at = tick;
-                    self.note(
-                        tick,
-                        format!("bow: aim at crystal {id}"),
-                        format!(
-                            "from {:?}, {:.1} off, pitch {:.1}, yaw {:.1}, {} ticks of flight; {} arrows",
-                            path::feet_cell(body.pos),
-                            a.range,
-                            a.pitch,
-                            a.yaw,
-                            a.ticks,
-                            arrows(w)
-                        ),
-                    );
-                    self.retry_at = tick + 1;
-                    return Some(Task::Idle);
-                }
-                Err(m) => {
-                    first_miss.get_or_insert((*id, m));
-                }
-            }
-        }
         // Off the island (the platform, the bridge: race 46072716511 lane 3 asked for stands from
         // (77, 50, 0) and gave six crystals up in 2,000 ticks): E3's way onto it first.
         if flat_to_fountain(body.pos) > ON_ISLAND {
             return None;
         }
-        // A walk to a stand, for the nearest crystals still to be shot that have one.
         let feet = path::feet_cell(body.pos);
+        let mut first_miss = None;
+        // The low arc first, from here and then from a stand; the high arc (longer, wider) only
+        // where no low arc is clear.
+        for high in [false, true] {
+            let mut cells = path::Cells::new(w);
+            let mut blocked = |c: Cell| blocks_arrow(&mut cells, c);
+            for (id, pos) in &targets {
+                match aim_with(body.pos, *pos, &mut blocked, high) {
+                    Ok(a) => return Some(self.bow_begin(w, tick, *id, *pos, a)),
+                    Err(m) => {
+                        first_miss.get_or_insert((*id, m));
+                    }
+                }
+            }
+            if let Some(t) = self.bow_stand(w, tick, &targets, feet, high, first_miss) {
+                return Some(t);
+            }
+        }
+        None
+    }
+
+    /// The shot begun at a crystal along an aim, noted with its arc.
+    fn bow_begin(&mut self, w: &World, tick: u64, id: i32, pos: P, a: Aim) -> Task {
+        let body_feet = w.body.map(|b| path::feet_cell(b.pos));
+        self.bow.doing = Some(Shot {
+            target: id,
+            at: pos,
+            aim: a,
+            stage: Stage::Hold,
+            begun: tick,
+            released_server: 0,
+            gone_at: None,
+        });
+        self.bow.driven_at = tick;
+        self.note(
+            tick,
+            format!("bow: aim at crystal {id}"),
+            format!(
+                "from {body_feet:?}, {:.1} off, the {} arc, pitch {:.1}, yaw {:.1}, {} ticks of flight; {} arrows",
+                a.range,
+                if a.high { "high" } else { "low" },
+                a.pitch,
+                a.yaw,
+                a.ticks,
+                arrows(w)
+            ),
+        );
+        self.retry_at = tick + 1;
+        Task::Idle
+    }
+
+    /// A walk to a stand with a clear arc (the low only unless `high`) for the nearest crystals
+    /// still to be shot, the stand with the shortest flight first; `None` with none walked to.
+    fn bow_stand(
+        &mut self,
+        w: &World,
+        tick: u64,
+        targets: &[(i32, P)],
+        feet: Cell,
+        high: bool,
+        first_miss: Option<(i32, Miss)>,
+    ) -> Option<Task> {
         for (id, pos) in targets.iter().copied().take(3) {
             if count(&self.bow.walks, id) >= STAND_WALKS {
                 if !self.bow.refused.contains(&id) {
@@ -582,22 +707,10 @@ impl Plan {
             let spike = crate::spikes::spike_for(w, &self.spikes.geography, pos);
             #[allow(clippy::cast_possible_truncation)]
             let centre = spike.map_or([pos[0].floor() as i32, pos[2].floor() as i32], |s| s.centre);
-            let mut stands: Vec<(i32, Cell)> = Vec::new();
-            let mut cells = path::Cells::new(w);
-            for col in stand_columns(centre, [0.0, 0.0]) {
-                let Some(c) = ground_in(w, &mut cells, col[0], col[1]) else {
-                    continue;
-                };
-                let mut blocked = |q: Cell| blocks_arrow(&mut cells, q);
-                if aim(centre_of(c), pos, &mut blocked).is_err() {
-                    continue;
-                }
-                let d = (c.0 - feet.0).abs() + (c.2 - feet.2).abs() + 2 * (c.1 - feet.1).abs();
-                stands.push((d, c));
-            }
+            let mut stands = stands_for(w, centre, pos, feet, high);
             stands.sort();
             let found = stands.len();
-            for (_, c) in stands.into_iter().take(STAND_TRIES) {
+            for (_, _, c) in stands.into_iter().take(STAND_TRIES) {
                 let mut walk = Walk::new(c, Goal::Block { pos: c }, Arrive::Goal, tick);
                 if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
                     let n = bump(&mut self.bow.walks, id);
@@ -607,25 +720,28 @@ impl Plan {
                         tick,
                         format!("bow: to the stand at {c:?} for crystal {id}"),
                         format!(
-                            "from {feet:?}; walk {n} of {STAND_WALKS}; from here {first_miss:?}"
+                            "the {} arc; from {feet:?}; walk {n} of {STAND_WALKS}; from here {first_miss:?}",
+                            if high { "high" } else { "low" }
                         ),
                     );
                     return Some(Task::Explore(walk));
                 }
                 self.expanded += walk.expanded;
             }
-            // None now: asked again later, the pillar kept off it meanwhile.
-            self.bow
-                .no_stand
-                .retain(|(c, until)| *c != id && tick < *until);
-            self.bow.no_stand.push((id, tick + NO_STAND_WAIT));
-            self.note(
-                tick,
-                format!("bow: no stand for crystal {id}"),
-                format!(
-                    "from {feet:?}; {found} stands with a shot, none walked to; asked again in {NO_STAND_WAIT}; from here {first_miss:?}"
-                ),
-            );
+            if high {
+                // None now with either arc: asked again later, the pillar kept off it meanwhile.
+                self.bow
+                    .no_stand
+                    .retain(|(c, until)| *c != id && tick < *until);
+                self.bow.no_stand.push((id, tick + NO_STAND_WAIT));
+                self.note(
+                    tick,
+                    format!("bow: no stand for crystal {id}"),
+                    format!(
+                        "from {feet:?}; {found} stands with a high arc, none walked to; asked again in {NO_STAND_WAIT}; from here {first_miss:?}"
+                    ),
+                );
+            }
         }
         None
     }

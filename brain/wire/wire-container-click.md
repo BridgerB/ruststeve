@@ -5,8 +5,8 @@ type: reference
 tags: [wire, windows, crafting, clicks]
 aliases: [container-click, state id, changed slots, predict nothing, set-cursor-item, container-set-content]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@ddae609
+lastUpdated: 2026-11-27
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/protocol/src/packets.rs#w.varint(0); // no changed slots: nothing predicted"
   - "ruststeve:crates/world/src/lib.rs#fn window_moved(&mut self, window: i32, state_id: i32) {"
