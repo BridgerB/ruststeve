@@ -88,6 +88,66 @@ pub fn ground_acceleration() -> f64 {
     0.1 * (0.16277136 / GROUND_INERTIA.powi(3))
 }
 
+// The sprint's numbers are config/sprint.toml's (S1's javap of the 26.1.2 jars, probe
+// 46115253148), mirrored as constants because the core reads no files; the test
+// `the_constants_are_config_sprint_toml` holds them equal.
+
+/// The `movement_speed` attribute is multiplied by `1 + this` while sprinting: the sprint
+/// modifier, an `add_multiplied_total` of 0.3 (`LivingEntity.SPEED_MODIFIER_SPRINTING`,
+/// 0.30000001192092896, the float 0.3), so the ground acceleration is ×1.3 and a steady sprint
+/// is 5.612 blocks a second against 4.317. The walk's 0.1 is the round value, not the float, as
+/// clojurecraft's is; the sprint's 0.3 likewise.
+pub const SPRINT_SPEED_BOOST: f64 = 0.3;
+/// Horizontal input acceleration in the air while sprinting (`Player.getFlyingSpeed`:
+/// `isSprinting ? 0.025999999f : 0.02f`, the float widened).
+pub const SPRINT_AIR_ACCELERATION: f64 = 0.025_999_999_046_325_684;
+/// The horizontal push a jump gets along the yaw while sprinting
+/// (`LivingEntity.jumpFromGround`: `addDeltaMovement(-sin yaw × 0.2, 0, cos yaw × 0.2)`).
+pub const SPRINT_JUMP_BOOST: f64 = 0.2;
+/// Food at or under this stops a sprint and refuses one (`FoodData.hasEnoughFood`: food > 6,
+/// `FoodConstants.SPRINT_LEVEL`).
+pub const SPRINT_FOOD_FLOOR: i32 = 6;
+/// A collision whose move still points within this of the facing, in radians, is minor and
+/// does not stop a sprint (`LocalPlayer.isHorizontalCollisionMinor`, 0.13962634F: 8°).
+pub const MINOR_COLLISION_ANGLE: f64 = 0.139_626_339_077_949_52;
+/// Under this squared length, the facing or the move is no direction and a collision is not
+/// minor (`isHorizontalCollisionMinor`'s 1.0E-5F widened).
+pub const MINOR_COLLISION_MIN_SQ: f64 = 9.999_999_747_378_752e-6;
+
+/// Does the body sprint this tick, given its food (`None`: unknown, as in a prediction, counts
+/// as enough)? The client's rules (`LocalPlayer.aiStep`, decided before the move), with one
+/// change: the bot's wish (`Controls.sprint`) is a held key whose release stops the sprint,
+/// where a vanilla client's flag holds until a stop rule; the server takes either (it checks no
+/// sprint, config/sprint.toml `[server]`).
+/// - **A start** (not sprinting last tick) also needs no sneak (`isMovingSlowly`).
+/// - **Either**, a start or going on: forward held, sprinting possible, and no horizontal
+///   collision last tick unless a minor one (the stop rules run the same tick, after a start).
+///   A sneak does not stop a sprint: one held into a crouch keeps the flag (at the sneak's
+///   input).
+/// - **Possible**: food over 6, and not in water. Vanilla refuses only shallow water (the eyes
+///   out of it); under it the body swims, a pose not modelled, so here water refuses it all.
+///   Blindness and using an item (which refuse a start) are not read: the bot moves with
+///   neither.
+pub fn sprint_allowed(body: &Body, food: Option<i32>, controls: &Controls) -> bool {
+    let possible = food.is_none_or(|f| f > SPRINT_FOOD_FLOOR) && !body.in_water;
+    let free = !body.horizontal_collision || body.minor_horizontal_collision;
+    controls.sprint && controls.forward && possible && free && (body.sprinting || !controls.sneak)
+}
+
+/// Was a collision minor: does the move the body made still point within 8° of where it faced
+/// (`LocalPlayer.isHorizontalCollisionMinor`)? `input` is the input along the facing, `(dx, dz)`
+/// the move after collision; either under 1.0E-5 squared is not minor.
+pub fn minor_collision(yaw: f64, input: f64, (dx, dz): (f64, f64)) -> bool {
+    let rad = yaw.to_radians();
+    let (g, h) = (-input * rad.sin(), input * rad.cos());
+    let i = g * g + h * h;
+    let j = dx * dx + dz * dz;
+    if i < MINOR_COLLISION_MIN_SQ || j < MINOR_COLLISION_MIN_SQ {
+        return false;
+    }
+    ((g * dx + h * dz) / (i * j).sqrt()).acos() < MINOR_COLLISION_ANGLE
+}
+
 /// `[x0, y0, z0, x1, y1, z1]`.
 pub type Aabb = [f64; 6];
 pub type Vec3 = [f64; 3];
@@ -246,6 +306,9 @@ pub struct Body {
     pub in_water: bool,
     pub in_lava: bool,
     pub eye_in_water: bool,
+    /// The horizontal collision was minor (`minor_collision`): it does not stop a sprint.
+    #[serde(default)]
+    pub minor_horizontal_collision: bool,
     /// Sprinting after the stop rules (`sprint_allowed`), as `step_on` left it: what the client
     /// reports to the server with a start or stop sprinting command.
     #[serde(default)]
@@ -541,7 +604,8 @@ pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Co
     step_on(solid, fluid, &plain_surface, body, controls)
 }
 
-/// One tick of movement in a world whose blocks may slow a body or damp its jump.
+/// One tick of movement in a world whose blocks may slow a body or damp its jump, the food
+/// unknown (a sprint is not stopped by hunger): `step_fed` with `None`.
 pub fn step_on(
     solid: &impl Solid,
     fluid: &impl FluidAt,
@@ -549,12 +613,29 @@ pub fn step_on(
     body: &Body,
     controls: &Controls,
 ) -> Body {
+    step_fed(solid, fluid, surface, body, controls, None)
+}
+
+/// One tick of movement, knowing the food the body has to sprint with. Food is not part of the
+/// body (physics never changes it); the caller that holds it, the world, passes it each tick,
+/// and `step_on`'s callers, which predict, pass none.
+pub fn step_fed(
+    solid: &impl Solid,
+    fluid: &impl FluidAt,
+    surface: &impl SurfaceAt,
+    body: &Body,
+    controls: &Controls,
+    food: Option<i32>,
+) -> Body {
     let pos = body.pos;
     let b = aabb(pos);
     let in_water = in_fluid(fluid, FluidKind::Water, WATER_CONTRACT, b);
     let in_lava = in_fluid(fluid, FluidKind::Lava, LAVA_CONTRACT, b);
     let liquid = in_water || in_lava;
     let touching = liquid || touching_fluid(fluid, pos);
+    // The client decides its sprint before it moves (`LocalPlayer.aiStep`, then `travel`),
+    // from last tick's collision and this tick's water.
+    let sprinting = sprint_allowed(&Body { in_water, ..*body }, food, controls);
     let [vx, vy, vz] = body.vel.map(squash);
     let jump_ticks = 0.max(body.jump_ticks - 1);
     // Vanilla jumps from the ground, or, in water under 0.4 deep, from the air: the hop that takes
@@ -573,10 +654,24 @@ pub fn step_on(
         vy
     };
     let jump_ticks = if jumping { JUMP_COOLDOWN } else { jump_ticks };
+    // A sprint-jump pushes the body along its yaw, before the tick's input.
+    let (vx, vz) = if jumping && sprinting {
+        let rad = controls.yaw.to_radians();
+        (
+            vx - rad.sin() * SPRINT_JUMP_BOOST,
+            vz + rad.cos() * SPRINT_JUMP_BOOST,
+        )
+    } else {
+        (vx, vz)
+    };
     let accel = if liquid {
         LIQUID_ACCELERATION
+    } else if body.on_ground && sprinting {
+        ground_acceleration() * (1.0 + SPRINT_SPEED_BOOST)
     } else if body.on_ground {
         ground_acceleration()
+    } else if sprinting {
+        SPRINT_AIR_ACCELERATION
     } else {
         AIR_ACCELERATION
     };
@@ -656,7 +751,9 @@ pub fn step_on(
         in_water,
         in_lava,
         eye_in_water: eye_in_water(fluid, pos2),
-        sprinting: false,
+        minor_horizontal_collision: hit
+            && minor_collision(controls.yaw, f, (pos2[0] - pos[0], pos2[2] - pos[2])),
+        sprinting,
     }
 }
 
@@ -802,6 +899,170 @@ mod tests {
             sneak * 20.0
         );
         assert!((sneak / walk - SNEAKING_SPEED).abs() < 1e-9);
+    }
+
+    fn sprint() -> Controls {
+        Controls {
+            forward: true,
+            sprint: true,
+            ..Controls::default()
+        }
+    }
+
+    /// The pace in blocks a second after 200 ticks of `c` on flat ground, and the body.
+    fn steady(c: &Controls, food: Option<i32>) -> (f64, Body) {
+        let mut b = standing();
+        for _ in 0..200 {
+            b = step_fed(&ground, &no_fluid, &plain_surface, &b, c, food);
+        }
+        let before = b.pos[2];
+        b = step_fed(&ground, &no_fluid, &plain_surface, &b, c, food);
+        ((b.pos[2] - before) * 20.0, b)
+    }
+
+    #[test]
+    fn sprinting_runs_at_thirteen_tenths_of_the_pace() {
+        // Terminal ground speed is accel × input / (1 - inertia), the acceleration ×1.3.
+        let (walk, wb) = steady(
+            &Controls {
+                forward: true,
+                ..Controls::default()
+            },
+            None,
+        );
+        let (run, rb) = steady(&sprint(), None);
+        assert!((run - 5.612).abs() < 0.01, "sprint {run}");
+        assert!((run / walk - (1.0 + SPRINT_SPEED_BOOST)).abs() < 1e-9);
+        assert!(rb.sprinting && !wb.sprinting);
+        // Sneaking refuses a start: the pace is the sneak's.
+        let (sneak, sb) = steady(
+            &Controls {
+                sneak: true,
+                ..sprint()
+            },
+            None,
+        );
+        assert!(
+            !sb.sprinting && (sneak - 1.295).abs() < 0.01,
+            "sneak {sneak}"
+        );
+    }
+
+    #[test]
+    fn a_sprint_held_into_a_crouch_keeps_the_flag_at_the_sneaks_input() {
+        let (_, mut b) = steady(&sprint(), None);
+        let crouch = Controls {
+            sneak: true,
+            ..sprint()
+        };
+        for _ in 0..200 {
+            b = step(&ground, &no_fluid, &b, &crouch);
+        }
+        let before = b.pos[2];
+        b = step(&ground, &no_fluid, &b, &crouch);
+        let pace = (b.pos[2] - before) * 20.0;
+        // 1.295 × 1.3: the sneak's input on the sprint's speed.
+        assert!(b.sprinting && (pace - 1.295 * 1.3).abs() < 0.01, "{pace}");
+        // Letting the wish go stops it (the bot's held key; vanilla's flag would hold).
+        let walked = step(
+            &ground,
+            &no_fluid,
+            &b,
+            &Controls {
+                sprint: false,
+                ..crouch
+            },
+        );
+        assert!(!walked.sprinting);
+    }
+
+    #[test]
+    fn food_six_stops_the_sprint_seven_does_not() {
+        let (at6, b6) = steady(&sprint(), Some(SPRINT_FOOD_FLOOR));
+        let (at7, b7) = steady(&sprint(), Some(SPRINT_FOOD_FLOOR + 1));
+        assert!(!b6.sprinting && (at6 - 4.317).abs() < 0.01, "food 6: {at6}");
+        assert!(b7.sprinting && (at7 - 5.612).abs() < 0.01, "food 7: {at7}");
+    }
+
+    #[test]
+    fn a_sprint_jump_is_pushed_along_the_yaw() {
+        // From a steady sprint, the jump tick adds 0.2 along the yaw to the velocity.
+        let (_, b) = steady(&sprint(), None);
+        let ran = step(&ground, &no_fluid, &b, &sprint());
+        let jumped = step(
+            &ground,
+            &no_fluid,
+            &b,
+            &Controls {
+                jump: true,
+                ..sprint()
+            },
+        );
+        // The same tick's inertia applies to both: the boost survives it × 0.91 (in the air).
+        let boost = jumped.vel[2] / AIR_INERTIA - ran.vel[2] / GROUND_INERTIA;
+        assert!((boost - SPRINT_JUMP_BOOST).abs() < 1e-9, "boost {boost}");
+        assert!(jumped.vel[0].abs() < 1e-12);
+        // Held, sprint-jumping keeps a pace well over the sprint's (vanilla's is about 7.1 b/s).
+        // Measured over 240 ticks, many hops, after 100 to settle.
+        let hopping = Controls {
+            jump: true,
+            ..sprint()
+        };
+        let mut hb = standing();
+        for _ in 0..100 {
+            hb = step(&ground, &no_fluid, &hb, &hopping);
+        }
+        let from = hb.pos[2];
+        for _ in 0..240 {
+            hb = step(&ground, &no_fluid, &hb, &hopping);
+        }
+        let hop = (hb.pos[2] - from) * 20.0 / 240.0;
+        assert!(hb.sprinting && hop > 6.5 && hop < 7.6, "sprint-jump {hop}");
+    }
+
+    #[test]
+    fn a_wall_stops_the_sprint_a_glancing_one_does_not() {
+        // A wall across the way at z = 3: running into it ends the sprint.
+        let wall = |_: i32, y: i32, z: i32| (y <= 63 || (y <= 65 && z == 3)).then_some(1.0);
+        let mut b = standing();
+        let mut ran = false;
+        for _ in 0..40 {
+            b = step(&wall, &no_fluid, &b, &sprint());
+            ran |= b.sprinting;
+        }
+        assert!(ran && !b.sprinting && b.horizontal_collision, "{b:?}");
+        // A wall along the way at x = -1, run at 5° into it: the move still points within 8° of
+        // the facing, so the collision is minor and the sprint goes on.
+        let side = |x: i32, y: i32, _: i32| (y <= 63 || (y <= 65 && x == -1)).then_some(1.0);
+        let at = |yaw: f64| {
+            let c = Controls { yaw, ..sprint() };
+            let mut b = standing();
+            for _ in 0..60 {
+                b = step(&side, &no_fluid, &b, &c);
+            }
+            b
+        };
+        let glance = at(5.0);
+        assert!(glance.horizontal_collision && glance.minor_horizontal_collision);
+        assert!(glance.sprinting, "{glance:?}");
+        // At 20° the collision is not minor: the sprint stops.
+        let steep = at(20.0);
+        assert!(steep.horizontal_collision && !steep.sprinting, "{steep:?}");
+    }
+
+    #[test]
+    fn in_water_the_body_does_not_sprint() {
+        let water = |_: i32, y: i32, _: i32| {
+            (y == 64).then_some(Fluid {
+                kind: FluidKind::Water,
+                level: 0,
+            })
+        };
+        let mut b = standing();
+        for _ in 0..20 {
+            b = step(&ground, &water, &b, &sprint());
+        }
+        assert!(b.in_water && !b.sprinting);
     }
 
     #[test]
