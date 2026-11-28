@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "crystals_5"
-tag = "race-46063334187"
-asset = "snapshot-crystals_5-46063334187-race-46063334187-lane-8.tar.zst"
-commit = "5caa8c94e1de6256d0b7beeb76e4f3880b01b362"
-how = "rs-l08-b00 of race 46063334187 (issue 20, 2026-11-27), resumed from the real island frontier (race 45888713362 lane 0): five crystals destroyed by pillar and strike ('gone (struck)' with its blast; 2160 [12, 39], 2680 [-34, 24], 4400 [33, 24], 14180 [-34, -25], 28540 [-13, -40]), the snapshot at the fifth strike on its stand by spike [-13, -40], at (-9.3, 97.0, -39.5), server tick 28,540. Chosen over race 46055583508 lane 2's crystals_5 (the stand on spike [-34, 24]): from that one E4's step-off found no edge over seen ground and 6 of 8 died stranded (race 46070173620), while from this one 4 of 4 stepped off onto the clutch and landed alive (race 46066925064). Real (no development mark, no kind)."
+stage = "crystals"
+tag = "race-46101740935"
+asset = "snapshot-crystals-46101740935-race-46101740935-lane-1.tar.zst"
+commit = "c5d09313dddc2420a7e1d88c2569890852080294"
+how = "rs-l01-b00 of race 46101740935 (issue 20, 2026-11-27), resumed from the bow line's real island frontier (race 46072716511 lane 1, a bow made from the stronghold's cobwebs): every crystal gone by server tick 3,900. Seven destroyed by arrow from the ground, each a 'gone (blast)' at its spot (260 [12, 39], 620 [-34, -25], 740 [-42, -1], 780 [33, -25], 900 [33, 24], 940 [-13, 39], 1260 [12, -40]); two struck from a pillar (2080 [-34, 24], 3900 [42, 0], the caged one); the tenth, [-13, -40], shot at 280 from 67.4 off, gone from the entities at its flight's landing with no blast heard (the server sends an explosion only within 64) and counted by the bare-spike rule after 400 ticks, never tracked again. The snapshot is at the strike on top of caged spike [42, 0], at (42.5, 82.0, 3.5). Holds full iron, an iron sword, a shield, a bow and 4 arrows, 4 stone pickaxes, 19 cooked food, 1 water bucket and 2 buckets. Real (no development mark, no kind)."

@@ -5,8 +5,8 @@ type: reference
 tags: [game, digging, timing]
 aliases: [delayed destroy, hasDelayedDestroy, break time, hardness, early FINISH, finish margin, dig penalties, player-action]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: clojurecraft@be85a92 ruststeve@ddae609
+lastUpdated: 2026-11-27
+verifiedAgainst: clojurecraft@be85a92 ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/sim/src/survival.rs#const FINISH_ACCEPT: f32 = 0.7;"
   - "ruststeve:crates/sim/src/survival.rs#pub(crate) fn tick_digging(&mut self) -> Result<Vec<Wire>, EncodeError> {"
@@ -35,6 +35,7 @@ The client digs with two `player-action` packets, START and FINISH. The server b
 - **What the server does** (`ServerPlayerGameMode.handleBlockBreakAction` and `tick`, read with `javap` from the 26.1.2 jar, issue 10b): progress = damage per tick × (server ticks since START + 1). FINISH at progress ≥ 0.7 breaks the block. **Below 0.7 it is not an abort**: the server records a delayed destroy and its tick breaks the block once progress reaches 1.0 — unless a delayed destroy is already pending, when the FINISH is ignored. ABORT ends only the dig in progress. Out of reach (eye to the block's box over 4.5 + 1) the action does nothing. Confirmed by the parity table's `dig:5` rows: 10 of 10 real blocks broke without a second FINISH ([[parity-table]]).
 - **FINISH timing**: the server takes a FINISH at 70% of its own ticks; clojurecraft believed an earlier one aborts (a hypothesis for why it looked so: its 60-tick confirm window ran out before the delayed destroy landed, or a second dig was refused while one was pending). clojurecraft sends FINISH at `ms × 1.15 × slowdown + 100 ms`, where `slowdown` is how much longer the server's ticks are taking than 50 ms (measured from `set-time` arrivals). A late FINISH breaks at once; an early one breaks only at the full time, after the bot may have stopped waiting.
 - **Confirmation**: after FINISH the server sends the breaker a block update (to air) and then a `block-changed-ack` for the FINISH sequence. clojurecraft waits up to 60 ticks for the update; an ack without it is a refusal.
+- **Wear** (`ItemStack.mineBlock`, issue 18): a block that takes time to break wears the held tool 1, a sword 2; an instant one wears nothing. The model sends the new `damage` at once and empties the slot at the tool's max damage.
 - Pickup needs no packet: the server hands a drop over when the player's box (grown 1 sideways, 0.5 up) touches it, after a 10-tick delay.
 
 ## Gotchas

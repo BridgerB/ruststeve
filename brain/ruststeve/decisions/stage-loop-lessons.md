@@ -5,8 +5,8 @@ type: decision
 tags: [decision, loop, testing, evidence, ledger, races]
 aliases: [stage loop lessons, test order, a race is the last check, count the ledger line, senses round cells floor, one fix per race, lessons of issue 16]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn feet_cell([x, y, z]: [f64; 3]) -> Cell {"
   - "ruststeve:crates/plan/src/lib.rs#self.note(tick, \"escape still trapped\".to_owned(), why);"

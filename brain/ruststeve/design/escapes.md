@@ -5,8 +5,8 @@ type: reference
 tags: [plan, escape, survival, water, lava, fire, always-rows]
 aliases: [always-rows, escape-water, escape-lava, escape-fire, Escape, Traps, TrapKind, swim-out, flee, bank, notch, lid, Aim::Hold, plan:hold, dry land]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@070578d clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/escape.rs#pub fn tick(&mut self, w: &World, body: &physics::Body, door: bool) -> Option<TrapKind> {"
   - "ruststeve:crates/plan/src/escape.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>) {"
@@ -30,7 +30,7 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 
 ## Key files
 - `config/goals.toml`: the `[[always]]` rows (`escape-water`, `escape-lava`, `escape-wall`, `escape-fire`, priority 0), read into `plan::make::Table::always`.
-- **Lava at the door** (blaze wall 22): `Traps::tick(w, body, door)` also answers lava over the head or beside the head or feet (`escape::lava_door`) as the lava trap, unless the task is a cast or a scoop. The escape seals that cell with a held block (`MAX_LAVA_SEALS` 16, clicked on a full block beside or under it) before it flees. Nether lava ran down three bots' own stairs and killed each in 80 ticks.
+- **Lava at the door** (blaze wall 22): `Traps::tick(w, body, door)` also answers lava over the head or beside the head or feet (`escape::lava_door`) as the lava trap, unless the task is a cast or a scoop, or the body is over the lit end portal (`end_portal::over_portal`, issue 20d wall 11: the room's lava under the portal's cells). The escape seals that cell with a held block (`MAX_LAVA_SEALS` 16, clicked on a full block beside or under it) before it flees. Nether lava ran down three bots' own stairs and killed each in 80 ticks.
 - `crates/plan/src/escape.rs`: `Traps`, `Escape`.
 - `crates/plan/src/lib.rs`: `Plan::always`, called every tick before the task and before the "finished" check, so it runs after the aim is met too.
 - `crates/bot/tests/escape.rs`: a pond, a shaft under a dirt lid, a pit with no bank (with a wooden pickaxe and by hand), lava and fire, each closed-loop against the model.
@@ -62,6 +62,8 @@ Issue 12b. clojurecraft's first three always-rows, as data and a small state mac
 - An escape's end is written with what it did (`Escape::report`: seals, digs, refusals, the trail): on "out of the lava" and when the run ends with the escape running ("escape-lava ended with the run"). Its start says whether the lava was at the door, and where.
 - `lava_door` also sees lava one cell over the head's height beside its column (the ring at y + 2), last in its order.
 - Soul sand is dry land for a trap to clear on.
+- **No X-ray at the door** (`lava_door_at`): only lava with an open face counts (`escape::exposed`); lava shut in round a one-wide tunnel is never seen (test `lava_shut_in_over_a_tunnel_is_not_at_the_door`).
+- **A notch before another bank**: once a bank is refused, a notch beside the body is tried before the next bank ("notch before another bank at …"), and a notch never opens a cell with water over or beside it (race 45343519424 lane 2 floated 21,000 ticks in an aquifer; test `water_far_from_any_bank_is_notched_beside_the_body`).
 
 
 ## See also

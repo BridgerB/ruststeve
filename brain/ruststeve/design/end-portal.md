@@ -6,7 +6,7 @@ tags: [plan, overworld, stronghold, end, portal, kit]
 aliases: [end_portal_task, end kit, end-kit row, frame_has_eye, empty_frames, eye_stands, KitPhase, armed]
 status: draft
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@3ea46ea
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/end_portal.rs#pub fn end_portal_task(&mut self, w: &World, tick: u64) -> Option<Task> {"
   - "ruststeve:crates/plan/src/end_portal.rs#pub fn frame_has_eye(state: u32) -> Option<bool> {"
@@ -37,7 +37,7 @@ Each phase is noted as it ends ("end kit: <phase> over, <next> next" with the ki
 3. **Row**: the needs planner on `end-kit` where the bot stands: crafts, a table and the carried furnace placed, the whole smelt's fuel crafted into planks first, the raw iron smelted; boots are put on by `equip`.
 4. **Cook**: the row's table dug first (at hand, the cook's planner presses cobblestone into furnaces), then the way home's cook (`home_cook`: a hut by night, its fuel fetched by day).
 5. **Eat** to `fed`.
-5b. **Bow** (E8's bow line, `[end_kit] bow`; [[end-bow]]): by day the `bow-kit` row built from what is held (a bow from 3 string, arrows from the feathers held with flint redug from the gravel, a 4th stone pickaxe, 16 sticks) through the same row step (`kit_row_step`); then the nearest chicken (feathers) or spider (string) seen within `bow_radius` hunted (`Task::Hunt`); with none, the overland's legs to the `wood_points` in turn. Its own clock `bow_ticks` (a night is in it) and `bow_fails`; notes "end kit: hunt", "end kit: bow row over", "end kit: legs toward bow look point". In the portal room with no bow (`bow_room_task`): cobwebs within 40 with a face open to the air dug for string (16 walks at most), then the bow made; "end kit: cobweb at", "end kit: the room's bow over". With no frame in the search and over 48 off the stairs' top, the way down first takes the overland's legs back to it.
+5b. **Bow** (E8's bow line, `[end_kit] bow`; [[end-bow]]): by day the `bow-kit` row built from what is held (a bow from 3 string, arrows from the feathers held with flint redug from the gravel, a 4th stone pickaxe, 16 sticks) through the same row step (`kit_row_step`); then the nearest chicken (feathers) or spider (string) seen within `bow_radius` hunted (`Task::Hunt`, which picks up feathers and string; any lying within 24 walked to first); with none, the overland's legs to `bow_points` in turn (eight look points 60 and 100 out round the stairs' top; `wood_points` when empty). Its own clock `bow_ticks` (18,000: the night and the morning, so the walk back is by day) and `bow_fails`; notes "end kit: hunt", "end kit: bow row over", "end kit: legs toward bow look point". In the portal room with no bow (`bow_room_task`): cobwebs within 40 with a face open to the air walked to and dug for string, one with no walk dug toward (48 tries at most, each refusal noted), then the bow alone made (the `bow-room` row, no trip for wood), and the way down runs again to the room; "end kit: cobweb at", "end kit: the room's bow over". With no frame in the search and over 48 off the stairs' top, the way down first takes the overland's legs back to it.
 6. **Down**: out of the night's hut, then a found walk to the room's standing cell (`stronghold::stand_target`), else its own way down a point at a time (`end_way_down`: the overland's legs back when far, a walk to each point, the pillar it left dug down to the point under the feet); then `stronghold_task`.
 
 ## The portal

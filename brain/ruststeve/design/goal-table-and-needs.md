@@ -5,8 +5,8 @@ type: reference
 tags: [plan, goals, needs, make, crafting]
 aliases: [block needs, holds, place-table, mine-stone, stone-tools, goals.toml, goal table, needs planner, plan::make, make, producer rows, craft rows, kit, wood, Aim::Table, --goal table, producer order, craft-now, make differential]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@3c35c72 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/make.rs#pub fn make<'a>("
   - "ruststeve:crates/plan/src/make.rs#fn producer_order(counts: &Counts, row: &Row) -> (i32, i32) {"
@@ -66,6 +66,10 @@ Rows `base-table` (four sticks and a table near) and `base-iron-sword`, `base-st
 
 ## Issue 19c: the eyes
 The `eyes` row provides `item:ender_eye`; `plan::eyes::eyes_row` sets its count to what the held pearls, powder and rods make, up to `[eyes] eyes_max` (14), so the planner chains powder from rods a rod at a time and keeps a rod it does not need ([[eyes-of-ender]]).
+
+## Issues 19 and 20: the way home and the End kit
+- Rows `home-eyes`, `home-sticks` and `home-table` are the way home's steps ([[forest-base]], [[way-home]]); `end-kit` (priority 17) provides three stone pickaxes, an iron sword and iron boots, made where the bot stands over the portal room ([[end-portal]]).
+- Each later subsystem reads its own section into `Goals` and `Table`, every one `#[serde(default)]`: `[overland]`, `[stronghold]`, `[home]`, `[portal_way]`, `[fortress_way]`, `[eyes]`, `[end_kit]` (the kit's targets, the stairs' top and the bow line's numbers). `[survival]` gains `travel_way` (issue 18c: the heading's points to the warped forest).
 
 ## Checked against clojurecraft
 `make-expected.txt` is clojurecraft's own `make/next-row` (at be85a92, a one-off oracle in its flake shell, outside this repo) toward the kit with a table of the kit and gather-log rows, for all 480 inventories of oak logs 0-3, planks 0-4, sticks 0-5 and tables 0-1: **480 of 480** choices equal. `make-expected-stone.txt` (issue 11b): toward `stone-pickaxe` with the stone-pickaxe, gather-log, place-table and mine-stone rows, 1,920 inventories of logs, planks, sticks, tables, cobblestone and wooden pickaxes, with and without a remembered table: **1,920 of 1,920** equal.

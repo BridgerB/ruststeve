@@ -5,8 +5,8 @@ type: reference
 tags: [plan, dig, gather, collect, pickup]
 aliases: [Dig, DigStage, DigFailure, Taken, Gone, crowded, CROWD_RADIUS, break_ticks, slowdown, FINISH margin, collect, pickup goal, Goal::Pickup, to_dig, DropUnreachable, DropWalkFailed, Uncollected, Refused]
 status: verified
-lastUpdated: 2026-11-14
-verifiedAgainst: ruststeve@d040afa clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/dig.rs#pub fn held_item(w: &World) -> Option<ItemKind> {"
   - "ruststeve:crates/plan/src/dig.rs#pub fn slowdown(w: &World) -> f64 {"
@@ -44,6 +44,8 @@ Issue 10c. `plan::dig::Dig` breaks one block from where the bot stands and colle
 - A block counts as gone when it turns to air or to water: water flows into a block dug beside it at once (an escape's dig, [[escapes]]). An escape's dig collects nothing.
 
 - A dig collects the block's certain drop and its chance drops before it (gravel's flint): either ends the collect (issue 13b).
+
+- **A preferred tool** (`Dig::with_tool`, issue 18): while that tool is held it digs before the fastest (the hunt's filler is dug with a wooden pickaxe, never the stone ones' reserve).
 
 ## Evidence
 - Sim, 320 captured landings, `--goal table`, 6,000 ticks: 193 of 200 qualifying made the kit. Before digging from beside, three of a landing's first four digs failed to collect; a drop that drifted sideways sank into the higher ground beside a trunk until the model collided items sideways ([[server-model]]).

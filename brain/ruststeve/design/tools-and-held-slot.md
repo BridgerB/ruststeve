@@ -5,8 +5,8 @@ type: reference
 tags: [data, tools, dig, items, components]
 aliases: [item_props, MAX_STACK, MAX_DAMAGE, TOOLS, Tool, tool_of, max_stack, data::dig, progress, harvests, best_tool, break_ticks, tool component, default components]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@5eeddee clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/datagen/src/model.rs#fn read_item_props("
   - "ruststeve:crates/data/src/dig.rs#pub fn progress("
