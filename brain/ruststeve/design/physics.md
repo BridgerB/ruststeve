@@ -6,7 +6,7 @@ tags: [physics, movement, collision, water, packets, core]
 aliases: [physics crate, step, Body, Controls, sprint, sprint_allowed, step_fed, move_player_pos_rot, movement packets, differential test, server corrections]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@36b9952 clojurecraft@be85a92
+verifiedAgainst: ruststeve@49603bd clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/physics/src/lib.rs#pub fn step(solid: &impl Solid, fluid: &impl FluidAt, body: &Body, controls: &Controls) -> Body {"
   - "ruststeve:crates/physics/src/lib.rs#pub fn sprint_allowed(body: &Body, food: Option<i32>, controls: &Controls) -> bool {"
@@ -29,7 +29,7 @@ related:
 The server does not move the player: the client simulates its own movement each tick and reports where it is. The `physics` crate (core, no I/O) is clojurecraft's `physics.clj` in Rust ([[cc-physics]]), function for function and constant for constant.
 
 ## How it works
-- `step(solid, fluid, &Body, &Controls) -> Body` is pure. `Body` holds position, velocity, on-ground, against-a-wall, jump cooldown, fall distance and the in-water, in-lava and eye-in-water flags; `Controls` are forward, jump, sneak, yaw and an optional pitch. `step_on` is `step` with a third oracle (below); `step` treats every block as plain.
+- `step(solid, fluid, &Body, &Controls) -> Body` is pure. `Body` holds position, velocity, on-ground, against-a-wall, jump cooldown, fall distance and the in-water, in-lava and eye-in-water flags; `Controls` are forward, jump, sneak, yaw and an optional pitch. `step_on` is `step` with a third oracle (below), and `step_fed` is `step_on` with the food (the world calls it); `step` treats every block as plain.
 - The world is read through two oracles, as in clojurecraft. `World::solid` is a full cube (1.0), a flat box's top (a carpet's 0.0625, from the generated collision table, [[datagen]]) or nothing; **an unloaded cell is a full cube**, so the body never falls out of the world. `World::fluid` is water or lava with its level (the state's offset from the block's first state).
 - **A third oracle, the surface** (issue 16): `World::surface` gives each block's speed and jump factors from the generated table (`data::generated::movement`, [[datagen]]: soul sand 0.4; honey 0.4 and a jump of 0.5) and whether it is water or a bubble column. After each move the horizontal velocity is multiplied by the speed factor of the block the feet are in (a body on soul sand stands inside its cell), or, when that is 1, of the block 0.500001 under the body in the column of its supporting block (`Entity.getBlockSpeedFactor`); water at the feet asks no further. A walk on soul sand settles at 0.098 / (1 - 0.4 × 0.546) a tick, 2.51 blocks a second against 4.32. Friction (ice 0.98, slime 0.8) is in the table and not applied: every block is 0.6. `physics::pace_factor(speed_factor)` is a steady walk's share of the plain pace, `(1 - inertia) / (1 - factor × inertia)` (0.581 on soul sand and honey), for a route's cost.
 - **Sneaking** (issue 16): the input is scaled by the `sneaking_speed` attribute (0.3: 1.30 blocks a second) and the move is backed off an edge in steps of 0.05 while nothing is within a step's height (0.6) under the moved box (`Player.maybeBackOffFromEdge`); the velocity is kept. In a liquid sneak also sinks, as before.
