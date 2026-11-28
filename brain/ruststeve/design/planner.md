@@ -84,7 +84,6 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 ## Issue 56: the pace gate
 - `Plan::step` ends with `pace_gate` (`plan::sprint`), after `track` so its notes are never read as a task's reason: the sprint key as the policy answers ([[sprint]]), with its state in `Plan.pace`.
-- `choose`'s explore and `explore_walk` both refuse a target near one explored before (`Plan::near_explored`, within `EXPLORED_NEAR`), turning the heading a quarter, noted "explore turned from": an explore's `Goal::Afar` ends anywhere far enough, and the planner test's bot went back and forth between two targets (CI 46126753035).
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.

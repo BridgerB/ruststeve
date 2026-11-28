@@ -4104,23 +4104,6 @@ impl Plan {
             let d = f64::from(EXPLORE_DISTANCE);
             let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
             let target = path::feet_cell(p);
-            // >>> sprint (issue 56): as `explore_walk` does, never toward a target explored
-            // before. An explore's `Goal::Afar` ends anywhere far enough, and the planner test's
-            // bot went back and forth between two (CI 46126753035, ticks 872 to 3000).
-            if self.near_explored(target) {
-                self.note(
-                    tick,
-                    format!("explore turned from {target:?}"),
-                    format!(
-                        "within {EXPLORED_NEAR} of a target explored before; heading {} to {}",
-                        self.heading,
-                        (self.heading + 90.0) % 360.0
-                    ),
-                );
-                self.heading = (self.heading + 90.0) % 360.0;
-                continue;
-            }
-            // <<< sprint
             let mut walk = Walk::new(
                 target,
                 Goal::Afar {
@@ -6128,14 +6111,6 @@ impl Plan {
         found
     }
 
-    /// Is `target` within `EXPLORED_NEAR` of a target explored before? Both explores read it
-    /// (`choose` and `explore_walk`), so an explore never heads back over its ground.
-    fn near_explored(&self, target: Cell) -> bool {
-        self.explored.iter().any(|e| {
-            f64::from((e.0 - target.0).pow(2) + (e.2 - target.2).pow(2)).sqrt() < EXPLORED_NEAR
-        })
-    }
-
     fn explore_walk(&mut self, w: &World, tick: u64, why: &str) -> Option<Task> {
         let body = w.body?;
         // Marooned (every walk failed, water beside the feet): swim to a far shore
@@ -6155,7 +6130,9 @@ impl Plan {
             let (s, c) = self.heading.to_radians().sin_cos();
             let p = [body.pos[0] - s * d, body.pos[1], body.pos[2] + c * d];
             let target = path::feet_cell(p);
-            if self.near_explored(target) {
+            if self.explored.iter().any(|e| {
+                f64::from((e.0 - target.0).pow(2) + (e.2 - target.2).pow(2)).sqrt() < EXPLORED_NEAR
+            }) {
                 self.heading = (self.heading + 90.0) % 360.0;
                 continue;
             }
