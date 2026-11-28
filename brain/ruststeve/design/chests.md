@@ -87,6 +87,8 @@ Issue 77. A chest lets the bot leave what it does not need yet and come back for
 
 Parity run 46120883534 (6b6cc39f, `only=c00-`), on the race seed's vanilla 26.1.2 server: real and model agree in every field. `k00-half` (then named `c00-half`) ends with 128 cobblestone held on both sides (the two 64s came back, so the server fills the chest from slot 0 and keeps the 10 in a slot of its own). `k00-round` (then `c00-round`) ends with 138 cobblestone and 3 string on both sides. The run reports FAIL only because `only` was given without a `tolerance`, so the full table's 179 applied to 3 rows; it also took in the older `c00-planks`, which is why the rows were renamed to a `k0` prefix. The evidence run is `-f only=k0 -f tolerance=3`, with the task row `k01-task` (on the planner's dev aim `plan:chest-trip`, 77-stash's) once that aim lands.
 
+`k01-task` (`plan:chest-trip`, the planner's development aim) runs the planner's own Place, Stash and Fetch tasks. It gives the same kit on a laid 5x5 stone floor with air over it. The planner puts the chest down, stashes 74 cobblestone and 3 string, and fetches them back; the row is met when the fetch ends. It is the first real-server run of the `Stash` and `Fetch` tasks.
+
 ## Limits
 - The chest parity rows agree with the real server (run 46120883534); the Stash and Fetch tasks have not yet run there.
 - The home chest is made at the Nether portal, the first leg with something to stash. A respawn far from it relies on the walk's route there. A walk that fails is noted, and the run goes on without the fetch.

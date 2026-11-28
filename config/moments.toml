@@ -1289,6 +1289,21 @@ ticks = 200
 give = ["chest 1", "cobblestone 64", "cobblestone 64", "cobblestone 10", "string 3"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
+# Issue 77's task row (`plan:chest-trip`, the planner's development aim, 77-stash): the held chest
+# put down by the planner's Place task on a laid 5x5 stone floor with air over it, then its Stash
+# task (74 cobblestone, the 64 and the 10, never the other 64, and 3 string) and its Fetch task
+# back; met when the fetch ends. The outcome's counts are the whole kit back but the chest.
+
+[[moment]]
+id = "k01-task"
+landing = 0
+dx = 20
+dz = 20
+script = "plan:chest-trip"
+ticks = 600
+give = ["chest 1", "cobblestone 64", "cobblestone 64", "cobblestone 10", "string 3"]
+set = [["stone", -2, -1, -2], ["stone", -2, -1, -1], ["stone", -2, -1, 0], ["stone", -2, -1, 1], ["stone", -2, -1, 2], ["stone", -1, -1, -2], ["stone", -1, -1, -1], ["stone", -1, -1, 0], ["stone", -1, -1, 1], ["stone", -1, -1, 2], ["stone", 0, -1, -2], ["stone", 0, -1, -1], ["stone", 0, -1, 0], ["stone", 0, -1, 1], ["stone", 0, -1, 2], ["stone", 1, -1, -2], ["stone", 1, -1, -1], ["stone", 1, -1, 0], ["stone", 1, -1, 1], ["stone", 1, -1, 2], ["stone", 2, -1, -2], ["stone", 2, -1, -1], ["stone", 2, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, 2], ["air", -2, 0, -2], ["air", -2, 0, -1], ["air", -2, 0, 0], ["air", -2, 0, 1], ["air", -2, 0, 2], ["air", -1, 0, -2], ["air", -1, 0, -1], ["air", -1, 0, 0], ["air", -1, 0, 1], ["air", -1, 0, 2], ["air", 0, 0, -2], ["air", 0, 0, -1], ["air", 0, 0, 0], ["air", 0, 0, 1], ["air", 0, 0, 2], ["air", 1, 0, -2], ["air", 1, 0, -1], ["air", 1, 0, 0], ["air", 1, 0, 1], ["air", 1, 0, 2], ["air", 2, 0, -2], ["air", 2, 0, -1], ["air", 2, 0, 0], ["air", 2, 0, 1], ["air", 2, 0, 2], ["air", -2, 1, -2], ["air", -2, 1, -1], ["air", -2, 1, 0], ["air", -2, 1, 1], ["air", -2, 1, 2], ["air", -1, 1, -2], ["air", -1, 1, -1], ["air", -1, 1, 0], ["air", -1, 1, 1], ["air", -1, 1, 2], ["air", 0, 1, -2], ["air", 0, 1, -1], ["air", 0, 1, 0], ["air", 0, 1, 1], ["air", 0, 1, 2], ["air", 1, 1, -2], ["air", 1, 1, -1], ["air", 1, 1, 0], ["air", 1, 1, 1], ["air", 1, 1, 2], ["air", 2, 1, -2], ["air", 2, 1, -1], ["air", 2, 1, 0], ["air", 2, 1, 1], ["air", 2, 1, 2], ["air", -2, 2, -2], ["air", -2, 2, -1], ["air", -2, 2, 0], ["air", -2, 2, 1], ["air", -2, 2, 2], ["air", -1, 2, -2], ["air", -1, 2, -1], ["air", -1, 2, 0], ["air", -1, 2, 1], ["air", -1, 2, 2], ["air", 0, 2, -2], ["air", 0, 2, -1], ["air", 0, 2, 0], ["air", 0, 2, 1], ["air", 0, 2, 2], ["air", 1, 2, -2], ["air", 1, 2, -1], ["air", 1, 2, 0], ["air", 1, 2, 1], ["air", 1, 2, 2], ["air", 2, 2, -2], ["air", 2, 2, -1], ["air", 2, 2, 0], ["air", 2, 2, 1], ["air", 2, 2, 2]]
+
 # Issue 14a: buckets along the look and fluids (brain/ruststeve/design/buckets-and-fluids.md), five rows a
 # landing on 0 to 2, each facing east (yaw -90) from the start's eye: a water source in a stone pit
 # scooped; water poured on stone; lava poured low against a hole's back wall; water poured against
