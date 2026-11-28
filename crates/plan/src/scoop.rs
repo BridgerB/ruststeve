@@ -195,7 +195,7 @@ pub fn aim_opened(
 
 /// The points on a source's faces a bucket is aimed at: the surface, the four sides, the
 /// underside, each a little inside.
-fn face_points((x, y, z): Cell) -> [[f64; 3]; 6] {
+pub fn face_points((x, y, z): Cell) -> [[f64; 3]; 6] {
     [
         [0.5, SURFACE_HEIGHT, 0.5],
         [0.1, 0.45, 0.5],

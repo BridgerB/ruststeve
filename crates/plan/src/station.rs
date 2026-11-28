@@ -161,6 +161,61 @@ pub fn serves(w: &World, stand: Cell, src: Cell, kept: &[Cell]) -> bool {
     let eye = eye_of(stand);
     crate::scoop::aim_opened(w, eye, src, crate::scoop::REACH, &opened).is_some()
         || sight_block_opened(w, eye, src, stand.1, kept, &opened).is_some()
+        || level_sight_block(w, eye, src, stand.1, kept, &opened).is_some()
+}
+
+/// Where a cell sits against the feet's height: level with the feet or with the head.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Level {
+    Feet,
+    Head,
+}
+
+impl Level {
+    pub fn name(self) -> &'static str {
+        match self {
+            Level::Feet => "feet",
+            Level::Head => "head",
+        }
+    }
+}
+
+/// The first block on the exact line from `eye` to a face of `src` in reach, when it lies level
+/// with the feet or the head and a sight dig may take it (`sight_diggable`: solid, not
+/// obsidian, not kept, no lava beside it at its height or over it; lava under it stays there,
+/// lava never flows up). The faces in `aim_opened`'s order, the first that has one; `opened`
+/// counts open. Race 46144128199 lane 0's stand (24, -54, 43) had its twelve sources behind
+/// (23, -54, 43), level with the feet, lava under it: lane 1 filled at the same site after its
+/// way dig cut that column (docs/problems/lava-portal.md wall 4).
+pub fn level_sight_block(
+    w: &World,
+    eye: [f64; 3],
+    src: Cell,
+    feet_y: i32,
+    kept: &[Cell],
+    opened: &[Cell],
+) -> Option<(Cell, Level)> {
+    let empty = |c: Cell| {
+        kind(w, c)
+            .and_then(data::generated::shapes::collision)
+            .is_some_and(|k| k == data::types::Collision::Empty)
+    };
+    crate::scoop::face_points(src)
+        .into_iter()
+        .filter(|p| dist(eye, *p) <= crate::scoop::REACH)
+        .find_map(|p| {
+            let block = crate::scoop::ray_cells(eye, p)
+                .into_iter()
+                .find(|c| *c != src && !opened.contains(c) && !empty(*c))?;
+            let level = if block.1 == feet_y {
+                Level::Feet
+            } else if block.1 == feet_y + 1 {
+                Level::Head
+            } else {
+                return None;
+            };
+            sight_diggable(w, block, kept).then_some((block, level))
+        })
 }
 
 /// The search of `station_among`: `take` keeps the sources a stand counts.

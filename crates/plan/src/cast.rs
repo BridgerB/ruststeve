@@ -45,6 +45,10 @@ const WAY_DIGS: u32 = 12;
 const REFILL_TRAIL: usize = 8;
 /// Blocks a cast may dig to open sight lines to lava with no station: a few per refill.
 const SIGHT_DIGS: u32 = 24;
+/// Blocks a station's stand may dig level with the feet or the head to see its sources
+/// (lava-portal.md wall 4): one wall cell opened lane 1's fill in race 46144128199; a few more
+/// for a thicker wall, after which the station is missed.
+const LEVEL_DIGS: u32 = 4;
 /// Blocks from the feet a lava source is looked at for a site (clojurecraft's `hunt-radius`).
 pub const LAVA_RADIUS: f64 = 48.0;
 /// Blocks from the feet lava seen is headed for when none is near (`far-radius`).
@@ -289,6 +293,10 @@ pub struct Cast {
     /// Blocks dug to open a refill's sight to lava with no station (wall 24).
     #[serde(default)]
     sight_digs: u32,
+    /// Blocks a station's stand dug level with the feet or the head to see a source (issue 83,
+    /// lava-portal.md wall 4).
+    #[serde(default)]
+    pub level_digs: u32,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -436,6 +444,7 @@ impl Cast {
             refill_trail: Vec::new(),
             scoop_uses: [0; 4],
             sight_digs: 0,
+            level_digs: 0,
             last_regression: None,
             tunnels: 0,
             refused: Vec::new(),
@@ -573,8 +582,9 @@ impl Cast {
         let [fe, fb, ee, eb] = self.scoop_uses;
         // The lava-first state rides on every ending note (the lit one carries only the uses).
         format!(
-            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked; {}",
-            self.lava_first.text()
+            "uses filled {fe} exact-clear {fb} exact-blocked, empty {ee} exact-clear {eb} exact-blocked; {}; station sight digs {}",
+            self.lava_first.text(),
+            self.level_digs
         )
     }
 
@@ -1226,7 +1236,31 @@ impl Cast {
                 .iter()
                 .find_map(|src| station::sight_block(w, from, *src, f.1, &kept))
             else {
-                return self.station_miss(tick, "at the stand, no source in sight and no lid");
+                // No lid under the feet: the block the line meets level with the feet or the head,
+                // dug from the stand (lava-portal.md wall 4: lane 1 of race 46144128199 filled at
+                // the site lane 0 gave up, once its way dig had cut that wall).
+                let level = (self.level_digs < LEVEL_DIGS)
+                    .then(|| {
+                        st.sources.iter().find_map(|src| {
+                            station::level_sight_block(w, from, *src, f.1, &kept, &[])
+                                .map(|(c, l)| (c, l, *src))
+                        })
+                    })
+                    .flatten();
+                let Some((block, level, src)) = level else {
+                    return self.station_miss(tick, "at the stand, no source in sight and no lid");
+                };
+                self.level_digs += 1;
+                let what = format!(
+                    "station sight dig at {block:?} (level with the {}) toward {src:?}",
+                    level.name()
+                );
+                self.trail(tick, what.clone());
+                if self.note.is_none() {
+                    self.note = Some((what, format!("from the stand {:?}", st.stand)));
+                }
+                self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
+                return Some((still, None, CastStatus::Running));
             };
             self.work = Work::WayDig(Box::new(Dig::new(w, block, tick)));
             return Some((still, None, CastStatus::Running));

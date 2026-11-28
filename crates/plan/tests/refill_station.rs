@@ -3,21 +3,24 @@
 //! level with the feet and the head, with lava under the wall's foot: from the stand no face was
 //! in sight and no lid lay under the feet, so the station step ended in the tick it began, the
 //! level tunnel turned off the lava and stopped on a walk onto air with nothing dug, and the
-//! ladder went round four times in 46 ticks to "no route".
+//! ladder went round four times in 46 ticks to "no route". Lane 1 filled at the same site once
+//! its way dig had cut that wall. The stand now digs the wall's cell on its line to the source
+//! (the station sight dig) and fills.
 //!
 //! The read's shape, hand-built: stone to y 63, air from y 64; the frame at (0, 63, 0) facing
-//! south, so the h 1 stand in front of it is (0, 64, 4); a wall of stone at x -1, y 64 and 65,
-//! along the whole span the station searches; lava under the wall's foot at (-1, 63, 4); the pool
-//! at x -14 to -2, y 63, open to the air above it.
+//! south, so the h 1 stand in front of it is (0, 64, 4); a wall at x -1, y 64 and 65, along the
+//! whole span the station searches; lava under the wall's foot at (-1, 63, 4); the pool at x -14
+//! to -2, y 63, open to the air above it.
 
 use std::sync::Arc;
 
 use data::{BlockKind, ItemKind};
 use plan::build::{Facing, Frame};
-use plan::cast::{Cast, Site};
+use plan::cast::{Cast, CastStatus, LavaFirst, Site};
+use plan::station::Level;
 use protocol::S2c;
 use protocol::chunk::{Column, Paletted, Section};
-use world::{Event, World};
+use world::{Act, Event, World};
 
 type Cell = (i32, i32, i32);
 
@@ -42,11 +45,21 @@ fn set(w: &mut World, c: Cell, k: BlockKind) {
 }
 
 const STAND: Cell = (0, 64, 4);
+/// The bucket's inventory slot (hotbar 2).
+const BUCKET: i16 = 38;
 
 fn frame() -> Frame {
     Frame {
         origin: (0, 63, 0),
         facing: Facing::South,
+    }
+}
+
+fn site() -> Site {
+    Site {
+        frame: frame(),
+        lava: (-2, 63, 4),
+        h: 1,
     }
 }
 
@@ -58,9 +71,9 @@ fn pool() -> Vec<Cell> {
         .collect()
 }
 
-/// The world of the read, with the wall when `wall`; the feet on the stand, the kit held with
-/// an empty bucket for the lava.
-fn world(wall: bool) -> World {
+/// The world of the read, the wall of `wall` (none when `Air`); the feet on the stand, the kit
+/// held with an empty bucket for the lava.
+fn world(wall: BlockKind) -> World {
     let mut sections = vec![section(BlockKind::Stone); 4];
     sections.extend(std::iter::repeat_n(section(BlockKind::Air), 12));
     let col = Arc::new(Column { min_y: 0, sections });
@@ -86,10 +99,10 @@ fn world(wall: bool) -> World {
         set(&mut w, c, BlockKind::Lava);
     }
     set(&mut w, (-1, 63, 4), BlockKind::Lava);
-    if wall {
+    if wall != BlockKind::Air {
         for z in -12..=20 {
-            set(&mut w, (-1, 64, z), BlockKind::Stone);
-            set(&mut w, (-1, 65, z), BlockKind::Stone);
+            set(&mut w, (-1, 64, z), wall);
+            set(&mut w, (-1, 65, z), wall);
         }
     }
     let pos = [0.5, 64.0, 4.5];
@@ -103,7 +116,7 @@ fn world(wall: bool) -> World {
     w.player.food = Some(20);
     w.inventory.slots.insert(36, (ItemKind::IronPickaxe, 1));
     w.inventory.slots.insert(37, (ItemKind::WaterBucket, 1));
-    w.inventory.slots.insert(38, (ItemKind::Bucket, 1));
+    w.inventory.slots.insert(BUCKET, (ItemKind::Bucket, 1));
     w.inventory.slots.insert(39, (ItemKind::FlintAndSteel, 1));
     w.inventory.slots.insert(40, (ItemKind::Cobblestone, 32));
     w.held = 0;
@@ -114,30 +127,51 @@ fn sources(w: &World) -> Vec<Cell> {
     plan::cast::lava_sources(w)
 }
 
-#[test]
-fn the_read_s_stand_is_a_station_by_reach_alone() {
-    let w = world(true);
-    let srcs = sources(&w);
-    assert!(pool().iter().all(|c| srcs.contains(c)), "{srcs:?}");
-    // The site chooser's station: a stand with sources in reach, sight not asked.
-    let st =
-        plan::station::station_among(&w, &srcs, frame(), &[], Some(1)).expect("a station by reach");
-    assert!(!st.sources.is_empty());
-    assert!(st.stand.0 >= 0, "on the room's side of the wall: {st:?}");
-    // From that stand no face is in sight and no lid lies under the feet: the step there ends in
-    // the tick it begins.
-    let kept = plan::station::kept(frame());
-    assert!(
-        st.sources
-            .iter()
-            .all(|s| !plan::station::serves(&w, st.stand, *s, &kept)),
-        "{st:?}"
-    );
+fn eye(c: Cell) -> [f64; 3] {
+    [
+        f64::from(c.0) + 0.5,
+        f64::from(c.1) + physics::EYE_HEIGHT,
+        f64::from(c.2) + 0.5,
+    ]
 }
 
 #[test]
-fn behind_the_wall_no_stand_serves() {
-    let w = world(true);
+fn the_read_s_stand_sees_nothing_until_the_wall_is_dug() {
+    let w = world(BlockKind::Stone);
+    let srcs = sources(&w);
+    assert!(pool().iter().all(|c| srcs.contains(c)), "{srcs:?}");
+    // The site chooser's station: the stand by reach alone.
+    let st =
+        plan::station::station_among(&w, &srcs, frame(), &[], Some(1)).expect("a station by reach");
+    assert_eq!(st.stand, STAND);
+    let kept = plan::station::kept(frame());
+    // From the stand no face is in the exact line and no lid lies under the feet: the steps the
+    // stand had before ended in the tick they began.
+    for s in &st.sources {
+        assert_eq!(
+            plan::scoop::aim_at_use(&w, eye(STAND), *s, plan::scoop::REACH),
+            None,
+            "{s:?}"
+        );
+        assert_eq!(
+            plan::station::sight_block(&w, eye(STAND), *s, STAND.1, &kept),
+            None,
+            "{s:?}"
+        );
+    }
+    // The wall's cell on the line, level with the head, a sight dig may take: lava under the
+    // wall's foot never flows up.
+    let (block, level) =
+        plan::station::level_sight_block(&w, eye(STAND), (-2, 63, 4), STAND.1, &kept, &[])
+            .expect("a level sight block");
+    assert_eq!((block, level), ((-1, 65, 4), Level::Head));
+    assert!(plan::station::serves(&w, STAND, (-2, 63, 4), &kept));
+}
+
+#[test]
+fn behind_an_obsidian_wall_no_stand_serves() {
+    // Obsidian is never dug: the stands behind it are counted blind and there is no station.
+    let w = world(BlockKind::Obsidian);
     let kept = plan::station::kept(frame());
     let (st, blind) =
         plan::station::serving_station(&w, &sources(&w), frame(), &[], Some(1), &kept);
@@ -146,16 +180,36 @@ fn behind_the_wall_no_stand_serves() {
 }
 
 #[test]
+fn a_wall_with_lava_beside_it_at_its_height_is_not_dug() {
+    // Lava level with the wall's cell would run in: no sight dig takes it.
+    let mut w = world(BlockKind::Stone);
+    for z in -12..=20 {
+        set(&mut w, (-2, 64, z), BlockKind::Lava);
+        set(&mut w, (-2, 65, z), BlockKind::Lava);
+    }
+    let kept = plan::station::kept(frame());
+    assert_eq!(
+        plan::station::level_sight_block(&w, eye(STAND), (-2, 63, 4), STAND.1, &kept, &[]),
+        None
+    );
+}
+
+#[test]
 fn with_the_wall_gone_the_stand_serves() {
-    let w = world(false);
+    let w = world(BlockKind::Air);
     let kept = plan::station::kept(frame());
     let (st, _) = plan::station::serving_station(&w, &sources(&w), frame(), &[], Some(1), &kept);
     let st = st.expect("a serving station");
-    assert!(!st.sources.is_empty());
+    assert_eq!(st.stand, STAND);
     assert!(
-        st.sources
-            .iter()
-            .all(|s| plan::station::serves(&w, st.stand, *s, &kept))
+        plan::scoop::aim_at_use(&w, eye(STAND), st.sources[0], plan::scoop::REACH).is_some()
+            || st.sources.iter().any(|s| plan::scoop::aim_at_use(
+                &w,
+                eye(STAND),
+                *s,
+                plan::scoop::REACH
+            )
+            .is_some())
     );
 }
 
@@ -163,7 +217,7 @@ fn with_the_wall_gone_the_stand_serves() {
 fn a_stand_in_the_rock_serves_once_opened() {
     // The stand and its head stone: the station's way digs them on the way in, so the sight is
     // judged with them open.
-    let mut w = world(false);
+    let mut w = world(BlockKind::Air);
     set(&mut w, STAND, BlockKind::Stone);
     set(&mut w, (STAND.0, STAND.1 + 1, STAND.2), BlockKind::Stone);
     let kept = plan::station::kept(frame());
@@ -171,19 +225,43 @@ fn a_stand_in_the_rock_serves_once_opened() {
 }
 
 #[test]
-fn the_ladder_says_no_station_and_never_walks_to_the_blind_stand() {
-    let w = world(true);
-    let site = Site {
-        frame: frame(),
-        lava: (-2, 63, 4),
-        h: 1,
-    };
-    let mut k = Cast::fresh(site, 0);
-    let _ = k.step(&w, 0);
+fn the_read_s_refill_digs_the_wall_and_fills() {
+    let mut w = world(BlockKind::Stone);
+    let mut k = Cast::fresh(site(), 0);
+    let mut notes = Vec::new();
+    let mut filled_at = None;
+    for t in 0..400 {
+        let (_, act, status) = k.step(&w, t);
+        assert_eq!(status, CastStatus::Running, "tick {t}: {}", k.refill_text());
+        notes.extend(k.take_note());
+        if let LavaFirst::Filled { at, .. } = k.lava_first {
+            filled_at = Some(at);
+            break;
+        }
+        // The server's side, by hand: the slot held, the dug block gone, the bucket filled.
+        match act {
+            Some(Act::Hold { slot }) => w.held = slot,
+            Some(Act::Dig { pos, .. }) => set(&mut w, (pos.x, pos.y, pos.z), BlockKind::Air),
+            Some(Act::UseItem) => {
+                w.inventory.slots.insert(BUCKET, (ItemKind::LavaBucket, 1));
+            }
+            _ => {}
+        }
+    }
     let trail = k.refill_text();
+    assert!(filled_at.is_some(), "no fill: {trail}");
     assert!(
-        trail.contains("no station (") && trail.contains("none in sight)"),
+        trail.contains("station sight dig at (-1, 65, 4) (level with the head) toward"),
         "{trail}"
     );
-    assert!(!trail.contains("station at"), "{trail}");
+    assert!(!trail.contains("station missed"), "{trail}");
+    assert!(!trail.contains("tunnel"), "{trail}");
+    assert!(k.level_digs >= 1);
+    assert!(
+        notes
+            .iter()
+            .any(|(what, _)| what.starts_with("station sight dig at ")),
+        "{notes:?}"
+    );
+    assert!(k.uses_text().contains("station sight digs "));
 }
