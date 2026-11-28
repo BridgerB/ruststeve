@@ -32,7 +32,8 @@ The summary: nether 2/2, median 23,300 (41,220 the other); stairs tasks were 16,
 
 - **What happened**: no `iron_pickaxe` line in either ledger; "tool broke: stone_pickaxe" 4 times in each; lane 1 smelted 3 of its 8 raw iron at the cook site for shields ("shields at the cook site: craft:shield … 3 iron ingots").
 - **Cause (hypothesis)**: no row asks for an iron pickaxe after `ready`; the nether kit asks 4 stone ones. Stone with a stone pickaxe is 12 ticks a block, 8 with iron (speed 4 against 6; deepslate 23 against 15); 131 uses against 250.
-- **Fix (to build)**: an iron pickaxe made at the cook site from raw iron held beyond the shields' ingots, and dug with first. Notes: "iron pickaxe at the cook site …". Counted: digs and stairs ticks on the leg, pickaxes broken.
+- **Fix** (368bf264, merged at d64f327d): `kit_iron_pickaxe = 1` ([survival]). After the meat, `cook_goal_with` smelts held raw iron for the kit's ingots plus three more for each iron pickaxe due (`iron_pickaxes_due`: fewer than `kit_iron_pickaxe` held with `spare_uses` left, from the iron held beyond `kit_ingots` less the shields made, never a trip for iron). The shields come next, then the pickaxe is crafted at the cook's table (`cook-pickaxe`). Digs already take the fastest held pickaxe (`plan::dig::Dig` → `data::dig::best_tool`: iron 6 against stone 4, 8 ticks a stone block against 12, 15 a deepslate against 23, 250 uses against 131; checked, not changed). Notes: "iron pickaxe at the cook site: <step>" and "pickaxe in hand: <kind>" (`Plan::pick_watch`, once per change). Test: `crates/plan/tests/iron_pickaxe.rs`.
+- **Counted by**: "pickaxe in hand: iron_pickaxe" lines per bot; "tool broke: stone_pickaxe" on the leg; stairs and dig ticks on the leg; the `iron_kit` stage's tick (an iron pickaxe and a bucket held). Not raced yet.
 
 ## 3. Lanes from one snapshot are not independent samples (races 46139640077 and 46144128199)
 
