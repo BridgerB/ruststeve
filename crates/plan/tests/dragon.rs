@@ -2817,18 +2817,14 @@ fn the_fourth_flaming_turn_is_left_as_the_takeoff_before_it_lifts() {
     let mut w = end_at(feet);
     // Yaw -90 faces -x: the bot 8 to its side.
     with_dragon(&mut w, [0.5, 66.0, 0.5], 5, -90.0);
-    assert_eq!(
-        dragon::knock_risk_at(&w, feet, 3, 0),
-        None,
-        "a scan follows"
-    );
-    let (_, d) = dragon::knock_risk_at(&w, feet, 4, 0).expect("the takeoff follows");
+    assert_eq!(dragon::knock_risk_at(&w, feet, 3), None, "a scan follows");
+    let (_, d) = dragon::knock_risk_at(&w, feet, 4).expect("the takeoff follows");
     assert!((d - 8.0).abs() < 0.01, "{d}");
     // Out past the wings' reach: nothing.
     let far = [0.5, 64.0, 13.5];
     let mut o = end_at(far);
     with_dragon(&mut o, [0.5, 66.0, 0.5], 5, -90.0);
-    assert_eq!(dragon::knock_risk_at(&o, far, 4, 0), None);
+    assert_eq!(dragon::knock_risk_at(&o, far, 4), None);
     // The count: four flaming turns on one perch, reset at the next landing.
     let mut p = Plan::new(Aim::Race);
     let mut t = 0;
@@ -2846,21 +2842,8 @@ fn the_fourth_flaming_turn_is_left_as_the_takeoff_before_it_lifts() {
 }
 
 #[test]
-fn a_long_scan_is_left_as_the_takeoff_and_no_meal_begins_in_the_air() {
-    // Wall 59: race 46103123144 lane 11, 8 from the fountain when the scan turned to the takeoff
-    // at 19,040 (dodge 9 ticks late, two blows, flung), then a meal begun in the air; dead.
-    let feet = [0.5, 64.0, 8.5];
-    let mut w = end_at(feet);
-    with_dragon(&mut w, [0.5, 66.0, 0.5], 6, -90.0);
-    assert_eq!(
-        dragon::knock_risk_at(&w, feet, 0, 20),
-        None,
-        "early in the scan"
-    );
-    assert!(
-        dragon::knock_risk_at(&w, feet, 0, dragon::SCAN_LEAVE_TICKS).is_some(),
-        "late in the scan: out before the takeoff"
-    );
+fn no_meal_begins_in_the_air() {
+    // Wall 59: race 46103123144 lanes 11 and 2 began a meal in the air after a knock and fell.
     // In the air: no meal, whatever the dragon does.
     let mut air = end_at([30.5, 70.0, 0.5]);
     if let Some(b) = air.body.as_mut() {

@@ -476,5 +476,5 @@ A strafe lasts about 180 ticks, time for a notch. Answering after the cloud land
   - Lane 11 was 8 from the fountain when sitting-scanning turned to takeoff at 19,040. A scan that finds no player in its view takes off at 100 ticks (`DragonSittingScanningPhase`). The knock dodge came 9 ticks late, two blows took it from 20 to 12.5, and it was flung.
   - At 19,080 "start #29 eat … (food Some(19) …)" began in the air after the knock. The fall took it to 8.5, then dead at 19,100. Lane 2 also ate in the air.
   - **Fix:**
-    - `knock_risk_at` takes a scan past `SCAN_LEAVE_TICKS` (60) as the takeoff's risk, like the fourth flaming turn: within 12 of the body, or in the head's lane, the dodge goes before it lifts.
+    - Tried and taken back: a scan past 60 ticks taken as the takeoff's risk. In vanilla a scan with a player within 20 attacks from 25 ticks, so a long scan near the bot is rare. The sim's scripted dragon scans for whole perches, and the rule held E6's end-loop win test in a dodge loop (CI 46105637021, 2,600 dodges). Lane 11's takeoff more likely came from the perch's damage (`sittingDamageReceived` over 50, `PERCH_TAKEOFF`) on the strike that crossed it. That is still open.
     - `dragon_holds_meal` holds every meal while the body is off the ground. It gates the always row's eat and `meal_cut`, so a meal in hand is cut once airborne.

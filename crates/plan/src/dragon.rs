@@ -837,14 +837,8 @@ pub const KNOCK_BEHIND: i32 = 16;
 /// sideways is straight away from the body) and the blocks, else `None`. Never while it sits:
 /// the strike's time, and no knockback then.
 pub fn knock_risk(w: &World, feet: [f64; 3]) -> Option<([f64; 2], f64)> {
-    knock_risk_at(w, feet, 0, 0)
+    knock_risk_at(w, feet, 0)
 }
-
-/// Ticks of a scan after which its end is taken as the takeoff's (or a charge's) risk: the scan
-/// with no player in its view takes off at 100 (`DragonSittingScanningPhase`); one that finds a
-/// player attacks from 25 (wall 59: race 46103123144 lane 11, 8 from the fountain when the scan
-/// turned to the takeoff at 19,040; the dodge 9 ticks late, two blows, flung).
-pub const SCAN_LEAVE_TICKS: u64 = 60;
 
 /// Flaming turns a perch holds before its takeoff (`DragonSittingFlamingPhase`: after the 200
 /// ticks of a turn, `flameCount >= 4` takes off, else scans again).
@@ -854,15 +848,9 @@ pub const FLAMES_TO_TAKEOFF: u32 = 4;
 /// (`FLAMES_TO_TAKEOFF`) is taken as the takeoff's own risk, so the bot is out of the wings' reach
 /// before it lifts (wall 58: race 46103123144 lane 7 held in the low stand 8.3 across through the
 /// fourth turn; the takeoff's blow lifted it to 84 and it fell to its death).
-pub fn knock_risk_at(
-    w: &World,
-    feet: [f64; 3],
-    flames: u32,
-    phase_ticks: u64,
-) -> Option<([f64; 2], f64)> {
+pub fn knock_risk_at(w: &World, feet: [f64; 3], flames: u32) -> Option<([f64; 2], f64)> {
     let (_, v) = view(w)?;
-    let last_flame = (flames >= FLAMES_TO_TAKEOFF && v.phase() == Some(Phase::SittingFlaming))
-        || (phase_ticks >= SCAN_LEAVE_TICKS && v.phase() == Some(Phase::SittingScanning));
+    let last_flame = flames >= FLAMES_TO_TAKEOFF && v.phase() == Some(Phase::SittingFlaming);
     if last_flame && flat(v.pos, [FOUNTAIN[0], 0.0, FOUNTAIN[1]]) <= KNOCK_ZONE {
         let r = [feet[0] - v.pos[0], feet[2] - v.pos[2]];
         let d = r[0].hypot(r[1]);
@@ -3364,7 +3352,7 @@ impl Plan {
         // rest (no charge, no strafe then).
         if charge.is_none()
             && strafe.is_none()
-            && knock_risk_at(w, body.pos, self.dragon.flames, self.phase_ticks(w)).is_some()
+            && knock_risk_at(w, body.pos, self.dragon.flames).is_some()
             && world::stage::open_sky(w)
             && !self.spikes_up_high(w)
         {
@@ -3421,7 +3409,7 @@ impl Plan {
         if (charge.is_some()
             || fireball.is_some()
             || fire_imminent(w, body.pos).is_some()
-            || knock_risk_at(w, body.pos, self.dragon.flames, self.phase_ticks(w)).is_some())
+            || knock_risk_at(w, body.pos, self.dragon.flames).is_some())
             && world::stage::open_sky(w)
         {
             if let Some(c) = self.fireball_dodge_step(w, tick) {
@@ -3552,13 +3540,6 @@ impl Plan {
             self.dragon.rows.push(row.to_owned());
         }
         c
-    }
-
-    /// Server ticks since the dragon's phase last changed (0 when unknown).
-    pub fn phase_ticks(&self, w: &World) -> u64 {
-        self.dragon
-            .phase_at
-            .map_or(0, |at| w.session.server_ticks.saturating_sub(at))
     }
 
     /// The backstop: in the End, idle with no note for `IDLE_NOTE_TICKS`, noted with the rows that
@@ -3795,7 +3776,7 @@ impl Plan {
                     let d = to[0].hypot(to[1]);
                     (d > 1e-6).then(|| ([to[0] / d, to[1] / d], d))
                 })
-                .or_else(|| knock_risk_at(w, feet, self.dragon.flames, self.phase_ticks(w)))
+                .or_else(|| knock_risk_at(w, feet, self.dragon.flames))
             {
                 Some((dir, d)) => {
                     // At the leg's end with the fire still due: a dodge again from here.
