@@ -548,6 +548,13 @@ jobs:
           cargo run -q --locked --release -p results -- summary lanes | tee summary.md
           # The race's own diagnosis: by place, cast failures, note kinds (results::diagnose).
           cargo run -q --locked --release -p results -- diagnose lanes | tee -a summary.md
+          # Per seed the game ticks from spawn to each stage, from each snapshot's level.dat
+          # (issue 69, results::seeds). Best-effort: a failure here never costs the summary.
+          if ! cargo run -q --locked --release -p results -- seeds lanes > seeds.md; then
+            echo "::warning::results seeds failed; the per-seed table is missing"
+            echo "(results seeds failed)" > seeds.md
+          fi
+          tee -a summary.md < seeds.md
           {
             echo
             echo "### lanes (lanes.toml)"
