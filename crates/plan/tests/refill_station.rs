@@ -14,9 +14,10 @@
 
 use std::sync::Arc;
 
-use data::{BlockKind, ItemKind};
+use data::{BlockKind, EntityKind, ItemKind};
 use plan::build::{Facing, Frame};
-use plan::cast::{Cast, CastStatus, LavaFirst, Site};
+use plan::cast::{Cast, CastStatus, LavaFirst, SightHold, Site};
+use plan::make::{Goals, Table};
 use plan::station::Level;
 use protocol::S2c;
 use protocol::chunk::{Column, Paletted, Section};
@@ -139,7 +140,9 @@ fn eye(c: Cell) -> [f64; 3] {
 fn the_read_s_stand_sees_nothing_until_the_wall_is_dug() {
     let w = world(BlockKind::Stone);
     let srcs = sources(&w);
-    assert!(pool().iter().all(|c| srcs.contains(c)), "{srcs:?}");
+    // The pool's near edge is remembered exposed (memory keeps the nearest within its radius).
+    let edge: Vec<Cell> = (2..=6).flat_map(|z| [(-2, 63, z), (-3, 63, z)]).collect();
+    assert!(edge.iter().all(|c| srcs.contains(c)), "{srcs:?}");
     // The site chooser's station: the stand by reach alone.
     let st =
         plan::station::station_among(&w, &srcs, frame(), &[], Some(1)).expect("a station by reach");
@@ -305,4 +308,62 @@ fn the_dug_cell_over_lava_is_never_walked_into() {
     for src in [(-2, 63, 4), (-2, 63, 3), (-2, 63, 5)] {
         assert!(!plan::scoop::stands(&w, src).contains(&dug), "{src:?}");
     }
+}
+
+fn table() -> Table {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
+    let goals: Goals = toml::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    Table::new(&goals).unwrap()
+}
+
+#[test]
+fn a_feet_level_sight_dig_is_held_while_a_hostile_is_near() {
+    // A zombie three blocks off the stand, within defend's own range (`defend_radius` of
+    // config/goals.toml): the hole beside the stand with lava under it is not opened, and the
+    // station counts a miss.
+    let rules = table().survival;
+    assert!(rules.defend_radius >= 3.0, "{}", rules.defend_radius);
+    let mut w = world(BlockKind::Stone);
+    w.step(&Event::Packet(S2c::AddEntity {
+        id: 41,
+        uuid: [0; 16],
+        kind: EntityKind::Zombie.id(),
+        x: 3.5,
+        y: 64.0,
+        z: 4.5,
+        velocity: [0.0; 3],
+    }));
+    let mut k = Cast::fresh(site(), 0).with_sight_hold(SightHold::of(&rules));
+    let mut notes = Vec::new();
+    for t in 0..60 {
+        let (_, act, status) = k.step(&w, t);
+        notes.extend(k.take_note());
+        match act {
+            Some(Act::Hold { slot }) => w.held = slot,
+            Some(Act::Dig { pos, .. }) => {
+                // A head-level wall cell may go; one level with the feet never does.
+                assert!(
+                    !(pos.x == -1 && pos.y == STAND.1),
+                    "tick {t}: dug {pos:?}: {}",
+                    k.refill_text()
+                );
+                set(&mut w, (pos.x, pos.y, pos.z), BlockKind::Air);
+            }
+            _ => {}
+        }
+        if status != CastStatus::Running {
+            break;
+        }
+    }
+    let trail = k.refill_text();
+    assert!(
+        trail.contains("station missed: station sight dig held: hostile Zombie at 3.0"),
+        "{trail}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|(what, _)| what.starts_with("station sight dig held: hostile Zombie")),
+        "{notes:?}"
+    );
 }

@@ -45,6 +45,47 @@ const WAY_DIGS: u32 = 12;
 const REFILL_TRAIL: usize = 8;
 /// Blocks a cast may dig to open sight lines to lava with no station: a few per refill.
 const SIGHT_DIGS: u32 = 24;
+/// The ranges defend reads (`SurvivalRules`: `defend_radius` for a mob it answers,
+/// `flee_radius` for a kind never fought), held by a cast: a station sight dig level with the
+/// feet opens a hole beside the stand with lava under it, and a hit's knockback could push the
+/// bot in, so none is dug while a mob defend would answer is that near (lava-portal.md wall 4).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SightHold {
+    pub defend_radius: f64,
+    pub flee_radius: f64,
+    /// The never-fought kinds, by protocol id.
+    pub never_fight: Vec<u32>,
+}
+
+impl SightHold {
+    pub fn of(rules: &crate::make::SurvivalRules) -> Self {
+        Self {
+            defend_radius: rules.defend_radius,
+            flee_radius: rules.flee_radius,
+            never_fight: rules.never_fight.iter().map(|k| k.id()).collect(),
+        }
+    }
+
+    /// The nearest live hostile within its range of the feet: a never-fought kind within
+    /// `flee_radius`, any other within `defend_radius`.
+    pub fn near(&self, w: &World) -> Option<(data::EntityKind, f64)> {
+        let body = w.body?;
+        w.entities
+            .values()
+            .filter(|e| !e.dead && crate::defend::hostile(e.kind))
+            .map(|e| (e.kind, dist(body.pos, e.pos)))
+            .filter(|(k, d)| {
+                let r = if self.never_fight.contains(&k.id()) {
+                    self.flee_radius
+                } else {
+                    self.defend_radius
+                };
+                *d <= r
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+    }
+}
+
 /// Blocks a station's stand may dig level with the feet or the head to see its sources
 /// (lava-portal.md wall 4): one wall cell opened lane 1's fill in race 46144128199; a few more
 /// for a thicker wall, after which the station is missed.
@@ -297,6 +338,9 @@ pub struct Cast {
     /// lava-portal.md wall 4).
     #[serde(default)]
     pub level_digs: u32,
+    /// The ranges a feet-level station sight dig is held within (`SightHold`); none, no hold.
+    #[serde(default)]
+    pub sight_hold: Option<SightHold>,
     #[serde(default)]
     pub last_regression: Option<(usize, usize)>,
     /// Tunnels cut toward the pool for the refill in hand.
@@ -445,6 +489,7 @@ impl Cast {
             scoop_uses: [0; 4],
             sight_digs: 0,
             level_digs: 0,
+            sight_hold: None,
             last_regression: None,
             tunnels: 0,
             refused: Vec::new(),
@@ -465,6 +510,14 @@ impl Cast {
         Self {
             lava_first: LavaFirst::Armed,
             ..Self::new(site, tick)
+        }
+    }
+
+    /// The cast with defend's ranges, for the hold on a feet-level station sight dig.
+    pub fn with_sight_hold(self, hold: SightHold) -> Self {
+        Self {
+            sight_hold: Some(hold),
+            ..self
         }
     }
 
@@ -1250,6 +1303,17 @@ impl Cast {
                 let Some((block, level, src)) = level else {
                     return self.station_miss(tick, "at the stand, no source in sight and no lid");
                 };
+                // A hole beside the stand with lava under it, never opened with a mob near
+                // enough to knock the bot into it.
+                if level == station::Level::Feet
+                    && let Some((kind, d)) = self.sight_hold.as_ref().and_then(|h| h.near(w))
+                {
+                    let what = format!("station sight dig held: hostile {kind:?} at {d:.1}");
+                    if self.note.is_none() {
+                        self.note = Some((what.clone(), format!("the dig at {block:?}")));
+                    }
+                    return self.station_miss(tick, &what);
+                }
                 self.level_digs += 1;
                 let what = format!(
                     "station sight dig at {block:?} (level with the {}) toward {src:?}",
