@@ -365,6 +365,25 @@ mod tests {
             .unwrap()
     }
 
+    /// Issue 77: a thrown splash potion's entity data, race 46140744043 lane 2 (rs-l02-b13, the
+    /// cuts probe 46152583531): index 8, `ITEM_STACK`, a splash potion whose `potion_contents`
+    /// holds potion 16 and nothing else. It cut the read short at `ITEM_STACK` (131 times in that
+    /// lane); now it reads to the end marker.
+    #[test]
+    fn a_thrown_potions_stack_reads_whole() {
+        let packet: [u8; 16] = [
+            0xdc, 0x14, 0x08, 0x07, 0x01, 0x8c, 0x0a, 0x01, 0x00, 0x33, 0x01, 0x10, 0x00, 0x00,
+            0x00, 0xff,
+        ];
+        let mut r = Reader::new(&packet);
+        assert_eq!(r.varint(), Ok(2652));
+        assert_eq!(id("ITEM_STACK"), 7);
+        let entries = read_metadata(&mut r).unwrap();
+        assert_eq!(entries, vec![(8, MetaValue::Item(Slot::item(1292, 1)))]);
+        assert_eq!(unread(&entries), None);
+        assert_eq!(r.remaining(), 0);
+    }
+
     #[test]
     fn reads_flags_and_health() {
         let mut w = Writer::new();
