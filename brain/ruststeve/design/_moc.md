@@ -45,6 +45,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[escapes]] - the always-rows: out of water, lava and fire ahead of every goal.
 - [[food-and-hunting]] - eating when hungry, and hunting an animal when there is nothing to eat.
 - [[smelting]] - the furnace window, the model's furnace, the smelt task.
+- [[chests]] - a chest known only when placed or seen, its contents only as its window showed; the model's chest; the stash and fetch tasks.
 - [[portal-cast]] - the cast as a build plan, its executor, the site beside lava, refills, the portal row and kit start.
 - [[buckets-and-fluids]] - the look's pitch, buckets along the look, the model's fluids, obsidian, portal lighting.
 - [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.

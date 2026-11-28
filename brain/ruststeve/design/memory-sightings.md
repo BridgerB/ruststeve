@@ -6,12 +6,13 @@ tags: [memory, sightings, no-xray, facts, world]
 aliases: [Memory, Sighting, Seen, watched kinds, exposed face, memory crate, facts with time]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+verifiedAgainst: ruststeve@bd9b55c clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/memory/src/lib.rs#/// A block seen with an exposed face. Only `Seen::check` makes one."
   - "ruststeve:crates/memory/src/lib.rs#pub fn record_source(&mut self, seen: SeenSource) -> bool {"
   - "ruststeve:crates/memory/src/lib.rs#pub fn record(&mut self, seen: Seen, at_tick: u64) -> bool {"
   - "ruststeve:crates/memory/src/lib.rs#pub fn record_sign(&mut self, seen: &Seen) -> bool {"
+  - "ruststeve:crates/memory/src/lib.rs#pub struct ChestSeen {"
   - "ruststeve:crates/world/src/lib.rs#fn observe_column(&mut self, at: ChunkPos) {"
   - "ruststeve:crates/world/tests/properties.rs#fn a_buried_log_is_seen_only_once_uncovered() {"
   - "clojurecraft:src/clojurecraft/memory.clj#defn watched?"
@@ -30,6 +31,7 @@ The `memory` crate (core, no I/O) is clojurecraft's sighting store in Rust ([[cc
 - A `Sighting { dimension, pos, state, at_tick }` is appended only when the state differs from the latest sighting at that position; a dug log becomes a newer fact of air, and the history stays.
 - Indexes: the latest sighting by position, and positions by dimension and chunk column. Since issue 07a also every block kind ever sighted (`has_seen`), so the stage ladder asks "seen nether bricks?" without a scan. `refold_latest` rebuilds the index from the log; the property test holds them equal.
 - **Only watched kinds start a record**: the `logs` block tag, crafting table, furnace, nether bricks, spawner, obsidian, and (issue 15c) nether portal, a lit portal to walk back to; (issue 19b) end portal frame and end portal (the portal room's frames face its air, so chunk data shows them within the view distance), stone bricks and their mossy, cracked and chiseled kinds (a stronghold's walls), and the seven infested kinds (`memory::INFESTED`: never dug); (issue 20b) in the End only (`memory::watched_in`, `END_WATCHED`), end stone (the island's ground and the dragon-immune pillar block), iron bars (two spikes' cages) and bedrock (the spikes' tops, the exit portal). Bedrock floors every Overworld and Nether chunk and roofs the Nether: watched there it put every column on record, and the heading's seen-columns count stopped meaning anything (CI 45868182237, `a_way_only_back_over_the_cut_is_refused_and_said`). Frames, the End portal, stone bricks, the infested kinds, iron bars and bedrock are in the kind index (`INDEXED`) for the stage ladder's look every second; end stone is not (the island's whole surface). `memory::frame_has_eye(state)` reads a frame's `eye` property from the generated table: the frontier's 12 frames on record read as RCON did (probe 45863427332: one eye). A position on record is then followed through every change, whatever it becomes.
+- **Chests** (issue 77): `chest` is a watched kind. When a cell's recorded kind becomes a chest, `Memory::chests` gets a `ChestSeen` for it, and when the kind changes away from a chest the entry is dropped. That covers a chest the bot placed (the block update after the place) and one seen exposed. Its `contents` are `None` until the chest's window shows them, and `chest_contents` takes window contents only for a chest already on record ([[chests]]).
 - **No X-ray by construction**: a `Sighting` needs a `Seen`, and only `Seen::check` makes one, when a neighbour is loaded and its collision (generated from the game, [[datagen]]) is not a full cube. An unloaded neighbour does not count.
 - **What the world looks at** (`World::observe_column`, `observe_around`): when a column loads, its sections whose palette may hold a watched kind, the positions already on record in it, and the facing edge cells of loaded neighbouring columns; after a block change, the cell and its six neighbours.
 
