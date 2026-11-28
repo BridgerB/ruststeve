@@ -16,7 +16,9 @@ sourceRefs:
   - "ruststeve:crates/plan/src/keep.rs#fn the_rows_are_the_old_junk_lists() {"
   - "ruststeve:crates/plan/src/lib.rs#fn equip(&mut self, w: &World, tick: u64) {"
   - "ruststeve:crates/results/src/keep.rs#pub fn keep_counts(l: &Ledger) -> KeepCounts {"
+  - "ruststeve:crates/plan/src/make.rs#pub fn make_traced<'a>("
   - "ruststeve:crates/plan/src/base.rs#pub fn drop_slot_by("
+  - "ruststeve:crates/plan/src/keep.rs#pub(crate) fn goal_wants(&mut self, goal: &str, short: &[crate::make::Short], tick: u64) {"
 related:
   - "[[ruststeve/design/_moc|Design]]"
   - "[[goal-table-and-needs]]"
@@ -50,6 +52,7 @@ Issue 77. A nearly full pack (fewer than `JUNK_FREE_SLOTS`, six, main slots free
 - **Kept in step**: goals.toml keeps its junk lists. `junk_place`, the stone pressing and the full-pack wait in `nether_task` still read them. `the_rows_are_the_old_junk_lists` holds keep.toml's counts equal to those lists, as `Plan::equip` composed them, in every context and at every stage. Change both files together.
 - **Compiled in**: keep.toml is `include_str!`'d (commit-pinned like the code) and parsed into `Plan::keep` at construction. An edit needs a rebuild, unlike goals.toml, which the shell reads. A table that does not parse is never an empty table, because an empty table would drop nothing and fill the pack. The drop rule falls back to the goals.toml lists and notes `keep table unreadable: <error>` once. The parse test makes that path unreachable for the committed file.
 - **Want lines**: a craft that fails `Missing` writes `want <Kind>|<Kind> <n> for craft <recipe>` for each ingredient set it is short of (counting the inventory, the cursor and the grid). A smelt that fails `Missing` writes `want <Kind> <n> for smelt <Result>` for its input, or `want fuel 1 ...`. When nothing is short (a full pack or a stale grid made the failure), the craft writes `craft <id> missing with every ingredient held` instead, and the smelt `smelt <Result> missing with input and fuel held`.
+- **The needs planner's wants**: `make::make_traced` returns, beside the choice, every item need its chosen path meets from a producer rather than from what is held (`make::Short`: the need's key, its items, how many are short). A producer skipped, a spare not planned and a branch that failed leave none. `Plan::decide` passes them to `goal_wants`, which writes `want <Kind>|<Kind> <n> for goal <id>` (or `want fuel <ticks> ...`) once an episode: when a key joins the short set, not again while it stays, again if it leaves and comes back. A new goal starts afresh (`Plan::keep_wants`). Only the main goal choice writes these; the other callers of `make` (base, eyes, end portal, stronghold) do not.
 - **The forest base** (`plan::base::drop_slot_by`) keeps its own gate: only `[base] drop` kinds, never `NEVER_DROP`, under `free_slots`. Its candidates (each kind's first main stack) go least needed first by `Plan::keep_rank`, then in the list's order. Its drop line `base: drop <Kind> from slot <n>` gives the rank.
 - **The count**: `results::keep::keep_counts` reads a ledger's notes, the base's drop lines included. `dropped_then_wanted` counts the wants that name a kind dropped at an earlier tick of the run. The issue's bar is 0. Its summary row waits on issue 56 (`text.rs` is fenced, lead-77).
 
@@ -58,7 +61,7 @@ Issue 77. A nearly full pack (fewer than `JUNK_FREE_SLOTS`, six, main slots free
 - `Needed` ranks are about what the drop leaves. A kind whose drop would go under its count is never a candidate at all.
 
 ## Limits
-- Only failed crafts and smelts write want lines. A goal the needs planner skips for want of an item writes none yet.
+- A want names its need's every kind (a tag's whole set), so a line for logs is long; it is written once an episode, not once a tick.
 - Contexts are the old gates, not stages. The Nether's leftovers stay put in the Nether before the home leg and in the End, as before.
 
 ## See also

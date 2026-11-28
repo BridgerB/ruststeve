@@ -408,6 +408,36 @@ impl Plan {
         junk
     }
 
+    /// The ledger's `want` lines for the needs planner (`make::make_traced`): one for each item
+    /// need its chosen path meets from a producer, not from what is held (`want <kinds> <n> for
+    /// goal <id>`, or `want fuel <ticks> ...`). One line an episode: a key is written when it
+    /// joins the short set, not again while it stays short, again if it leaves and comes back;
+    /// a new goal starts afresh.
+    pub(crate) fn goal_wants(&mut self, goal: &str, short: &[crate::make::Short], tick: u64) {
+        if self.keep_wants.0 != goal {
+            self.keep_wants = (goal.to_owned(), Vec::new());
+        }
+        self.keep_wants
+            .1
+            .retain(|k| short.iter().any(|s| s.key == *k));
+        for s in short {
+            if self.keep_wants.1.contains(&s.key) {
+                continue;
+            }
+            self.keep_wants.1.push(s.key.clone());
+            let kinds = if s.items.is_empty() {
+                "fuel".to_owned()
+            } else {
+                kinds_text(&s.items)
+            };
+            self.note(
+                tick,
+                format!("want {kinds} {} for goal {goal}", s.n),
+                format!("the needs planner makes {} rather than holds it", s.key),
+            );
+        }
+    }
+
     /// The ledger's `want` lines for a craft that failed `Missing`: one for each ingredient it is
     /// short of (`want <kinds> <n> for craft <recipe>`), or one note when nothing is short (a
     /// full pack or a stale grid made the failure, not a want).
@@ -690,6 +720,65 @@ mod tests {
             crate::base::drop_slot_by(&w, &only, &rank).map(|(s, k, _)| (s, k)),
             Some((9, Str))
         );
+    }
+
+    fn goals_table() -> crate::make::Table {
+        let goals: crate::make::Goals =
+            toml::from_str(include_str!("../../../config/goals.toml")).unwrap();
+        crate::make::Table::new(&goals).unwrap()
+    }
+
+    /// The needs planner's path names what it makes rather than holds: from nothing, the kit's
+    /// sticks; with the kit held, nothing.
+    #[test]
+    fn the_needs_planners_path_names_its_wants() {
+        let t = goals_table();
+        let kit = t.until("table").unwrap();
+        let near = |_: data::BlockKind| false;
+        let none = crate::make::Counts::new();
+        let (_, short) =
+            crate::make::make_traced(&t, &none, &near, true, &crate::make::Wear::default(), kit);
+        assert!(
+            short.iter().any(|s| s.key == "item:stick" && s.n == 4),
+            "{short:?}"
+        );
+        let mut held = crate::make::Counts::new();
+        held.insert(ItemKind::Stick, 4);
+        held.insert(ItemKind::CraftingTable, 1);
+        let (choice, short) =
+            crate::make::make_traced(&t, &held, &near, true, &crate::make::Wear::default(), kit);
+        assert_eq!(choice, crate::make::Choice::Done);
+        assert!(short.is_empty(), "{short:?}");
+    }
+
+    /// One want line an episode: a key short again on the next tick writes nothing; one that
+    /// left and came back writes again; a new goal starts afresh.
+    #[test]
+    fn a_want_is_written_once_an_episode() {
+        let mut p = Plan::new(crate::Aim::Race);
+        let stick = crate::make::Short {
+            key: "item:stick".to_owned(),
+            items: vec![ItemKind::Stick],
+            n: 4,
+        };
+        let wants = |p: &Plan| {
+            p.events
+                .iter()
+                .filter(|e| e.what.starts_with("want "))
+                .count()
+        };
+        p.goal_wants("kit", std::slice::from_ref(&stick), 1);
+        p.goal_wants("kit", std::slice::from_ref(&stick), 2);
+        assert_eq!(wants(&p), 1);
+        assert_eq!(
+            p.events.last().map(|e| e.what.as_str()),
+            Some("want Stick 4 for goal kit")
+        );
+        p.goal_wants("kit", &[], 3);
+        p.goal_wants("kit", std::slice::from_ref(&stick), 4);
+        assert_eq!(wants(&p), 2);
+        p.goal_wants("iron", std::slice::from_ref(&stick), 5);
+        assert_eq!(wants(&p), 3);
     }
 
     #[derive(serde::Deserialize)]

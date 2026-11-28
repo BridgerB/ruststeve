@@ -716,6 +716,9 @@ pub struct Plan {
     /// The "keep table unreadable" note was made (once a run).
     #[serde(default)]
     pub keep_noted: bool,
+    /// The goal the needs planner's want lines were last written for, and the keys written.
+    #[serde(default)]
+    pub keep_wants: (String, Vec<String>),
     // <<< keep
     /// A goal aim is met.
     #[serde(default)]
@@ -1108,6 +1111,7 @@ impl Plan {
             // >>> keep (issue 77)
             keep: keep::Loaded::compiled(),
             keep_noted: false,
+            keep_wants: (String::new(), Vec::new()),
             // <<< keep
             acts: Vec::new(),
         }
@@ -4536,7 +4540,8 @@ impl Plan {
                 ),
             );
         }
-        let choice = make::make_with_wear(&table, &counts, &near, gather_now, &wear, goal);
+        let (choice, short) = make::make_traced(&table, &counts, &near, gather_now, &wear, goal);
+        self.goal_wants(&goal.id, &short, tick); // keep (issue 77): the want lines
         // >>> shield (docs/problems/shield.md): the kit's tools held, the shields the held iron
         // and wood make are made next; an act that would be a trip (a gather, a mine) skips them.
         let (goal, choice) = match shield::kit_row(&counts).and_then(|r| table.until(r)) {
