@@ -1148,3 +1148,55 @@ bow_radius = 48.0
 # the wood points went to 190 off and the way back was lost (race 46060386538).
 bow_points = [[1608, -92], [1668, -32], [1608, 28], [1548, -32], [1608, -132], [1708, -32], [1608, 68], [1508, -32]]
 # <<< E8
+# >>> pumpkin (issue 80, docs/problems/pumpkin.md): a carved pumpkin worn from the way down
+# through the End, so no stare provokes an enderman (EnderMan.isBeingStaredBy skips a player
+# wearing an item of the gaze_disguise_equipment tag, probe 45472254333; the tag is
+# [carved_pumpkin], crates/data/src/generated/tags.rs; only the head slot counts, probe
+# 46159976076, brain/game/mc-pumpkin.md). A phase after the bow, before the way down: the shears
+# (UseOn, held) carve a pumpkin in place, the carved block is dug (hardness 1, an axe best, drops
+# itself) and picked up. Patches are rare (patch_pumpkin: 1 chunk in 300, over grass, 46 of 65
+# biomes, the same probe), so the phase gives up cleanly on its clock and the kit goes on.
+pumpkin = true
+# The end-kit row makes the shears (2 ingots, the shears recipe) ahead of the iron boots: the
+# armed pack's 7 raw iron make the sword's 2 and the boots' 4 and leave 1 (lead-80, 2026-11-28).
+# The boots are made only from iron beyond that; false puts the boots first again.
+shears_first = true
+# The phase's clock: the eat and the row's phase_ticks (6,000), the walks to a pumpkin and the
+# look points; and phase_fails' 16 failed tasks.
+pumpkin_ticks = 6000
+pumpkin_fails = 16
+# Memory's pumpkins (watched from issue 80; a sighting needs an exposed face) in the columns
+# round the feet, kept within 150 flat of the stairs' top (the farthest bow point is 100 out,
+# plus the view's reach from it) and 16 over or under it (log_rise).
+pumpkin_radius = 150.0
+pumpkin_rise = 16
+# Four uses and four walks on one pumpkin (eye_tries' 4: a UseOn's block update comes back in one
+# or two ticks), then the next one seen.
+pumpkin_tries = 4
+pumpkin_walks = 4
+# With none seen, the bow's look points (empty: bow_points).
+pumpkin_points = []
+# The dragon fight keeps the pumpkin on (false). The helmet is 2 of the full iron set's 15 armour
+# points (helmet 2, chestplate 6, leggings 5, boots 2). With armour a, a blow of d is cut by
+# max(a / 5, a - d / 2) / 25 (toughness 0): the bite's 10 (EnderDragon.hurt, to be read by
+# 80-measure) takes 6.0 at 15 and 6.8 at 13, the wings' 5 (knockBack) 2.5 and 2.9, and the breath's
+# instant damage is magic, which armour does not cut. Against that: a stare angers an enderman for
+# good (docs/problems/end.md: the 17 stares of races 45994686575 and 45988967677; walls 42 and 48,
+# a single angry enderman beat a full-iron bot). 0.8 a bite is less than one angry enderman.
+dragon_helmet = false
+# Endermen angry at whom, in the End (plan::endermen::whose; the jar, probes 46160185304 and
+# 46160754145: a target is the latest hurter with an entity, or a stare, and every dragon hurt is
+# the dragon's). One on the dragon gets no water, no cover and no hold. The safe side, its
+# behaviour: 4 closer within 40 server ticks (2 s; a walk is 0.3 a tick, so 4 in 40 is a third
+# of its pace held straight at the bot, not a drift), or a jump of over 4 in one tick (a walk
+# cannot; a teleport) landing within 8 (dragon::ENDER_NEAR, the hold's reach) makes it the bot's,
+# for the rest of its anger. After an enderman's blow the nearest angry one within 5 (its 3-block
+# reach and a margin) is the bot's. Each skip is noted per enderman every 200 ticks (look::
+# SPARED_NOTE_EVERY's 10 s).
+whom_close = 4.0
+whom_close_ticks = 40
+whom_land_near = 8.0
+whom_jump = 4.0
+whom_melee = 5.0
+whom_note_every = 200
+# <<< pumpkin

@@ -52,7 +52,7 @@ pub fn clear(w: &World, from: [f64; 3], to: [f64; 3]) -> bool {
 }
 
 /// Whether a carved pumpkin is worn (menu slot 5, the head): no enderman is provoked by a stare.
-fn pumpkin_worn(w: &World) -> bool {
+pub fn pumpkin_worn(w: &World) -> bool {
     w.inventory
         .slots
         .get(&5)
@@ -77,6 +77,11 @@ pub fn stares_except(
     if pumpkin_worn(w) {
         return None;
     }
+    stares_bare(w, eye, yaw, pitch, except)
+}
+
+/// `stares_except` as if the head were bare: the pumpkin's backstop count (issue 80).
+fn stares_bare(w: &World, eye: [f64; 3], yaw: f32, pitch: f32, except: Option<u32>) -> Option<u32> {
     let feet = w
         .body
         .map_or([eye[0], eye[1] - physics::EYE_HEIGHT, eye[2]], |b| b.pos);
@@ -188,6 +193,11 @@ fn watchers(w: &World, eyes: &[[f64; 3]], except: Option<u32>) -> Vec<Watcher> {
     if pumpkin_worn(w) {
         return Vec::new();
     }
+    watchers_bare(w, eyes, except)
+}
+
+/// `watchers` as if the head were bare (issue 80: the looks the pumpkin spared are counted).
+fn watchers_bare(w: &World, eyes: &[[f64; 3]], except: Option<u32>) -> Vec<Watcher> {
     let Some(feet) = w.body.map(|b| b.pos) else {
         return Vec::new();
     };
@@ -365,3 +375,48 @@ pub fn keep_off_act(
     }
     (kept, why, false)
 }
+
+// >>> pumpkin (issue 80)
+/// With the carved pumpkin worn, a look is never bent; the guard stays as a backstop and counts
+/// what it would have done with the head bare: one note at the first such look at an enderman and
+/// every `SPARED_NOTE_EVERY`-th after. The planner sends a look a tick, so 200 is 10 s of looks held
+/// near one enderman (the ledger's other per-tick watches note about as often, `LOOK_NOTE_EVERY`).
+pub const SPARED_NOTE_EVERY: u64 = 200;
+
+/// The enderman a look would have been bent off (and why) had the head been bare, when the carved
+/// pumpkin is worn; `None` with the head bare (the guard bends those) or a look that is safe
+/// either way. Pure.
+pub fn spared(w: &World, c: &Controls, except: Option<u32>) -> Option<(u32, Kept)> {
+    if !pumpkin_worn(w) {
+        return None;
+    }
+    let body = w.body?;
+    #[allow(clippy::cast_possible_truncation)]
+    let yaw = c.yaw as f32;
+    let pitch = c.pitch.unwrap_or(w.player.pitch);
+    let all = eyes(body.pos, body.vel);
+    let (id, _) = within_guard(&watchers_bare(w, &all, except), yaw, pitch)?;
+    let why = if stares_bare(w, eye(body.pos, c), yaw, pitch, except).is_some() {
+        Kept::Stare
+    } else {
+        Kept::Guard
+    };
+    Some((id, why))
+}
+
+/// One look spared on `id` counted in `counts` (per enderman); `Some(n)` when it is to be
+/// noted: the first, and every `SPARED_NOTE_EVERY`-th after.
+pub fn count_spared(counts: &mut Vec<(u32, u64)>, id: u32) -> Option<u64> {
+    let n = match counts.iter_mut().find(|(e, _)| *e == id) {
+        Some(e) => {
+            e.1 += 1;
+            e.1
+        }
+        None => {
+            counts.push((id, 1));
+            1
+        }
+    };
+    (n == 1 || n % SPARED_NOTE_EVERY == 0).then_some(n)
+}
+// <<< pumpkin

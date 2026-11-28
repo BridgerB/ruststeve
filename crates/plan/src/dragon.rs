@@ -4648,7 +4648,9 @@ impl Plan {
         if let Some(c) = self.ender_water_step(w, tick) {
             return Some(c);
         }
-        let Some(id) = crate::endermen::angry(w) else {
+        // >>> pumpkin (issue 80): only an enderman angry at the bot is held from.
+        let Some(id) = self.angry_at_bot(w, Some(crate::endermen::Skip::Hold)) else {
+            // <<< pumpkin
             self.dragon.ender_walk = None;
             self.dragon.ender_hold = None;
             // Down a notch from an enderman: out once it is calm, by the roof and the step.
@@ -4709,7 +4711,12 @@ impl Plan {
         }
         let capped = self.dragon.ender_capped;
         // One at a time only (wall 46: race 46063334187 lane 7 fought 3 or 4 at once and lost).
-        let single = angry_endermen(w, body.pos).0 <= 1;
+        // >>> pumpkin (issue 80): the bot's only.
+        let single = self
+            .angry_at_bot_near(w, body.pos, ENDER_WATER_NEAR, None)
+            .len()
+            <= 1;
+        // <<< pumpkin
         // Struck from the covered cell's edge in reach, over the line (40 health, the sword's 6).
         if covered && in_reach && above && single {
             self.dragon.ender_walk = None;
@@ -4880,7 +4887,15 @@ impl Plan {
         let body = w.body?;
         let feet = body.pos;
         let fc = cell_of(feet);
-        let (n, hurt) = angry_endermen(w, feet);
+        // >>> pumpkin (issue 80): the water for endermen angry at the bot only; one the dragon hurt
+        // is the dragon's (the jar's hurt-by target), so a dragon hurt calls for no pour (race
+        // 46063334187 lane 7, wall 46: the four the charge angered at 13,160 hit the bot only from
+        // 13,380, after its strikes at 13,280 to 13,360 made them its own).
+        let n = self
+            .angry_at_bot_near(w, feet, ENDER_WATER_NEAR, Some(crate::endermen::Skip::Pour))
+            .len();
+        let hurt = false;
+        // <<< pumpkin
         let held = |k: ItemKind| crate::craft::count(w, k);
         let look = |to: [f64; 3]| {
             let eye = [feet[0], feet[1] + physics::EYE_HEIGHT, feet[2]];
@@ -5305,7 +5320,9 @@ impl Plan {
     /// is passed over for it.
     pub fn dragon_first_step(&mut self, w: &World, tick: u64) -> bool {
         let first = self.dragon_first(w);
-        if first && let Some(id) = crate::endermen::angry(w) {
+        // >>> pumpkin (issue 80)
+        if first && let Some(id) = self.angry_at_bot(w, None) {
+            // <<< pumpkin
             self.dragon.first_skips += 1;
             if tick >= self.dragon.first_noted_at + FIRST_NOTE_TICKS || self.dragon.first_skips == 1
             {

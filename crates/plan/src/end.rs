@@ -2892,7 +2892,13 @@ impl Plan {
     /// In the End, covered (`covered`) with an angry enderman near: no pocket is sealed, the work
     /// goes on; noted every `COVERED_NOTE_EVERY` ticks with the count.
     pub(crate) fn end_covered(&mut self, w: &World, tick: u64) -> bool {
-        if !in_end(w) || crate::endermen::angry(w).is_none() {
+        // >>> pumpkin (issue 80): covered from an enderman angry at the bot only.
+        if !in_end(w)
+            || self
+                .angry_at_bot(w, Some(crate::endermen::Skip::Cover))
+                .is_none()
+        {
+            // <<< pumpkin
             return false;
         }
         // In or on the bunker, its stair too: it is the shelter, and a pocket sealed there shuts

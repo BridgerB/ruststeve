@@ -99,6 +99,36 @@ pub struct EndKitRules {
     /// The look points (x, z) for chickens and spiders, in turn (`wood_points` when empty).
     pub bow_points: Vec<[i32; 2]>,
     // <<< E8
+    // >>> pumpkin (issue 80): the pumpkin phase's numbers (`[end_kit]` in config/goals.toml).
+    /// The pumpkin phase runs, and the pumpkin is worn from the way down; false skips both.
+    pub pumpkin: bool,
+    /// The end-kit row makes the shears ahead of the iron boots (the 2 ingots kept for them).
+    pub shears_first: bool,
+    /// The phase's own clock and its failed tasks.
+    pub pumpkin_ticks: u64,
+    pub pumpkin_fails: u32,
+    /// Pumpkins are looked for within this flat distance of the stairs' top, and this far over or
+    /// under its height.
+    pub pumpkin_radius: f64,
+    pub pumpkin_rise: i32,
+    /// Shears' UseOns on one pumpkin, and walks to it, before it is given up.
+    pub pumpkin_tries: u32,
+    pub pumpkin_walks: u32,
+    /// The look points (x, z) walked to with no pumpkin seen (`bow_points` when empty).
+    pub pumpkin_points: Vec<[i32; 2]>,
+    /// In the dragon fight (`Task::Dragon`) the iron helmet goes back on over the pumpkin's place.
+    pub dragon_helmet: bool,
+    /// Endermen angry at whom, in the End (`endermen::whose`): one closer to the bot by
+    /// `whom_close` within `whom_close_ticks`, or landing from a jump over `whom_jump` within
+    /// `whom_land_near`, is the bot's; the nearest angry one within `whom_melee` after an
+    /// enderman's blow is too; skips noted per enderman every `whom_note_every` server ticks.
+    pub whom_close: f64,
+    pub whom_close_ticks: u64,
+    pub whom_land_near: f64,
+    pub whom_jump: f64,
+    pub whom_melee: f64,
+    pub whom_note_every: u64,
+    // <<< pumpkin
 }
 
 impl Default for EndKitRules {
@@ -151,6 +181,22 @@ impl Default for EndKitRules {
             bow_fails: 24,
             bow_radius: 48.0,
             bow_points: Vec::new(),
+            pumpkin: true,
+            shears_first: true,
+            pumpkin_ticks: 6000,
+            pumpkin_fails: 16,
+            pumpkin_radius: 150.0,
+            pumpkin_rise: 16,
+            pumpkin_tries: 4,
+            pumpkin_walks: 4,
+            pumpkin_points: Vec::new(),
+            dragon_helmet: false,
+            whom_close: 4.0,
+            whom_close_ticks: 40,
+            whom_land_near: 8.0,
+            whom_jump: 4.0,
+            whom_melee: 5.0,
+            whom_note_every: 200,
         }
     }
 }
@@ -169,6 +215,9 @@ pub enum KitPhase {
     // >>> E8 (issue 20, the bow line): after the eat, before the way down.
     Bow,
     // <<< E8
+    // >>> pumpkin (issue 80): after the bow, before the way down.
+    Pumpkin,
+    // <<< pumpkin
 }
 
 impl KitPhase {
@@ -182,6 +231,7 @@ impl KitPhase {
             KitPhase::Down => "down",
             KitPhase::Over => "over",
             KitPhase::Bow => "bow",
+            KitPhase::Pumpkin => "pumpkin",
         }
     }
 
@@ -192,7 +242,8 @@ impl KitPhase {
             KitPhase::Row => KitPhase::Cook,
             KitPhase::Cook => KitPhase::Eat,
             KitPhase::Eat => KitPhase::Bow,
-            KitPhase::Bow => KitPhase::Down,
+            KitPhase::Bow => KitPhase::Pumpkin,
+            KitPhase::Pumpkin => KitPhase::Down,
             KitPhase::Down | KitPhase::Over => KitPhase::Over,
         }
     }
@@ -257,6 +308,22 @@ pub struct EndPortalState {
     pub web_tries: u32,
     pub room_bow_over: bool,
     // <<< E8
+    // >>> pumpkin (issue 80)
+    /// Pumpkins on record (memory's sightings: an exposed face), each noted once; the one gone
+    /// for, the shears' UseOns and the walks spent on it.
+    pub pumpkins_seen: Vec<Cell>,
+    pub pumpkin_at: Option<Cell>,
+    pub pumpkin_uses: u32,
+    pub pumpkin_used_at: u64,
+    pub pumpkin_walks: u32,
+    pub pumpkin_point: usize,
+    pub pumpkin_looks: u32,
+    /// Noted once each: the shears made, the pumpkin carved, worn, and the iron short.
+    pub shears_noted: bool,
+    pub carved_noted: bool,
+    pub worn_noted: bool,
+    pub pumpkin_row_said: Option<String>,
+    // <<< pumpkin
 }
 
 // >>> E8 (issue 20, the bow line)
@@ -329,6 +396,93 @@ pub fn bow_line(w: &World) -> String {
     )
 }
 // <<< E8
+
+// >>> pumpkin (issue 80): the carved pumpkin (docs/problems/pumpkin.md).
+/// The goal row the shears are made by, where the bot stands.
+pub const SHEARS_ROW: &str = "pumpkin-shears";
+
+/// The pumpkin's part of the kit line: the carved pumpkins and shears held, what the head wears.
+pub fn pumpkin_line(w: &World) -> String {
+    format!(
+        "carved pumpkins {}, shears {}, head {:?}",
+        craft::count(w, ItemKind::CarvedPumpkin),
+        craft::count(w, ItemKind::Shears),
+        w.inventory.slots.get(&5).map(|(k, _)| *k)
+    )
+}
+
+/// The end-kit row with the shears put ahead of the iron boots, so the iron for them is kept
+/// (the armed pack's 7 raw iron make the sword's 2 and the boots' 4 and leave 1). Pure.
+pub fn shears_first(row: &make::Row) -> make::Row {
+    let Some(shears) = make::Need::parse("item:shears") else {
+        return row.clone();
+    };
+    let mut out = row.clone();
+    if out.provides.iter().any(|(n, _)| *n == shears) {
+        return out;
+    }
+    let boots = make::Need::parse("item:iron_boots");
+    let at = out
+        .provides
+        .iter()
+        .position(|(n, _)| Some(n) == boots.as_ref())
+        .unwrap_or(out.provides.len());
+    out.provides.insert(at, (shears, 1));
+    out
+}
+
+/// The shears' row: one pair, from the iron held.
+pub fn shears_row() -> make::Row {
+    make::Row {
+        id: SHEARS_ROW.to_owned(),
+        needs: Vec::new(),
+        provides: make::Need::parse("item:shears")
+            .map(|n| vec![(n, 1)])
+            .unwrap_or_default(),
+        holds: Vec::new(),
+        spares: Vec::new(),
+        wants: Vec::new(),
+        act: None,
+    }
+}
+
+/// The six faces of a cell with the protocol's face numbers (0 down, 1 up, 2 north, 3 south,
+/// 4 west, 5 east) and the neighbour each looks onto.
+const FACES: [(i8, (i32, i32, i32)); 6] = [
+    (0, (0, -1, 0)),
+    (1, (0, 1, 0)),
+    (2, (0, 0, -1)),
+    (3, (0, 0, 1)),
+    (4, (-1, 0, 0)),
+    (5, (1, 0, 0)),
+];
+
+/// The faces of `c` open to sight (a loaded neighbour that is not a full block), nearest the
+/// eye first, with the face's middle's distance from the eye.
+pub fn open_faces(w: &World, c: Cell, eye: [f64; 3]) -> Vec<(i8, f64)> {
+    let mut v: Vec<(i8, f64)> = FACES
+        .iter()
+        .filter(|(_, d)| {
+            w.block_at(BlockPos::new(c.0 + d.0, c.1 + d.1, c.2 + d.2))
+                .is_some_and(|k| {
+                    data::generated::shapes::collision(k) != Some(data::types::Collision::Full)
+                })
+        })
+        .map(|(f, d)| {
+            let m = [
+                f64::from(c.0) + 0.5 + 0.5 * f64::from(d.0),
+                f64::from(c.1) + 0.5 + 0.5 * f64::from(d.1),
+                f64::from(c.2) + 0.5 + 0.5 * f64::from(d.2),
+            ];
+            let dist = (0..3).map(|i| (m[i] - eye[i]).powi(2)).sum::<f64>().sqrt();
+            (*f, dist)
+        })
+        .collect();
+    v.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    v
+}
+
+// <<< pumpkin
 
 // ------------------------------------------------------------------ pure
 
@@ -411,7 +565,7 @@ pub fn kit_held(w: &World, r: &EndKitRules) -> bool {
 /// The kit in one line, for the notes.
 pub fn kit_line(w: &World) -> String {
     format!(
-        "pickaxes {}, iron swords {}, iron boots {}, logs {}, planks {}, sticks {}, raw iron {}, ingots {}, food {:?}, health {:?}",
+        "pickaxes {}, iron swords {}, iron boots {}, logs {}, planks {}, sticks {}, raw iron {}, ingots {}, food {:?}, health {:?}, {}",
         pickaxes_held(w),
         craft::count(w, ItemKind::IronSword),
         craft::count(w, ItemKind::IronBoots),
@@ -421,7 +575,8 @@ pub fn kit_line(w: &World) -> String {
         craft::count(w, ItemKind::RawIron),
         craft::count(w, ItemKind::IronIngot),
         w.player.food,
-        w.player.health
+        w.player.health,
+        pumpkin_line(w)
     )
 }
 
@@ -710,7 +865,7 @@ impl Plan {
         );
     }
 
-    fn end_rules(&self) -> EndKitRules {
+    pub(crate) fn end_rules(&self) -> EndKitRules {
         self.table
             .as_ref()
             .map(|t| t.end_kit.clone())
@@ -809,29 +964,39 @@ impl Plan {
             let clock = match phase {
                 KitPhase::Cook => r.cook_ticks,
                 KitPhase::Bow => r.bow_ticks,
+                // >>> pumpkin (issue 80)
+                KitPhase::Pumpkin => r.pumpkin_ticks,
+                // <<< pumpkin
                 _ => r.phase_ticks,
             };
-            let fails_max = if phase == KitPhase::Bow {
-                r.bow_fails
-            } else {
-                r.phase_fails
+            let fails_max = match phase {
+                KitPhase::Bow => r.bow_fails,
+                KitPhase::Pumpkin => r.pumpkin_fails,
+                _ => r.phase_fails,
             };
             if phase != KitPhase::Up && phase != KitPhase::Down {
                 if spent > clock {
-                    self.end_kit_advance(w, tick, &format!("gave up: {spent} ticks of {clock}"));
+                    let why = format!("gave up: {spent} ticks of {clock}");
+                    self.pumpkin_given_up(w, phase, &why, tick);
+                    self.end_kit_advance(w, tick, &why);
                     continue;
                 }
                 if self.end_portal.fails >= fails_max {
                     let fails = self.end_portal.fails;
-                    self.end_kit_advance(w, tick, &format!("gave up: {fails} tasks failed"));
+                    let why = format!("gave up: {fails} tasks failed");
+                    self.pumpkin_given_up(w, phase, &why, tick);
+                    self.end_kit_advance(w, tick, &why);
                     continue;
                 }
             }
             let next = match phase {
                 KitPhase::Up => self.end_kit_up(w, &r, tick),
-                KitPhase::Wood | KitPhase::Row | KitPhase::Cook | KitPhase::Eat | KitPhase::Bow => {
-                    self.end_kit_surface(w, &r, phase, tick)
-                }
+                KitPhase::Wood
+                | KitPhase::Row
+                | KitPhase::Cook
+                | KitPhase::Eat
+                | KitPhase::Bow
+                | KitPhase::Pumpkin => self.end_kit_surface(w, &r, phase, tick),
                 KitPhase::Down => self.end_kit_down(w, &r, tick),
                 KitPhase::Over => return None,
             };
@@ -1139,6 +1304,9 @@ impl Plan {
                 Some(Task::Eat(eat::Eat::new(w, f, tick)))
             }
             KitPhase::Bow => self.end_kit_bow(w, r, night, tick),
+            // >>> pumpkin (issue 80)
+            KitPhase::Pumpkin => self.end_kit_pumpkin(w, r, night, tick),
+            // <<< pumpkin
             KitPhase::Up | KitPhase::Down | KitPhase::Over => None,
         }
     }
@@ -1494,6 +1662,479 @@ impl Plan {
     }
     // <<< E8
 
+    // >>> pumpkin (issue 80): the carved pumpkin (docs/problems/pumpkin.md).
+    /// The pumpkin leg: from the kit's way down (the pumpkin never goes on before `armed`: the
+    /// pearl hunt stares on purpose) through the stronghold and the End.
+    pub fn pumpkin_leg(&self, w: &World) -> bool {
+        crate::end::in_end(w)
+            || (overworld(w)
+                && self.end_portal.begun
+                && matches!(self.end_portal.phase, KitPhase::Down | KitPhase::Over))
+    }
+
+    /// The pumpkin wanted on the head now: on the leg with one held, and not the dragon fight
+    /// when `dragon_helmet` puts the helmet back for it.
+    fn pumpkin_wanted(&self, w: &World, r: &EndKitRules) -> bool {
+        r.pumpkin
+            && self.pumpkin_leg(w)
+            && craft::count(w, ItemKind::CarvedPumpkin) >= 1
+            && !(r.dragon_helmet && matches!(self.task, Task::Dragon(_)))
+    }
+
+    /// The one head-slot rule: with the pumpkin wanted, the iron helmet stays off (held), so
+    /// `equip` and the Nether's armour branch never put it back over the pumpkin's place.
+    pub fn helmet_off(&self, w: &World) -> bool {
+        self.pumpkin_wanted(w, &self.end_rules())
+    }
+
+    /// The head's next click, on `equip`'s clock (true when one was sent): the helmet off and
+    /// the pumpkin on, two shift-clicks: a carved pumpkin's quick move goes into slot 5 only when
+    /// it is empty, and with the helmet there falls through to a main-hotbar move (its
+    /// `equippable` is head, not swappable; probe 46159976076, brain/game/mc-pumpkin.md). Or the
+    /// pumpkin off for the dragon fight when the data says so.
+    pub fn pumpkin_head(&mut self, w: &World, tick: u64) -> bool {
+        let r = self.end_rules();
+        if !r.pumpkin || w.click.is_some() || w.inventory.carried.is_some() {
+            return false;
+        }
+        let head = w.inventory.slots.get(&5).map(|(k, _)| *k);
+        let wanted = self.pumpkin_wanted(w, &r);
+        let click = |slot: i16| Act::Click {
+            slot,
+            button: 0,
+            mode: 1,
+        };
+        let free = (9i16..=44).any(|s| !w.inventory.slots.contains_key(&s));
+        if !wanted {
+            // The dragon fight with `dragon_helmet`: the pumpkin comes off; `equip` then puts
+            // the helmet on.
+            if head == Some(ItemKind::CarvedPumpkin)
+                && r.dragon_helmet
+                && matches!(self.task, Task::Dragon(_))
+                && free
+            {
+                self.equip_at = tick + crate::EQUIP_TICKS;
+                self.acts.push(click(5));
+                self.end_portal.worn_noted = false;
+                let line = pumpkin_line(w);
+                self.note(
+                    tick,
+                    "pumpkin off for the dragon fight (helmet next)".to_owned(),
+                    format!("[end_kit] dragon_helmet; {line}"),
+                );
+                return true;
+            }
+            return false;
+        }
+        match head {
+            Some(ItemKind::CarvedPumpkin) => {
+                if !self.end_portal.worn_noted {
+                    self.end_portal.worn_noted = true;
+                    let line = pumpkin_line(w);
+                    self.note(
+                        tick,
+                        "pumpkin worn (helmet held)".to_owned(),
+                        format!(
+                            "{} iron helmets held; no stare provokes an enderman now; {line}",
+                            craft::count(w, ItemKind::IronHelmet)
+                        ),
+                    );
+                }
+                false
+            }
+            Some(k) => {
+                if !free {
+                    return false;
+                }
+                self.equip_at = tick + crate::EQUIP_TICKS;
+                self.acts.push(click(5));
+                let line = pumpkin_line(w);
+                self.note(
+                    tick,
+                    format!("{k:?} off the head for the pumpkin"),
+                    format!("the pumpkin leg begun; {line}"),
+                );
+                true
+            }
+            None => {
+                let Some(slot) = w
+                    .inventory
+                    .slots
+                    .iter()
+                    .find(|(s, (k, _))| **s >= 9 && *k == ItemKind::CarvedPumpkin)
+                    .map(|(s, _)| *s)
+                else {
+                    return false;
+                };
+                self.equip_at = tick + crate::EQUIP_TICKS;
+                self.acts.push(click(slot));
+                let line = pumpkin_line(w);
+                self.note(
+                    tick,
+                    format!("pumpkin on from slot {slot}"),
+                    format!("the head empty, the pumpkin leg begun; {line}"),
+                );
+                true
+            }
+        }
+    }
+
+    /// The pumpkin phase given up on its clock or its failures: noted as the pumpkin's.
+    fn pumpkin_given_up(&mut self, w: &World, phase: KitPhase, why: &str, tick: u64) {
+        if phase != KitPhase::Pumpkin {
+            return;
+        }
+        let line = pumpkin_line(w);
+        self.note(
+            tick,
+            format!("pumpkin given up: {why}"),
+            format!("the kit goes on without one; {line}"),
+        );
+    }
+
+    /// The pumpkins on record in the columns round the feet (`SEARCH_COLUMNS`), their last
+    /// sighting a pumpkin, within `pumpkin_radius` flat and `pumpkin_rise` of the stairs' top.
+    fn pumpkins_on_record(&self, w: &World, r: &EndKitRules) -> Vec<Cell> {
+        let (Some(body), Some(dim)) = (w.body, w.dimension.as_ref()) else {
+            return Vec::new();
+        };
+        let feet = path::feet_cell(body.pos);
+        let top = (r.way_up[0], r.way_up[1], r.way_up[2]);
+        let (cx, cz) = (feet.0 >> 4, feet.2 >> 4);
+        let mut v: Vec<Cell> = Vec::new();
+        for dx in -crate::SEARCH_COLUMNS..=crate::SEARCH_COLUMNS {
+            for dz in -crate::SEARCH_COLUMNS..=crate::SEARCH_COLUMNS {
+                for s in w.memory.in_column(&dim.name, cx + dx, cz + dz) {
+                    if data::block_of_state(s.state) == Some(BlockKind::Pumpkin)
+                        && flat(s.pos, top) <= r.pumpkin_radius
+                        && (s.pos.1 - top.1).abs() <= r.pumpkin_rise
+                    {
+                        v.push(s.pos);
+                    }
+                }
+            }
+        }
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// The phase over without a carved pumpkin, noted, the kit going on.
+    fn pumpkin_give_up(&mut self, w: &World, why: &str, tick: u64) {
+        self.pumpkin_given_up(w, KitPhase::Pumpkin, why, tick);
+        self.end_kit_advance(w, tick, &format!("no pumpkin: {why}"));
+    }
+
+    /// The pumpkin phase: a pumpkin seen with an exposed face within `pumpkin_radius` of the
+    /// stairs' top, walked to, the shears used on it where it stands (made from the iron held when
+    /// none are, never a trip for iron), the carved pumpkin dug and picked up. With none seen,
+    /// the look points; over at the carved pumpkin held, or given up (noted) on its clock.
+    fn end_kit_pumpkin(
+        &mut self,
+        w: &World,
+        r: &EndKitRules,
+        night: bool,
+        tick: u64,
+    ) -> Option<Task> {
+        if !r.pumpkin {
+            self.end_kit_advance(w, tick, "no pumpkin on this line");
+            return None;
+        }
+        if craft::count(w, ItemKind::Shears) >= 1 && !self.end_portal.shears_noted {
+            self.end_portal.shears_noted = true;
+            let line = pumpkin_line(w);
+            self.note(tick, "shears made".to_owned(), line);
+        }
+        if craft::count(w, ItemKind::CarvedPumpkin) >= 1 {
+            let line = pumpkin_line(w);
+            self.note(tick, "carved pumpkin picked up".to_owned(), line.clone());
+            self.end_kit_advance(w, tick, &format!("the carved pumpkin held: {line}"));
+            return None;
+        }
+        if night {
+            self.retry_at = tick + crate::RETRY_TICKS * 10;
+            return Some(Task::Idle);
+        }
+        if let Some(t) = self.end_hut_exit(w, None, tick) {
+            return Some(t);
+        }
+        let body = w.body?;
+        let feet = path::feet_cell(body.pos);
+        let top = (r.way_up[0], r.way_up[1], r.way_up[2]);
+        // Memory's pumpkins (sightings need an exposed face: strict no X-ray) within the radius
+        // of the stairs' top, each noted once.
+        for c in self.pumpkins_on_record(w, r) {
+            if self.end_portal.pumpkins_seen.contains(&c) {
+                continue;
+            }
+            self.end_portal.pumpkins_seen.push(c);
+            self.note(
+                tick,
+                format!("pumpkin seen at {c:?}"),
+                format!(
+                    "{:.0} off the feet {feet:?}, {:.0} off the stairs' top; {} seen",
+                    flat(c, feet),
+                    flat(c, top),
+                    self.end_portal.pumpkins_seen.len()
+                ),
+            );
+        }
+        // A carved pumpkin lying in sight (a dig's drop not yet taken): picked up.
+        let lying = w
+            .entities
+            .values()
+            .filter(|e| !e.dead && e.item().is_some_and(|(k, _)| k == ItemKind::CarvedPumpkin))
+            .map(|e| e.pos)
+            .filter(|p| flat(path::feet_cell(*p), feet) <= 24.0)
+            .min_by(|a, b| {
+                flat(path::feet_cell(*a), feet).total_cmp(&flat(path::feet_cell(*b), feet))
+            });
+        if let Some(p) = lying {
+            let c = path::feet_cell(p);
+            if !self.refused_now(c, tick) {
+                let mut walk = Walk::new(c, Goal::Near { pos: c, range: 0.8 }, Arrive::Goal, tick);
+                if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+                    self.walks += 1;
+                    self.note(
+                        tick,
+                        format!("end kit: pick up the carved pumpkin at {c:?}"),
+                        pumpkin_line(w),
+                    );
+                    return Some(Task::Explore(walk));
+                }
+                self.expanded += walk.expanded;
+                self.refuse(c, tick);
+            }
+        }
+        // The pumpkin gone for: kept while it stands, else the nearest seen and not refused.
+        if let Some(c) = self.end_portal.pumpkin_at {
+            let k = w.block_at(BlockPos::new(c.0, c.1, c.2));
+            let gone = !matches!(
+                k,
+                Some(BlockKind::Pumpkin | BlockKind::CarvedPumpkin) | None
+            );
+            if gone || self.refused_now(c, tick) {
+                self.end_portal.pumpkin_at = None;
+                self.end_portal.pumpkins_seen.retain(|x| *x != c);
+                self.note(
+                    tick,
+                    format!("end kit: the pumpkin at {c:?} left"),
+                    format!("now {k:?}"),
+                );
+            }
+        }
+        if self.end_portal.pumpkin_at.is_none() {
+            let seen = self.end_portal.pumpkins_seen.clone();
+            let best = seen
+                .into_iter()
+                .filter(|c| !self.refused_now(*c, tick))
+                .min_by(|a, b| flat(*a, feet).total_cmp(&flat(*b, feet)).then(a.cmp(b)));
+            if let Some(c) = best {
+                self.end_portal.pumpkin_at = Some(c);
+                self.end_portal.pumpkin_uses = 0;
+                self.end_portal.pumpkin_walks = 0;
+                self.end_portal.carved_noted = false;
+                self.note(
+                    tick,
+                    format!("end kit: for the pumpkin at {c:?}"),
+                    format!(
+                        "{:.0} off the feet {feet:?}; {}",
+                        flat(c, feet),
+                        pumpkin_line(w)
+                    ),
+                );
+            }
+        }
+        let Some(c) = self.end_portal.pumpkin_at else {
+            return self.pumpkin_look(w, r, tick);
+        };
+        if w.block_at(BlockPos::new(c.0, c.1, c.2)) == Some(BlockKind::CarvedPumpkin) {
+            if !self.end_portal.carved_noted {
+                self.end_portal.carved_noted = true;
+                self.note(
+                    tick,
+                    format!("pumpkin carved at {c:?}"),
+                    format!(
+                        "after {} shears' uses; {}",
+                        self.end_portal.pumpkin_uses,
+                        pumpkin_line(w)
+                    ),
+                );
+            }
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("end kit: dig the carved pumpkin at {c:?}"),
+                format!("from {feet:?}; {}", pumpkin_line(w)),
+            );
+            return Some(Task::ToLog(Walk::to_dig(c, tick)));
+        }
+        // Shears first, from the iron held: never a trip for iron.
+        if craft::count(w, ItemKind::Shears) == 0 {
+            let iron = craft::count(w, ItemKind::IronIngot) + craft::count(w, ItemKind::RawIron);
+            if iron < 2 {
+                self.pumpkin_give_up(w, &format!("{iron} iron held, the shears want 2"), tick);
+                return None;
+            }
+            return match self.kit_row_step(w, r, &shears_row(), tick) {
+                RowStep::Task(t) => Some(t.unwrap_or(Task::Idle)),
+                RowStep::Over(why) => {
+                    if craft::count(w, ItemKind::Shears) == 0 {
+                        self.pumpkin_give_up(w, &format!("no shears ({why})"), tick);
+                        return None;
+                    }
+                    Some(Task::Idle)
+                }
+            };
+        }
+        if self.end_portal.pumpkin_uses >= r.pumpkin_tries
+            || self.end_portal.pumpkin_walks >= r.pumpkin_walks
+        {
+            self.note(
+                tick,
+                format!("end kit: the pumpkin at {c:?} refused"),
+                format!(
+                    "{} uses, {} walks",
+                    self.end_portal.pumpkin_uses, self.end_portal.pumpkin_walks
+                ),
+            );
+            self.refuse(c, tick);
+            self.end_portal.pumpkin_at = None;
+            return Some(Task::Idle);
+        }
+        let eye = [body.pos[0], body.pos[1] + physics::EYE_HEIGHT, body.pos[2]];
+        // In reach: the shears on its open face nearest the eye (the server takes a UseOn within
+        // the block interaction range, `frame_reach`).
+        if let Some((face, d)) = open_faces(w, c, eye).first().copied()
+            && d <= r.frame_reach
+        {
+            if self.end_portal.pumpkin_uses > 0
+                && tick < self.end_portal.pumpkin_used_at + r.eye_every
+            {
+                return Some(Task::Idle);
+            }
+            if w.window.is_some() || w.click.is_some() || !self.acts.is_empty() {
+                return Some(Task::Idle);
+            }
+            return match crate::hold::toward(w, ItemKind::Shears) {
+                crate::hold::Hold::Held => {
+                    self.acts.push(Act::UseOn {
+                        pos: BlockPos::new(c.0, c.1, c.2),
+                        face,
+                    });
+                    self.end_portal.pumpkin_uses += 1;
+                    self.end_portal.pumpkin_used_at = tick;
+                    self.note(
+                        tick,
+                        format!("end kit: shears on the pumpkin at {c:?}"),
+                        format!(
+                            "face {face}, {d:.1} from the eye; use {} of {}",
+                            self.end_portal.pumpkin_uses, r.pumpkin_tries
+                        ),
+                    );
+                    self.retry_at = tick + r.eye_every;
+                    Some(Task::Idle)
+                }
+                crate::hold::Hold::Act(a) => {
+                    self.acts.push(a);
+                    Some(Task::Idle)
+                }
+                crate::hold::Hold::Wait => Some(Task::Idle),
+                crate::hold::Hold::Missing => {
+                    self.pumpkin_give_up(w, "the shears not in the inventory", tick);
+                    None
+                }
+            };
+        }
+        // Out of reach: a walk to beside it.
+        self.end_portal.pumpkin_walks += 1;
+        let mut walk = Walk::to_dig(c, tick);
+        if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
+            self.walks += 1;
+            self.note(
+                tick,
+                format!("end kit: walk to the pumpkin at {c:?}"),
+                format!(
+                    "from {feet:?}, {:.0} off; walk {} of {}",
+                    flat(c, feet),
+                    self.end_portal.pumpkin_walks,
+                    r.pumpkin_walks
+                ),
+            );
+            return Some(Task::Explore(walk));
+        }
+        self.expanded += walk.expanded;
+        self.note(
+            tick,
+            format!("end kit: no walk to the pumpkin at {c:?}"),
+            format!("from {feet:?}, route {:?}", walk.route),
+        );
+        self.refuse(c, tick);
+        self.end_portal.pumpkin_at = None;
+        Some(Task::Idle)
+    }
+
+    /// No pumpkin seen: the overland's legs to the next look point (`pumpkin_points`, else the
+    /// bow's); over (noted) when the points are spent.
+    fn pumpkin_look(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
+        let points = if r.pumpkin_points.is_empty() {
+            &r.bow_points
+        } else {
+            &r.pumpkin_points
+        };
+        let Some(p) = points.get(self.end_portal.pumpkin_point).copied() else {
+            let n = points.len();
+            self.pumpkin_give_up(w, &format!("none seen at {n} look points"), tick);
+            return None;
+        };
+        let body = w.body?;
+        let p = [f64::from(p[0]), f64::from(p[1])];
+        let dd = (p[0] - body.pos[0]).hypot(p[1] - body.pos[2]);
+        if dd <= r.point_reach
+            || self.overland.arrived
+            || self.end_portal.pumpkin_looks >= r.look_walks
+        {
+            self.end_portal.pumpkin_point += 1;
+            self.end_portal.pumpkin_looks = 0;
+            self.overland.arrived = false;
+            self.note(
+                tick,
+                format!(
+                    "end kit: pumpkin look point {} reached, none seen",
+                    self.end_portal.pumpkin_point - 1
+                ),
+                format!("{dd:.0} off; on to the next"),
+            );
+            self.retry_at = tick + crate::RETRY_TICKS;
+            return Some(Task::Idle);
+        }
+        if self
+            .overland
+            .fix
+            .is_none_or(|(q, _)| (q[0] - p[0]).hypot(q[1] - p[1]) > 4.0)
+        {
+            self.overland.retarget((p, 0.0), true);
+            self.end_portal.pumpkin_looks += 1;
+            self.note(
+                tick,
+                format!(
+                    "end kit: legs toward pumpkin look point {}",
+                    self.end_portal.pumpkin_point
+                ),
+                format!("({:.0}, {:.0}), {dd:.0} off", p[0], p[1]),
+            );
+        }
+        self.end_portal.wood_legs = true;
+        let t = self.overland_task(w, tick);
+        self.end_portal.wood_legs = false;
+        if let Some(t) = t {
+            return Some(t);
+        }
+        self.overland.arrived = true;
+        Some(Task::Idle)
+    }
+    // <<< pumpkin
+
     /// Out of the hut: a wall cell beside the feet dug (the head's first), toward `toward` when
     /// given; `None` once a side is open at the feet and the head, or no hut was built.
     fn end_hut_exit(&mut self, w: &World, toward: Option<Cell>, tick: u64) -> Option<Task> {
@@ -1698,10 +2339,15 @@ impl Plan {
     /// table at hand), a placing, a smelt at the furnace at hand, or a log gathered.
     fn end_kit_row(&mut self, w: &World, r: &EndKitRules, tick: u64) -> Option<Task> {
         let table = self.table.clone()?;
-        let Some(row) = table.until("end-kit").cloned() else {
+        let Some(mut row) = table.until("end-kit").cloned() else {
             self.end_kit_advance(w, tick, "no end-kit row in the goal table");
             return None;
         };
+        // >>> pumpkin (issue 80): the shears' 2 ingots kept ahead of the boots.
+        if r.pumpkin && r.shears_first {
+            row = shears_first(&row);
+        }
+        // <<< pumpkin
         match self.kit_row_step(w, r, &row, tick) {
             RowStep::Task(t) => t,
             RowStep::Over(why) => {

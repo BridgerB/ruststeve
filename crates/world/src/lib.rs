@@ -195,6 +195,13 @@ pub struct Hurt {
     pub damage_type: String,
     /// The bot was the cause (its swing or its arrow).
     pub by_bot: bool,
+    // >>> pumpkin (issue 80)
+    /// The entity that caused it (the packet's source cause, else its direct source), `None`
+    /// for a hurt with no entity (water, a fall): only one with an entity sets an enderman's
+    /// hurt-by target (`LivingEntity.hurtServer`, probe 46160185304).
+    #[serde(default)]
+    pub cause: Option<i32>,
+    // <<< pumpkin
 }
 
 impl Entity {
@@ -1889,6 +1896,7 @@ impl World {
                             at_tick: tick,
                             damage_type,
                             by_bot,
+                            cause: (*cause).or(*direct), // pumpkin (issue 80)
                         });
                         let over = e.hurts.len().saturating_sub(ENTITY_HURTS_KEPT);
                         e.hurts.drain(..over);
