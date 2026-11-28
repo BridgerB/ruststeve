@@ -5,7 +5,7 @@ type: reference
 tags: [plan, path, astar, routes, core]
 aliases: [path, pathfinder, A*, route, waypoints, Cells, classify, awkward, moves, goals, Near, Afar, budget, expansions, start_cell]
 status: verified
-lastUpdated: 2026-11-27
+lastUpdated: 2026-11-28
 verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/path.rs#pub fn classify(state: Option<u32>) -> Class {"
@@ -53,6 +53,9 @@ Issue 09a: clojurecraft's `path.clj` in Rust (`plan::path`), constant for consta
 - **Blocked cells** (`Cells::blocking`): a search never enters them. The heading gives its cut cells at or behind the feet, so a leg never walks back over ground it covered (clojurecraft's causeway pacing).
 - **Bridges over water** (issue 19e, `Cells::far_over_water`, `walk::More::water`): an overland leg's far search may lay held blocks over water (a river) in the overworld, with its keep; every other search still never lays into water.
 - **A keep for bridging** (`Cells::far_keeping`): a far search bridges only with that many blocks held; the heading keeps 32, the fortress walk `BRIDGE_RESERVE` 16. `plan_over` searches cells the caller made.
+
+## Issue 56: `Goal::Reach`
+- **`Goal::Reach { pos, range, rise }`**: `Near`, and `pos` at most `rise` over the feet (`path::reach_rise`, which the reach walk's arrival reads too). A walk to within reach of a block routes to it, so its route never ends under a block too high to arrive at ([[walk-and-watchdog]]).
 
 ## See also
 - [[walk-and-watchdog]] - following a route.

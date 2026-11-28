@@ -900,11 +900,11 @@ mod tests {
         }
     }
 
-    /// A walk to within reach of a block 3 over the floor: the route's goal (`Near`, height in
-    /// its range) takes the cell under it, the arrival (`PICKUP_RISE` 2) never would; that end
-    /// is refused and the route goes up the step beside it instead.
+    /// A walk to within reach of a block 3 over the floor: the cell under it is in `Near`'s
+    /// range (height counted) but not the arrival's (`PICKUP_RISE` 2). The reach walk's goal is
+    /// the arrival's rule, so its route never ends there: it goes up the step beside it.
     #[test]
-    fn a_route_end_the_arrival_refuses_is_planned_again() {
+    fn a_reach_walks_route_never_ends_where_it_cannot_arrive() {
         let mut w = flat();
         put(&mut w, (1, 64, 10), BlockKind::Stone);
         for y in 65..=68 {
@@ -920,13 +920,8 @@ mod tests {
         assert!(walk.route_now(&w, 0));
         let end = walk.waypoints.as_ref().and_then(|v| v.last().copied());
         assert_eq!(end, Some((1, 65, 10)), "{:?}", walk.waypoints);
-        assert!(walk.more.blocked.contains(&(0, 64, 10)));
-        assert!(
-            walk.more
-                .said
-                .iter()
-                .any(|(w, _)| w.starts_with("walk: route end"))
-        );
+        assert!(walk.more.said.is_empty(), "{:?}", walk.more.said);
+        assert!(walk.goal.done((1, 65, 10)) && !walk.goal.done((0, 64, 10)));
     }
 
     /// The constants are config/sprint.toml's `[policy]` (and its `[exhaustion]`, which they

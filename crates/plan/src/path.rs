@@ -739,6 +739,18 @@ pub enum Goal {
     /// far point ends where the ground there is, not at the height it began; race 45535712274
     /// lane 0's legs at y 86 in the basalt deltas had no walk and tunnelled 84 pickaxe uses).
     Plane { pos: Cell, range: f64 },
+    /// Within `range` of `pos` as `Near`, with `pos` at most `rise` over the feet
+    /// (`reach_rise`): a walk to within reach of a block, whose arrival asks the same
+    /// (`walk::Arrive::Reach`), so its route never ends where it cannot arrive (issue 56: a
+    /// route under a log 3 up ended at a cell the arrival refused, and the walk turned on the
+    /// spot until NoProgress).
+    Reach { pos: Cell, range: f64, rise: i32 },
+}
+
+/// Is a block at height `pos_y` within `rise` over feet at `feet_y`? The one rule a reach walk's
+/// route goal (`Goal::Reach`) and its arrival (`walk::Arrive::Reach`) both read.
+pub fn reach_rise(feet_y: i32, pos_y: i32, rise: i32) -> bool {
+    pos_y - feet_y <= rise
 }
 
 /// A cell's projection on a compass heading from `from`, and how far aside of the axis it is.
@@ -768,6 +780,9 @@ impl Goal {
             Goal::Away { pos, range } => flat_distance(node, pos) > range,
             Goal::Afar { pos, range } => octile(node, pos) > range,
             Goal::Plane { pos, range } => octile(node, pos) <= range,
+            Goal::Reach { pos, range, rise } => {
+                flat_distance(node, pos) <= range && reach_rise(node.1, pos.1, rise)
+            }
             Goal::Pickup { pos, range, rise } => {
                 octile(node, pos) <= range && node.1 <= pos.1 && pos.1 <= node.1 + rise
             }
@@ -786,6 +801,10 @@ impl Goal {
             Goal::Away { pos, range } => (range - flat_distance(node, pos)).max(0.0),
             Goal::Afar { pos, range } => (range - octile(node, pos)).max(0.0),
             Goal::Plane { pos, range } => (octile(node, pos) - range).max(0.0),
+            Goal::Reach { pos, range, rise } => {
+                (flat_distance(node, pos) - range).max(0.0)
+                    + f64::from((pos.1 - node.1 - rise).max(0))
+            }
             Goal::Pickup { pos, range, rise } => {
                 let up = if pos.1 < node.1 {
                     node.1 - pos.1

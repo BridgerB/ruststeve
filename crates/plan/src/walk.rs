@@ -25,9 +25,6 @@ pub const GOAL_RANGE: f64 = 3.0;
 pub const REACH: f64 = 4.0;
 /// A log is reached only from no more than this far below it (`pickup-rise`).
 pub const PICKUP_RISE: i32 = 2;
-/// Route ends a walk to within reach refuses (each under its block too high for the arrival)
-/// before it walks the route it has: the cells round a block's foot at one height are a few.
-pub const END_REFUSALS: u32 = 4;
 /// The progress invariant: no gain toward the target for this many ticks fails the walk
 /// (brain/ruststeve/design/progress-invariants.md). Ten game seconds, well under the issue's
 /// "no walk 60 game seconds without progress".
@@ -361,9 +358,10 @@ impl Walk {
     pub fn to_block(target: Cell, tick: u64) -> Self {
         Self::new(
             target,
-            Goal::Near {
+            Goal::Reach {
                 pos: target,
                 range: GOAL_RANGE,
+                rise: PICKUP_RISE,
             },
             Arrive::Reach,
             tick,
@@ -378,7 +376,7 @@ impl Walk {
                 let d =
                     ((eye[0] - c[0]).powi(2) + (eye[1] - c[1]).powi(2) + (eye[2] - c[2]).powi(2))
                         .sqrt();
-                d <= REACH && self.target.1 - pos[1].floor() as i32 <= PICKUP_RISE
+                d <= REACH && path::reach_rise(pos[1].floor() as i32, self.target.1, PICKUP_RISE)
             }
             Arrive::Goal => self.goal.done(path::stand_cell(w, pos)),
         }
@@ -429,43 +427,27 @@ impl Walk {
         } else {
             (Budget::Far.expansions(), 1.0)
         };
-        // A walk to within reach ends only where its arrival holds: a route's goal counts height
-        // in its range (`Goal::Near`), the arrival allows the block at most `PICKUP_RISE` over the
-        // feet. A found route that ends under a block too high (a log 3 over a cell beside its
-        // trunk) is planned again with that end refused, at most `END_REFUSALS` times (issue 56:
-        // the planner test's walk sprinted to (189, 72, 24) under the log at (189, 75, 24), walked
-        // out its route there, and turned on the spot until NoProgress, three times).
-        let mut refusals = 0;
-        let r = loop {
-            // The cells it never enters are read by its searches only (a route's waypoints are
-            // checked every tick, and a heading's cut set runs to thousands of cells).
-            let cells = if self.more.blocked.is_empty() {
-                self.cells(w)
-            } else {
-                self.cells(w).blocking(self.more.blocked.clone())
-            };
-            let r = path::plan_over(cells, path::feet_cell(pos), &self.goal, nodes, weight);
-            self.expanded += u64::from(r.expanded);
-            let too_low =
-                r.waypoints.last().copied().filter(|end| {
-                    self.arrive == Arrive::Reach && self.target.1 - end.1 > PICKUP_RISE
-                });
-            match too_low {
-                Some(end) if r.status == Status::Found && refusals < END_REFUSALS => {
-                    refusals += 1;
-                    self.more.blocked.insert(end);
-                    self.more.said.push((
-                        format!("walk: route end {end:?} refused"),
-                        format!(
-                            "{:?} is {} over it, the arrival allows {PICKUP_RISE}; planned again ({refusals} of {END_REFUSALS})",
-                            self.target,
-                            self.target.1 - end.1
-                        ),
-                    ));
-                }
-                Some(_) | None => break r,
-            }
+        // The cells it never enters are read by its searches only (a route's waypoints are
+        // checked every tick, and a heading's cut set runs to thousands of cells).
+        let cells = if self.more.blocked.is_empty() {
+            self.cells(w)
+        } else {
+            self.cells(w).blocking(self.more.blocked.clone())
         };
+        let r = path::plan_over(cells, path::feet_cell(pos), &self.goal, nodes, weight);
+        self.expanded += u64::from(r.expanded);
+        // A reach walk's goal is its arrival's rule (`Goal::Reach`): a found route that ends
+        // where the arrival cannot hold is a bug of the goal, said if it ever comes.
+        if self.arrive == Arrive::Reach
+            && r.status == Status::Found
+            && let Some(end) = r.waypoints.last()
+            && !path::reach_rise(end.1, self.target.1, PICKUP_RISE)
+        {
+            self.more.said.push((
+                format!("walk: route end {end:?} under its block"),
+                format!("{:?} more than {PICKUP_RISE} over it", self.target),
+            ));
+        }
         self.waypoints = Some(r.waypoints);
         self.more.kinds = r.kinds;
         self.more.from = r.from;
