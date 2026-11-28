@@ -1084,7 +1084,7 @@ pub fn run(opts: Opts) -> Result<Outcome, String> {
     // words left out show as an ellipsis, so the case's `doing:` line does not read as cut off
     // ("stairs down toward the fortress at" was); the numbers themselves are in the story's
     // last lines, and with them every run would be a signature of its own.
-    if let Some(e) = planner.as_ref().and_then(|p| p.events.last()) {
+    if let Some(e) = planner.as_ref().and_then(|p| p.last_task_event()) {
         doing = Doing {
             task: kind_shown(&e.what),
             why: kind_shown(&e.why),

@@ -48,6 +48,17 @@ pub const CLEAR_BLOCKS: f64 = 3.0;
 /// 20, 40, 80, 160 ticks).
 pub const MAX_DOUBLINGS: u32 = 3;
 
+/// Every pace note's `what` begins with this ("sprint begun, walk", "sprint refused, lava",
+/// "sprint restarted, 2"). The notes are counted in the ledger, but they are about a task's
+/// pace, never the task: `Plan::last_task_event` and `Plan::why` skip them (race 46132613146:
+/// the endings table's "doing" read "sprint refused, stairs" for almost every run).
+pub const NOTE: &str = "sprint ";
+
+/// Is this event's `what` a pace note?
+pub fn is_note(what: &str) -> bool {
+    what.starts_with(NOTE)
+}
+
 /// The kind of move this tick, as the task in hand makes it: a closed set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pace {
@@ -413,7 +424,7 @@ impl Plan {
             self.pace.stopped_at = None;
             self.note(
                 tick,
-                format!("sprint restarted, {}", self.pace.restarts),
+                format!("{NOTE}restarted, {}", self.pace.restarts),
                 format!(
                     "{} ({}): {} stops in the task, the next hold {} ticks; at {:?}",
                     self.task.name(),
@@ -435,7 +446,7 @@ impl Plan {
                     self.pace.begun = true;
                     self.note(
                         tick,
-                        format!("sprint begun, {}", pace.words()),
+                        format!("{NOTE}begun, {}", pace.words()),
                         format!(
                             "{}: food {:?}, saturation {:?}, hungry_below {hungry_below}: budget {budget:.0} m, {left} left; {} sprint ticks in the run",
                             self.task.name(),
@@ -452,7 +463,7 @@ impl Plan {
                     self.pace.refused.push(r);
                     self.note(
                         tick,
-                        format!("sprint refused, {}", r.words()),
+                        format!("{NOTE}refused, {}", r.words()),
                         format!(
                             "{} ({}): food {:?}, saturation {:?}, hungry_below {hungry_below}: budget {budget:.0} m, {left} left; at {:?}",
                             self.task.name(),
@@ -834,6 +845,31 @@ mod tests {
             ]
         );
         assert_eq!(plan.pace.stops, 2);
+    }
+
+    /// After a pace note, what the bot is doing and why still name the task (race 46132613146).
+    #[test]
+    fn a_pace_note_never_reads_as_the_task() {
+        let w = flat();
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.note(
+            0,
+            "walk to log (0, 64, 40)".to_owned(),
+            "the nearest log".to_owned(),
+        );
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        assert!(plan.pace_gate(&w, ahead()).sprint);
+        assert!(plan.events.last().is_some_and(|e| is_note(&e.what)));
+        assert_eq!(
+            plan.last_task_event().map(|e| e.what.as_str()),
+            Some("walk to log (0, 64, 40)")
+        );
+        assert_eq!(plan.why(), "the nearest log");
     }
 
     /// The gate only ever writes `sprint`: every other key, the look and the pitch are the

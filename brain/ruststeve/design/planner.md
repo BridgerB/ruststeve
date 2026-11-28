@@ -84,6 +84,7 @@ The iron-kit race's walls (docs/problems/iron-kit.md) are answered here; each is
 
 ## Issue 56: the pace gate
 - `Plan::step` ends with `pace_gate` (`plan::sprint`), after `track` so its notes are never read as a task's reason: the sprint key as the policy answers ([[sprint]]), with its state in `Plan.pace`.
+- The pace notes (`sprint::is_note`, "sprint " first) stay in `events` and the ledger, but are never what the bot is doing: `Plan::last_task_event` and `Plan::why` skip them, and the case file's "doing" and the landings read `last_task_event` (race 46132613146: "doing" read "sprint refused, stairs" for almost every run).
 
 ## See also
 - [[phases-and-task-stack]] - the design this begins.
