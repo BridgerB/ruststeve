@@ -5,8 +5,8 @@ type: reference
 tags: [plan, stairs, mine, safety, underground]
 aliases: [Stairs, StairStage, refusal, Boxed, level step, STAIR_DEPTH, never dig under the feet, stairs-down, mine stone, exposed_near]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@201dfcf clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/stairs.rs#pub fn refusal(w: &World, cells: &[Cell], floor: Cell) -> Option<String> {"
   - "ruststeve:crates/plan/src/stairs.rs#fn plan(&mut self, feet: Cell, w: &World) -> Result<StairStage, StairsFailure> {"
@@ -19,6 +19,7 @@ related:
   - "[[mc-water]]"
   - "[[digging]]"
   - "[[goal-table-and-needs]]"
+  - "[[iron-search]]"
 ---
 
 # Stairs down
@@ -51,6 +52,9 @@ Issue 11b. The mine act (`mine-stone`) digs the nearest **exposed** block of its
 - **Short drops** (wall 17): a stair may land up to 3 below where it was cut (a cave under it); the step is done where the feet land, deeper refused.
 - **Falling blocks**: a cell with gravel or sand over it is refused (it falls on the bot).
 - Stair digs collect nothing: the stairs never stop for a drop.
+
+## A level tunnel walks its own tunnel (generality item B)
+- A level step at a face it may not cut turns a quarter inside the task, and an open cell is never refused, so a `Stairs::level` turns back into its own tunnel and walks it, six steps counted as six stairs and "done" (the "nothing cut and nowhere gone" test fails it only when it ends within a block of its start). In race 46130982111, 2,727 of 3,711 tunnels ended this way in under 100 ticks. The iron rows go round it in [[iron-search]] (a strip only into fresh rock, turned after two tunnels no further along); stairs.rs is unchanged.
 
 ## See also
 - [[mc-water]] - why water and lava are refused.

@@ -5,8 +5,8 @@ type: reference
 tags: [plan, mine, ore, vein, flint, gravel, stairs]
 aliases: [mine-coal, mine-iron, dig-gravel, flint-from-gravel, Redig, redig, depth, tunnel, Stairs::level, vein, chance drops, make room, NoRoom]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@201dfcf clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/redig.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>, RedigStatus) {"
   - "ruststeve:crates/plan/src/stairs.rs#pub fn level(dir: (i32, i32), tick: u64) -> Self {"
@@ -19,6 +19,7 @@ related:
   - "[[digging]]"
   - "[[placing]]"
   - "[[fuel-and-smelt-needs]]"
+  - "[[iron-search]]"
 ---
 
 # Veins and flint
@@ -40,4 +41,5 @@ Issue 13b.
 - Model: the kit from the `stone` kit (three iron as a vein, coal, stone by stairs, the furnace placed after a wall was dug); flint from thirty held gravel by re-digging.
 
 ## Limits
+- The iron rows (iron ore, deepslate iron ore) at their depth no longer take the level tunnel first: [[iron-search]] rises out of deepslate, seeks caves beyond view and cuts strips only into fresh rock (generality item B: the old tunnel walked its own tunnel again, 2,727 of 3,711 tunnels in race 46130982111 cutting nothing). Coal and gravel keep the tunnel.
 - The first race measured depth from where the planner began (spawn minus 16, about y 68): 8 of 56 bots found any iron (docs/problems/iron-kit.md wall 1).

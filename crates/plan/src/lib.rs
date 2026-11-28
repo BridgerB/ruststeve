@@ -52,6 +52,9 @@ pub mod fortress_way;
 // <<< Q11
 pub mod hold;
 pub mod hunt;
+// >>> iron search (gen)
+pub mod iron;
+// <<< iron search (gen)
 pub mod ledger;
 pub mod look;
 pub mod make;
@@ -946,6 +949,11 @@ pub struct Plan {
     #[serde(default)]
     pub bow: bow::BowState,
     // <<< E8
+    // >>> iron search (gen): the strip, the caves taken and the counts
+    // (docs/problems/iron-search.md).
+    #[serde(default)]
+    pub iron: iron::IronSearch,
+    // <<< iron search (gen)
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1094,6 +1102,9 @@ impl Plan {
             // >>> E8
             bow: bow::BowState::default(),
             // <<< E8
+            // >>> iron search (gen)
+            iron: iron::IronSearch::default(),
+            // <<< iron search (gen)
             acts: Vec::new(),
         }
     }
@@ -5024,6 +5035,15 @@ impl Plan {
         // At the row's depth, the lowest feet height its stairs go to (clojurecraft's
         // `:goal/depth`), tunnel along instead (issue 13b; docs/problems/iron-kit.md wall 1).
         let deep = depth.is_some_and(|d| w.body.is_some_and(|b| b.pos[1] <= f64::from(d)));
+        // >>> iron search (gen): an iron row at its depth searches before the old tunnel, which
+        // walked its own tunnel again (docs/problems/iron-search.md).
+        if deep
+            && iron::is_iron_row(blocks)
+            && let Some(t) = self.iron_search(w, dir, depth, tick)
+        {
+            return t;
+        }
+        // <<< iron search (gen)
         if deep {
             self.note(
                 tick,

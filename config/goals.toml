@@ -1148,3 +1148,34 @@ bow_radius = 48.0
 # the wood points went to 190 off and the way back was lost (race 46060386538).
 bow_points = [[1608, -92], [1668, -32], [1608, 28], [1548, -32], [1608, -132], [1708, -32], [1608, 68], [1508, -32]]
 # <<< E8
+
+# >>> iron search (gen, docs/problems/iron-search.md): an iron row at its depth with no exposed
+# iron in sight (plan::iron). The old level tunnel walked its own tunnel again: 2,727 of 3,711
+# "cut 6 stairs" tunnels of race 46130982111 ended in under 100 ticks with nothing dug.
+[iron]
+# Under y 0 the rock is deepslate (hardness 3 against stone's 1.5: twice the dig) and the middle
+# band (y -24 to 56, peak 16) thins to nothing at -24; race 46130982111's bots ended at y -53 to
+# 15, median about -23. Feet under this cut stairs up.
+rise_below = 0
+# exposed_near's SEARCH_RADIUS (24): a strip this long has its start out of view of its end.
+strip_len = 24
+# Two tunnels in a row no further along: rs-l00-b00 of race 46130982111 ran 343 tunnels that cut
+# nothing, back and forth in one corridor.
+strip_stalls = 2
+# Half a tunnel task (STAIR_DEPTH 6): the rock a tunnel would cut first.
+fresh_ahead = 3
+# exposed_near's SEARCH_RADIUS (24): a nearer cave's walls are already read for ore.
+cave_from = 24
+# Twice that, well inside the server's view distance (8 chunks, 128 blocks).
+cave_reach = 48
+# Iron's middle band in 26.x (docs/problems/iron-kit.md wall 1); under -54 caves are lava.
+cave_low = -24
+cave_high = 56
+# A cave within this of one taken is the same cave (a cave system's rooms are tens of blocks).
+cave_apart = 16
+# Ticks between cave searches: one search reads up to about 60,000 cells (exposed_near's whole
+# radius cost 0.4 s in one tick before its rings stopped early).
+cave_every = 200
+# Dig-toward tasks of six steps on one cave with no route: 8 × 6 = 48, the reach.
+cave_cuts = 8
+# <<< iron search (gen)
