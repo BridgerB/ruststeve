@@ -5,8 +5,8 @@ type: decision
 tags: [decision, roadmap, snapshots, frontier, done-conditions]
 aliases: [one bot first, win once, the frontier, snapshot and resume, no rates until the win]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@25a0729
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/results/src/snapshot.rs#pub fn offline_uuid(name: &str) -> String {"
 related:
@@ -33,8 +33,8 @@ Bridger, 2026-11-19: "the goal is 1 bot ... 1 full end to end bot that goes from
 - A stage passed one time in twenty is enough when the next attempt starts right before it: the runners work the frontier instead of replaying the opening.
 
 ## How
-- **Capture**: `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor: `save-all flush` over RCON, the server's `world/` copied, the bot's memory and `snap.toml` (stage, bot, offline UUID, server ticks, run and lane, position, dimension, commit, and the items held by name). Races and the marathon publish each as `snapshot-<stage>-<run>-<lane>.tar.zst`.
-- **Resume**: `race.yml` `snapshot=frontier` (or `<tag>/<asset>`) restores that world before the server starts, gives every bot the snapshot bot's player file under its own offline UUID (`results offline-uuid`), and seeds each bot's memory (`--memory`). The `snapshot` start gives nothing more.
+- **Capture**: `race` takes a snapshot the first time any bot in a lane reaches a stage above the lane's floor: `save-all flush` over RCON, the server's `world/` copied, the bot's memory, the planner's eyes-of-ender state (`eyes.rsw`, issue 19c: the lines thrown and the fix) and `snap.toml` (stage, bot, offline UUID, server ticks, run and lane, position, dimension, commit, and the items held by name). Races and the marathon publish each as `snapshot-<stage>-<run>-<lane>.tar.zst`.
+- **Resume**: `race.yml` `snapshot=frontier` (or `<tag>/<asset>`) restores that world before the server starts, gives every bot the snapshot bot's player file under its own offline UUID (`results offline-uuid`), and seeds each bot's memory (`--memory`) and eyes state (`eyes.rsw`; a snapshot without one, or one that cannot be read, resumes with none). The `snapshot` start gives nothing more.
 - **Reading one** (issue 19a, on a runner): `results memory <memory.rsw> [kind]...` prints what the bot remembers by dimension and kind (every portal and obsidian cell, every sighting of the kinds named); `results region-find` and `results region-strip` read the saved world's region files (a block's cells, column tops and biomes) as development knowledge, never a bot input.
 - **The frontier** moves by a commit to `config/frontier.toml` each time a bot first passes a stage.
 - **The marathon** stays end to end from spawn on the latest main: the proof the whole chain runs.

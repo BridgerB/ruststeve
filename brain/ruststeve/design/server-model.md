@@ -5,8 +5,8 @@ type: reference
 tags: [sim, model, server, body, closed-loop]
 aliases: [air supply, drowning, fire, lava, hunger, eating, melee, Life, summon, sim crate, Sim, server model, survival, digging model, item entities, window 0 model, delayed destroy, model body, In, Wire, ModelWorld, flat_world, S2c encode, NotModelled, movement check, moved wrongly, moved too quickly, fall damage, lockstep, generated worlds, sim terrain, 1000 worlds, nether_world, Stage, Wall, Nether stage, magma, hot_floor, fast lava, setblock, enderman, endermen, stare, simulation distance, frozen mobs, ticking, biome palette, warped forest, natural spawning, eye of ender, stronghold, with_stronghold, eye flight, the End, EndStage, end crystal, crystal blast, seen_percent, cage, ender dragon, summon_dragon, exit portal, win_game, credits]
 status: verified
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@83dba95 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/eye.rs#pub fn eye_step(e: &mut Eye) {"
   - "ruststeve:crates/sim/src/lib.rs#pub fn step(&mut self, input: &In) -> Result<Vec<Wire>, EncodeError> {"

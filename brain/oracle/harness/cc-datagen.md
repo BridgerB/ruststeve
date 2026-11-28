@@ -5,8 +5,8 @@ type: reference
 tags: [oracle, datagen, tables, registry]
 aliases: [bb datagen, resources/clojurecraft, blocks.edn, recipes.edn, hardness.edn, generated data]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@ddae609
+lastUpdated: 2026-11-27
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@a5a7aa4
 sourceRefs:
   - "clojurecraft:bb.edn#datagen {:doc \"Regenerate the EDN tables in resources/clojurecraft/ from the server jar\""
   - "clojurecraft:src/clojurecraft/blocks.clj#\"Block-state, item and entity-type tables generated from the vanilla reports, and the hardness,"
