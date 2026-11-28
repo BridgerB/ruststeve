@@ -1261,6 +1261,34 @@ ticks = 400
 give = ["furnace 1", "raw_iron 2", "coal 1"]
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
+# Issue 77's chest rows (`chest:<in>:<out>`, brain/ruststeve/design/chests.md): a given chest
+# placed east of the feet on laid stone, air over it (a full block over a chest stops it opening),
+# and opened. Then `in` shift-clicks of the first inventory slot holding anything (two stacks of
+# 64 cobblestone, one of 10, 3 string: the four given after the chest), then `out` of the first
+# chest slot holding anything, then the window closed. c00-half fetches back only the chest's first
+# two slots: the two 64s when the server fills the chest from slot 0 and keeps the 10 apart
+# (`ChestMenu.quickMoveStack`). c00-round fetches all four back.
+
+[[moment]]
+id = "c00-half"
+landing = 0
+dx = 20
+dz = 0
+script = "chest:4:2"
+ticks = 200
+give = ["chest 1", "cobblestone 64", "cobblestone 64", "cobblestone 10", "string 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
+[[moment]]
+id = "c00-round"
+landing = 0
+dx = -20
+dz = 0
+script = "chest:4:4"
+ticks = 200
+give = ["chest 1", "cobblestone 64", "cobblestone 64", "cobblestone 10", "string 3"]
+set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
+
 # Issue 14a: buckets along the look and fluids (brain/ruststeve/design/buckets-and-fluids.md), five rows a
 # landing on 0 to 2, each facing east (yaw -90) from the start's eye: a water source in a stone pit
 # scooped; water poured on stone; lava poured low against a hole's back wall; water poured against
