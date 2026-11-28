@@ -1265,12 +1265,12 @@ set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 # placed east of the feet on laid stone, air over it (a full block over a chest stops it opening),
 # and opened. Then `in` shift-clicks of the first inventory slot holding anything (two stacks of
 # 64 cobblestone, one of 10, 3 string: the four given after the chest), then `out` of the first
-# chest slot holding anything, then the window closed. c00-half fetches back only the chest's first
+# chest slot holding anything, then the window closed. k00-half fetches back only the chest's first
 # two slots: the two 64s when the server fills the chest from slot 0 and keeps the 10 apart
-# (`ChestMenu.quickMoveStack`). c00-round fetches all four back.
+# (`ChestMenu.quickMoveStack`). k00-round fetches all four back.
 
 [[moment]]
-id = "c00-half"
+id = "k00-half"
 landing = 0
 dx = 20
 dz = 0
@@ -1280,7 +1280,7 @@ give = ["chest 1", "cobblestone 64", "cobblestone 64", "cobblestone 10", "string
 set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 
 [[moment]]
-id = "c00-round"
+id = "k00-round"
 landing = 0
 dx = -20
 dz = 0
