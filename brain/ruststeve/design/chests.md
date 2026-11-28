@@ -22,6 +22,7 @@ sourceRefs:
   - "ruststeve:config/goals.toml#id = \"home-chest\""
   - "ruststeve:crates/plan/tests/stash_planner.rs#fn before_the_nether_the_home_chest_is_made_and_the_surplus_for_the_leg_stashed_then_fetched()"
   - "ruststeve:config/moments.toml#id = \"k00-half\""
+  - "ruststeve:crates/results/src/parity_notes.rs#pub fn check(moments: &[Moment], results: &[MomentResult]) -> Vec<String> {"
 related:
   - "[[keep-rule]]"
   - "[[ruststeve/design/_moc|Design]]"
@@ -94,6 +95,8 @@ The evidence run is parity run 46128707215 (831dbe72, `only=k0 tolerance=3`), on
 - the stash: `chest opened ... it shows nothing`, `stash moved 64 cobblestone by slot 55`, `stash moved 10 cobblestone by slot 57` (the other 64 kept), `stash moved 3 string by slot 58`, `chest closed ... 74 of 74 cobblestone, 3 of 3 string; it shows 74 cobblestone, 3 string`;
 - the fetch: `chest opened ... it shows 74 cobblestone, 3 string`, `fetch moved 64 cobblestone by slot 0`, `fetch moved 10 cobblestone by slot 1`, `fetch moved 3 string by slot 2`, `chest closed ... it shows nothing`;
 - `chest trip met (1 stashes and 1 fetches ended)` at tick 44. The aim met, the planner row ends (`Ending::Cap` on `p.finished()`): the run ended about 60 server ticks in, not at its 600-tick cap.
+
+**The path, not only the end** (`crates/results/src/parity_notes.rs`). A row's `notes` is a list of `[substring, count]` pairs: each ledger substring must fire exactly that many times in the real bot's planner notes and in the model's. `k01-task` asks for `stash done`, `fetch done` and `chest trip met`, once each. Every `MomentResult` now carries its planner notes in a new field, `notes` (each note's `what`, in order). The real side's come from the run's ledger and the model's from `Plan::events_since` each tick, so neither side is capped. A count that differs on either side is a miss. `moments compare` prints the misses under the table, and any miss fails the table. A bot that only put the chest down ends with the same counts as a full trip, but it would miss all three notes.
 
 ## Limits
 - The chest rows and the task row agree with the real server (parity 46128707215). A double chest, a chest across a dimension change, and the planner's own triggers in a race are not yet run on one.

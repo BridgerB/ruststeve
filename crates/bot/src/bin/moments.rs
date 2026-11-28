@@ -1199,6 +1199,7 @@ fn real_waves(
                         .teleports_at_script
                         .map_or(0, |t| o.world.session.teleports.saturating_sub(t)),
                     ending: o.ending.name().to_owned(),
+                    notes: ledger_notes(&o.ledger),
                     final_pos: o.world.body.map(|b| b.pos),
                 },
                 Ok(Err(e)) => MomentResult {
@@ -1208,6 +1209,7 @@ fn real_waves(
                     outcome: None,
                     corrections: 0,
                     ending: format!("never connected: {e}"),
+                    notes: Vec::new(),
                     final_pos: None,
                 },
                 Err(_) => return Err("a bot thread panicked".to_owned()),
@@ -1343,6 +1345,8 @@ fn sim(a: &Args) -> Result<(), String> {
         let mut trace = Vec::new();
         let mut tracks = tracks_of(&mob_spots(start, m));
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
+        // Every planner note, for the row's `notes` (issue 77): the plan keeps only its last 64.
+        let (mut notes, mut notes_seen) = (Vec::new(), 0);
         let run = bot::lockstep::run_acting(
             model,
             &format!("rs-m{i:02}"),
@@ -1363,6 +1367,8 @@ fn sim(a: &Args) -> Result<(), String> {
                 let (c, acts) = match (&mut planner, script) {
                     (Some(p), _) => {
                         let c = p.step(w);
+                        notes.extend(p.events_since(notes_seen).iter().map(|e| e.what.clone()));
+                        notes_seen = p.event_count;
                         (c, p.take_acts())
                     }
                     (None, Some(s)) => (s.steer(t, w), s.acts(t, w)),
@@ -1419,12 +1425,27 @@ fn sim(a: &Args) -> Result<(), String> {
                 .teleports_at_script
                 .map_or(0, |t| run.world.session.teleports.saturating_sub(t)),
             ending: if run.died { "death" } else { "cap" }.to_owned(),
+            notes,
             final_pos: run.world.body.map(|b| b.pos),
         };
         save(&a.out, &r)?;
     }
     println!("moments sim: {} moments", moments.moment.len());
     Ok(())
+}
+
+/// The planner's notes of a run's ledger, in order (`what` only).
+fn ledger_notes(ledger: &[plan::TaskRecord]) -> Vec<String> {
+    ledger
+        .iter()
+        .filter_map(|r| {
+            if let plan::TaskRecord::Note { what, .. } = r {
+                Some(what.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn read_dir(dir: &Path) -> Result<Vec<MomentResult>, String> {
@@ -1449,7 +1470,21 @@ fn compare_cmd(a: &Args) -> Result<bool, String> {
         &read_dir(Path::new(real_dir))?,
         &read_dir(Path::new(sim_dir))?,
     );
-    let (text, pass) = render(&rows, a.tolerance);
+    let (mut text, pass) = render(&rows, a.tolerance);
+    // A row's `notes` (issue 77): each ledger line fired as often as asked, on both sides.
+    let asked = Moments::read(&a.moments)?.moment;
+    let all: Vec<MomentResult> = [real_dir, sim_dir]
+        .iter()
+        .map(|d| read_dir(Path::new(d)))
+        .collect::<Result<Vec<_>, _>>()?
+        .concat();
+    let misses = results::parity_notes::check(&asked, &all);
+    let with = asked
+        .iter()
+        .filter(|m| !m.notes.is_empty() && all.iter().any(|r| r.moment == m.id))
+        .count();
+    text.push_str(&results::parity_notes::render(&misses, with));
+    let pass = pass && misses.is_empty();
     print!("{text}");
     if let Some(p) = &a.report {
         std::fs::write(p, &text).map_err(|e| e.to_string())?;

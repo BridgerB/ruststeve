@@ -1292,7 +1292,8 @@ set = [["stone", 1, -1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0]]
 # Issue 77's task row (`plan:chest-trip`, the planner's development aim, 77-stash): the held chest
 # put down by the planner's Place task on a laid 5x5 stone floor with air over it, then its Stash
 # task (74 cobblestone, the 64 and the 10, never the other 64, and 3 string) and its Fetch task
-# back; met when the fetch ends. The outcome's counts are the whole kit back but the chest.
+# back; met when the fetch ends. The outcome's counts are the whole kit back but the chest;
+# `notes` asks the path: the stash's close, the fetch's close and the aim met, once each.
 
 [[moment]]
 id = "k01-task"
@@ -1301,6 +1302,7 @@ dx = 20
 dz = 20
 script = "plan:chest-trip"
 ticks = 600
+notes = [["stash done", 1], ["fetch done", 1], ["chest trip met", 1]]
 give = ["chest 1", "cobblestone 64", "cobblestone 64", "cobblestone 10", "string 3"]
 set = [["stone", -2, -1, -2], ["stone", -2, -1, -1], ["stone", -2, -1, 0], ["stone", -2, -1, 1], ["stone", -2, -1, 2], ["stone", -1, -1, -2], ["stone", -1, -1, -1], ["stone", -1, -1, 0], ["stone", -1, -1, 1], ["stone", -1, -1, 2], ["stone", 0, -1, -2], ["stone", 0, -1, -1], ["stone", 0, -1, 0], ["stone", 0, -1, 1], ["stone", 0, -1, 2], ["stone", 1, -1, -2], ["stone", 1, -1, -1], ["stone", 1, -1, 0], ["stone", 1, -1, 1], ["stone", 1, -1, 2], ["stone", 2, -1, -2], ["stone", 2, -1, -1], ["stone", 2, -1, 0], ["stone", 2, -1, 1], ["stone", 2, -1, 2], ["air", -2, 0, -2], ["air", -2, 0, -1], ["air", -2, 0, 0], ["air", -2, 0, 1], ["air", -2, 0, 2], ["air", -1, 0, -2], ["air", -1, 0, -1], ["air", -1, 0, 0], ["air", -1, 0, 1], ["air", -1, 0, 2], ["air", 0, 0, -2], ["air", 0, 0, -1], ["air", 0, 0, 0], ["air", 0, 0, 1], ["air", 0, 0, 2], ["air", 1, 0, -2], ["air", 1, 0, -1], ["air", 1, 0, 0], ["air", 1, 0, 1], ["air", 1, 0, 2], ["air", 2, 0, -2], ["air", 2, 0, -1], ["air", 2, 0, 0], ["air", 2, 0, 1], ["air", 2, 0, 2], ["air", -2, 1, -2], ["air", -2, 1, -1], ["air", -2, 1, 0], ["air", -2, 1, 1], ["air", -2, 1, 2], ["air", -1, 1, -2], ["air", -1, 1, -1], ["air", -1, 1, 0], ["air", -1, 1, 1], ["air", -1, 1, 2], ["air", 0, 1, -2], ["air", 0, 1, -1], ["air", 0, 1, 0], ["air", 0, 1, 1], ["air", 0, 1, 2], ["air", 1, 1, -2], ["air", 1, 1, -1], ["air", 1, 1, 0], ["air", 1, 1, 1], ["air", 1, 1, 2], ["air", 2, 1, -2], ["air", 2, 1, -1], ["air", 2, 1, 0], ["air", 2, 1, 1], ["air", 2, 1, 2], ["air", -2, 2, -2], ["air", -2, 2, -1], ["air", -2, 2, 0], ["air", -2, 2, 1], ["air", -2, 2, 2], ["air", -1, 2, -2], ["air", -1, 2, -1], ["air", -1, 2, 0], ["air", -1, 2, 1], ["air", -1, 2, 2], ["air", 0, 2, -2], ["air", 0, 2, -1], ["air", 0, 2, 0], ["air", 0, 2, 1], ["air", 0, 2, 2], ["air", 1, 2, -2], ["air", 1, 2, -1], ["air", 1, 2, 0], ["air", 1, 2, 1], ["air", 1, 2, 2], ["air", 2, 2, -2], ["air", 2, 2, -1], ["air", 2, 2, 0], ["air", 2, 2, 1], ["air", 2, 2, 2]]
 
