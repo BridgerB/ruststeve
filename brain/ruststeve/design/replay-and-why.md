@@ -3,10 +3,10 @@ title: Replay and why
 description: How to record a run, verify it replays exactly (one fold checked at every checkpoint), export it as text, ask why for the world at any moment, print a slice of its blocks and ask the planner again there (replan); what each tool is for.
 type: how-to
 tags: [replay, why, recording, debugging]
-aliases: [replay verify, replay export, why binary, replan, replan binary, --route, --steps, --blocks, --radius, block slice, --force, debug a run, fold a recording]
+aliases: [seen binary, replay verify, replay export, why binary, replan, replan binary, --route, --steps, --blocks, --radius, block slice, --force, debug a run, fold a recording]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@adfcb00
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@201dfcf
 sourceRefs:
   - "ruststeve:crates/replay/src/bin/replay.rs#fn verify(path: &Path, force: bool) -> Result<(), String> {"
   - "ruststeve:crates/replay/src/bin/why.rs#fn print_world(w: &World, events: u64) {"
@@ -35,6 +35,7 @@ related:
 - `cargo run -q --release -p replay --bin replan -- <file.rsr> --at <ticks> --route x,y,z [--range 2] [--nodes 6000] [--force]`: `plan::path::plan` from the bot's feet to within `--range` of the cell (0 is the cell itself): how it ended, waypoints, cost, nodes; whether the feet's cell is a start and why not; when it did not arrive, the moves the route's end has and each cell beside it nearer the goal that no move enters, with the reason (no floor and what is under, the block and class in the feet or head cell, lava beside and where).
 - `... --bin replan -- <file.rsr> --at <ticks> --steps N [--goal race] [--force]`: a new planner (a recording does not hold one; a `.rsm` moment does) stepped N times on that world, its notes and acts printed. Open loop ([[replay-limits]]): the body moves by the client's physics, no server answers a dig.
 - `... --bin why -- <file.rsr> --at <ticks> --blocks x,y,z --radius 15 --ys lo,hi [--force]`: a 31 by 31 slice a layer; short codes in the grid, every block's full name and count in the legend, `*` the centre, `@` the bot's feet. Without `--radius` and `--ys`: 3 each way, 2 under to 3 over.
+- `... --bin seen -- <file.rsr> [--kinds pumpkin,carved_pumpkin] [--every 200] [--chunks 6] [--at x,y,z] [--force]` (issue 80): every cell of the kinds seen with an exposed face (`plan::cast::seen`) in the loaded overworld columns near the feet, looked at every `--every` ticks; each cell at its first sight (tick, the bot's distance, the distance from `--at` or from the feet at the first look) and a summary (counts within 32, 64, 96). Sections whose palette cannot hold the kind are skipped.
 - These print blocks the bot had loaded, seen or not: tools for reading a run, never an input to the bot.
 
 ## Rules
