@@ -1523,6 +1523,11 @@ set = [["stone", 0, -1, 0], ["stone", 0, -1, 1], ["soul_sand", 0, -1, 2], ["soul
 # - e02-ticks: the same 30 east (within 3 chunks): it ticks and falls.
 # - e00-stare: an enderman penned 12 east, the bot looking at its eye (pitch -4.43): it is angered
 #   (creepy) and, stared at within 16, frozen in place.
+# - e00-pumpkin: e00-stare's pen and look with a carved pumpkin on the bot's head (issue 80,
+#   `EnderMan.isBeingStaredBy` checks the head for #gaze_disguise_equipment first,
+#   brain/game/mc-pumpkin.md): neutral, never stared. Landing 3, 40 west and 40 north, clear of
+#   y01-throw-3 (40 away) and e03-aside's enderman; its own stone basin, open to the sky (the
+#   terrain there is not e00-stare's).
 # - e03-aside: the same look 15 degrees aside: neutral.
 
 [[moment]]
@@ -1533,6 +1538,19 @@ dz = 40
 script = "use:100000:-90:-4.43"
 ticks = 40
 difficulty = "normal"
+mobs = [["enderman", 12, 0, 0]]
+set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0], ["air", 1, 2, 0], ["air", 2, 0, 0], ["air", 2, 1, 0], ["air", 2, 2, 0], ["air", 3, 0, 0], ["air", 3, 1, 0], ["air", 3, 2, 0], ["air", 4, 0, 0], ["air", 4, 1, 0], ["air", 4, 2, 0], ["air", 5, 0, 0], ["air", 5, 1, 0], ["air", 5, 2, 0], ["air", 6, 0, 0], ["air", 6, 1, 0], ["air", 6, 2, 0], ["air", 7, 0, 0], ["air", 7, 1, 0], ["air", 7, 2, 0], ["air", 8, 0, 0], ["air", 8, 1, 0], ["air", 8, 2, 0], ["air", 9, 0, 0], ["air", 9, 1, 0], ["air", 9, 2, 0], ["air", 10, 0, 0], ["air", 10, 1, 0], ["air", 10, 2, 0], ["stone", 12, -1, 0], ["air", 12, 0, 0], ["air", 12, 1, 0], ["air", 12, 2, 0], ["stone", 12, 3, 0], ["stone", 11, 0, 0], ["air", 11, 1, 0], ["air", 11, 2, 0], ["stone", 11, 3, 0], ["stone", 13, 0, 0], ["stone", 13, 1, 0], ["stone", 13, 2, 0], ["stone", 13, 3, 0], ["stone", 11, 0, -1], ["stone", 11, 0, 1], ["stone", 11, 1, -1], ["stone", 11, 1, 1], ["stone", 11, 2, -1], ["stone", 11, 2, 1], ["stone", 11, 3, -1], ["stone", 11, 3, 1], ["stone", 12, 0, -1], ["stone", 12, 0, 1], ["stone", 12, 1, -1], ["stone", 12, 1, 1], ["stone", 12, 2, -1], ["stone", 12, 2, 1], ["stone", 12, 3, -1], ["stone", 12, 3, 1], ["stone", 13, 0, -1], ["stone", 13, 0, 1], ["stone", 13, 1, -1], ["stone", 13, 1, 1], ["stone", 13, 2, -1], ["stone", 13, 2, 1], ["stone", 13, 3, -1], ["stone", 13, 3, 1]]
+
+[[moment]]
+id = "e00-pumpkin"
+landing = 3
+dx = -40
+dz = -40
+script = "use:100000:-90:-4.43"
+ticks = 40
+difficulty = "normal"
+armor = ["carved_pumpkin"]
+fill = [["stone", -3, -2, -4, 15, 5, 4], ["air", -2, 0, -3, 14, 5, 3]]
 mobs = [["enderman", 12, 0, 0]]
 set = [["stone", 0, -1, 0], ["air", 0, 0, 0], ["air", 0, 1, 0], ["air", 1, 0, 0], ["air", 1, 1, 0], ["air", 1, 2, 0], ["air", 2, 0, 0], ["air", 2, 1, 0], ["air", 2, 2, 0], ["air", 3, 0, 0], ["air", 3, 1, 0], ["air", 3, 2, 0], ["air", 4, 0, 0], ["air", 4, 1, 0], ["air", 4, 2, 0], ["air", 5, 0, 0], ["air", 5, 1, 0], ["air", 5, 2, 0], ["air", 6, 0, 0], ["air", 6, 1, 0], ["air", 6, 2, 0], ["air", 7, 0, 0], ["air", 7, 1, 0], ["air", 7, 2, 0], ["air", 8, 0, 0], ["air", 8, 1, 0], ["air", 8, 2, 0], ["air", 9, 0, 0], ["air", 9, 1, 0], ["air", 9, 2, 0], ["air", 10, 0, 0], ["air", 10, 1, 0], ["air", 10, 2, 0], ["stone", 12, -1, 0], ["air", 12, 0, 0], ["air", 12, 1, 0], ["air", 12, 2, 0], ["stone", 12, 3, 0], ["stone", 11, 0, 0], ["air", 11, 1, 0], ["air", 11, 2, 0], ["stone", 11, 3, 0], ["stone", 13, 0, 0], ["stone", 13, 1, 0], ["stone", 13, 2, 0], ["stone", 13, 3, 0], ["stone", 11, 0, -1], ["stone", 11, 0, 1], ["stone", 11, 1, -1], ["stone", 11, 1, 1], ["stone", 11, 2, -1], ["stone", 11, 2, 1], ["stone", 11, 3, -1], ["stone", 11, 3, 1], ["stone", 12, 0, -1], ["stone", 12, 0, 1], ["stone", 12, 1, -1], ["stone", 12, 1, 1], ["stone", 12, 2, -1], ["stone", 12, 2, 1], ["stone", 12, 3, -1], ["stone", 12, 3, 1], ["stone", 13, 0, -1], ["stone", 13, 0, 1], ["stone", 13, 1, -1], ["stone", 13, 1, 1], ["stone", 13, 2, -1], ["stone", 13, 2, 1], ["stone", 13, 3, -1], ["stone", 13, 3, 1]]
 
