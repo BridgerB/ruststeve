@@ -646,3 +646,13 @@ Read from the lanes' evidence at about tick 4,700 (11:10 AM Denver):
 - A climb's start and its going on both read E3's `Plan::calm` (end.rs: no dragon sent, or holding (phase 0) `CALM_FROM` 40 off or more and not closing over `CALM_TICKS` 20), so the stock, the crystals and the rest share one rule ("the dragon not calm").
 - Kept as the crystals' own: the stops for a landing, sitting, strafe or charge (`DESCEND_PHASES`, `threatens`), the knock rule within 30, fireballs, health, and the `STAND_NEAR` finish (wall 47).
 - The crystals' own closing reading is gone; `dragon_seen` is still kept for its notes.
+
+### Wall 48: left water never refilled from (race 46079924222 lanes 5 and 2; fixed)
+- **What happened:**
+  - At 1,060, "the water against endermen lost at [-13, 60, -47] (not taken back in 3 uses; left for the refill)": E5's, put in `left_water`.
+  - At 1,580, "no way to the water left at (-13, 60, -47) (from (-17, 59, -59); dropped from the record)". Then "no climb: no water" 12 times to 9,640, with 3 empty buckets held.
+  - E5 poured that water standing in the cell, so it spread. The refill's goal beside it was flowing water, which the walk does not end in, so no route was found. One failed walk dropped the record for good.
+- **The fix:**
+  - The refill's stand is a dry cell within `LEFT_WATER_STAND` (3) of the water, from a level under to a level over, its eye within reach of the source, the nearest first.
+  - A failed walk keeps the record ("no way yet to the water left at"). It is tried again `LEFT_WATER_RETRY` (200) ticks later and dropped only after `LEFT_WATER_TRIES` (5).
+  - Unit tests `an_empty_bucket_walks_10_to_left_water_spread_round_and_refills` and `a_failed_walk_to_left_water_keeps_its_record`.

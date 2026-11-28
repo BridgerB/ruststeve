@@ -411,6 +411,12 @@ pub fn clutch_water(w: &World, feet: Cell) -> Option<Cell> {
     })
 }
 
+/// Blocks on the plane round a left water cell a dry stand to refill from is looked for in, and
+/// the failed walks to it before it is dropped from the record.
+pub const LEFT_WATER_STAND: i32 = 3;
+pub const LEFT_WATER_TRIES: u32 = 5;
+pub const LEFT_WATER_RETRY: u64 = 200;
+
 /// Blocks on the plane round the landed feet the clutch's water is looked for in.
 pub const CLUTCH_WATER_REACH: i32 = 2;
 
@@ -1162,6 +1168,9 @@ pub struct SpikeState {
     /// Water the bot poured and left (a clutch's or a landing's not taken back): an empty bucket
     /// refills from it first.
     pub left_water: Vec<Cell>,
+    /// Failed walks to each left water cell and the last one's tick (dropped at
+    /// `LEFT_WATER_TRIES`, tried again `LEFT_WATER_RETRY` ticks after a failure).
+    pub left_water_fails: Vec<(Cell, u32, u64)>,
     /// Each pillar's landing water (its column, the cell at its foot the water was poured in).
     pub landings: Vec<((i32, i32), Cell)>,
 }
@@ -1228,6 +1237,7 @@ impl Default for SpikeState {
             now: 0,
             stubs: Vec::new(),
             left_water: Vec::new(),
+            left_water_fails: Vec::new(),
         }
     }
 }
@@ -3657,10 +3667,19 @@ impl Plan {
         self.spikes.left_water.retain(|c| source(w, *c));
         if water == 0
             && empty > 0
-            && let Some(c) =
-                self.spikes.left_water.iter().copied().min_by_key(|c| {
-                    (c.0 - feet.0).abs() + (c.1 - feet.1).abs() + (c.2 - feet.2).abs()
+            && let Some(c) = self
+                .spikes
+                .left_water
+                .iter()
+                .copied()
+                .filter(|c| {
+                    !self
+                        .spikes
+                        .left_water_fails
+                        .iter()
+                        .any(|(x, _, at)| x == c && tick.saturating_sub(*at) < LEFT_WATER_RETRY)
                 })
+                .min_by_key(|c| (c.0 - feet.0).abs() + (c.1 - feet.1).abs() + (c.2 - feet.2).abs())
         {
             let target = [
                 f64::from(c.0) + 0.5,
@@ -3689,18 +3708,37 @@ impl Plan {
                 self.retry_at = tick + 1;
                 return Some(Task::Idle);
             }
-            let beside = Axis::ALL
-                .iter()
-                .map(|a| {
-                    let (dx, dz) = a.step();
-                    (c.0 + dx, c.1, c.2 + dz)
+            // A dry cell to stand in within reach of the source (race 46079924222 lane 5: the
+            // water spread round the cell it was poured from, the goal beside it was flowing
+            // water, the walk found no route, and the record was dropped at once).
+            let beside = (-LEFT_WATER_STAND..=LEFT_WATER_STAND)
+                .flat_map(|dx| {
+                    (-LEFT_WATER_STAND..=LEFT_WATER_STAND)
+                        .flat_map(move |dz| (-1..=1).map(move |dy| (c.0 + dx, c.1 + dy, c.2 + dz)))
                 })
                 .filter(|b| {
                     full(kind(w, (b.0, b.1 - 1, b.2)))
-                        && passable(kind(w, *b))
-                        && passable(kind(w, (b.0, b.1 + 1, b.2)))
+                        && open(kind(w, *b))
+                        && open(kind(w, (b.0, b.1 + 1, b.2)))
+                        && (0..3)
+                            .map(|i| {
+                                let e = [
+                                    f64::from(b.0) + 0.5,
+                                    f64::from(b.1) + 1.62,
+                                    f64::from(b.2) + 0.5,
+                                ];
+                                (target[i] - e[i]).powi(2)
+                            })
+                            .sum::<f64>()
+                            .sqrt()
+                            <= POUR_REACH
                 })
-                .min_by_key(|b| (b.0 - feet.0).abs() + (b.2 - feet.2).abs());
+                .min_by_key(|b| {
+                    (
+                        (b.0 - feet.0).abs() + (b.1 - feet.1).abs() + (b.2 - feet.2).abs(),
+                        *b,
+                    )
+                });
             if let Some(b) = beside {
                 let mut walk = Walk::new(b, Goal::Block { pos: b }, Arrive::Goal, tick);
                 if walk.route_now(w, tick) && walk.route == Some(path::Status::Found) {
@@ -3713,12 +3751,38 @@ impl Plan {
                 }
                 self.expanded += walk.expanded;
             }
-            self.spikes.left_water.retain(|x| *x != c);
-            self.note(
-                tick,
-                format!("spikes: no way to the water left at {c:?}"),
-                format!("from {feet:?}; dropped from the record"),
-            );
+            // Kept for a later try; dropped only after `LEFT_WATER_TRIES` failed walks.
+            let n = match self
+                .spikes
+                .left_water_fails
+                .iter_mut()
+                .find(|(x, _, _)| *x == c)
+            {
+                Some((_, n, at)) => {
+                    *n += 1;
+                    *at = tick;
+                    *n
+                }
+                None => {
+                    self.spikes.left_water_fails.push((c, 1, tick));
+                    1
+                }
+            };
+            if n >= LEFT_WATER_TRIES {
+                self.spikes.left_water.retain(|x| *x != c);
+                self.spikes.left_water_fails.retain(|(x, _, _)| *x != c);
+                self.note(
+                    tick,
+                    format!("spikes: no way to the water left at {c:?}"),
+                    format!("from {feet:?}; {n} walks failed, dropped from the record"),
+                );
+            } else {
+                self.spikes_note(
+                    tick,
+                    format!("spikes: no way yet to the water left at {c:?}"),
+                    format!("from {feet:?}; walk {n} of {LEFT_WATER_TRIES} failed, kept"),
+                );
+            }
         }
         // A refill: an empty bucket held and water in a pool cell (made or not: never leave the
         // pool with an empty hand).
