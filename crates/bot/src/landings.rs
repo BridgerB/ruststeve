@@ -171,6 +171,9 @@ pub fn run_one(
         | plan::Aim::Nether
         | plan::Aim::Race
         | plan::Aim::Base
+        // >>> stash (issue 77)
+        | plan::Aim::ChestTrip
+        // <<< stash
         | plan::Aim::Hold => 0.0,
     };
     let mut p = match table {

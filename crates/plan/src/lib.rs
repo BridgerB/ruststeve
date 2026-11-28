@@ -400,6 +400,12 @@ pub enum Aim {
     // >>> base (P5, issue 18d): a development aim, the forest base where the bot stands.
     Base,
     // <<< base
+    // >>> stash (issue 77)
+    /// A development aim for parity only, never a frontier start nor a race's evidence: the
+    /// chest held put down, `stash::TRIP` stashed in it and fetched back, each through the
+    /// planner's own `Task::Place`, `Task::Stash` and `Task::Fetch` (`stash::Plan::chest_trip_aim`).
+    ChestTrip,
+    // <<< stash
     /// No goal: only the always-rows run (issue 12b's escape rows, 12e's hold after the aim).
     Hold,
 }
@@ -427,6 +433,9 @@ impl Aim {
             None if s == "nether" => Some(Aim::Nether),
             None if s == "race" => Some(Aim::Race),
             None if s == "base" => Some(Aim::Base),
+            // >>> stash (issue 77)
+            None if s == "chest-trip" => Some(Aim::ChestTrip),
+            // <<< stash
             None if s == "hold" => Some(Aim::Hold),
             Some(("log", m)) => m
                 .parse()
@@ -457,6 +466,9 @@ impl Aim {
             Aim::Nether => "nether".to_owned(),
             Aim::Race => "race".to_owned(),
             Aim::Base => "base".to_owned(),
+            // >>> stash (issue 77)
+            Aim::ChestTrip => "chest-trip".to_owned(),
+            // <<< stash
             Aim::Hold => "hold".to_owned(),
         }
     }
@@ -483,6 +495,9 @@ impl Aim {
             | Aim::Nether
             | Aim::Race
             | Aim::Base
+            // >>> stash (issue 77)
+            | Aim::ChestTrip
+            // <<< stash
             | Aim::Hold => true,
         }
     }
@@ -1841,6 +1856,9 @@ impl Plan {
                 Aim::Fortress => self.fortress_task(w, tick),
                 Aim::Nether | Aim::Race => self.nether_task(w, origin, tick),
                 Aim::Base => self.base_aim(w, tick),
+                // >>> stash (issue 77)
+                Aim::ChestTrip => self.chest_trip_aim(w, tick),
+                // <<< stash
                 Aim::Hold => Task::Idle,
             };
             // >>> stash (issue 77): a fetch after a respawn, a stash before a leg's portal.
@@ -4077,6 +4095,9 @@ impl Plan {
             | Aim::Nether
             | Aim::Race
             | Aim::Base
+            // >>> stash (issue 77)
+            | Aim::ChestTrip
+            // <<< stash
             | Aim::Hold => 0.0,
         };
         let Some(body) = w.body else {
@@ -4107,6 +4128,9 @@ impl Plan {
                 | Aim::Nether
                 | Aim::Race
                 | Aim::Base
+                // >>> stash (issue 77)
+                | Aim::ChestTrip
+                // <<< stash
                 | Aim::Hold => Walk::to_dig(log, tick),
             };
             if walk.route_now(w, tick) {

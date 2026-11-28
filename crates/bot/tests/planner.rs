@@ -103,7 +103,7 @@ fn over_generated_worlds_it_never_churns_and_never_stalls_past_its_patience() {
 
 #[test]
 fn aims_parse_and_name_back() {
-    for s in ["log", "log:30"] {
+    for s in ["log", "log:30", "chest-trip"] {
         let a = Aim::parse(s).unwrap();
         assert_eq!(Aim::parse(&a.name()), Some(a));
     }

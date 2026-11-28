@@ -333,3 +333,48 @@ fn a_fetch_is_due_only_after_a_respawn_and_says_why_it_ends() {
     assert!(!plan.stash.fetch_due);
     assert!(ledger(&plan).contains("fetch after the respawn skipped (no home chest)"));
 }
+
+/// The development aim `chest-trip` (parity only): the held chest put down, 74 cobblestone and
+/// 3 string stashed and fetched back, through the planner's own tasks, each step noted.
+#[test]
+fn the_chest_trip_aim_places_stashes_and_fetches_back() {
+    let mut p = Pair::new(&[
+        (ItemKind::Chest, 1),
+        (ItemKind::Cobblestone, 64),
+        (ItemKind::Cobblestone, 64),
+        (ItemKind::Cobblestone, 10),
+        (ItemKind::String, 3),
+    ]);
+    let mut plan = planner();
+    plan.aim = Aim::ChestTrip;
+    let mut begun = Vec::new();
+    for _ in 0..3000 {
+        if plan.met {
+            break;
+        }
+        plan.step(&p.w);
+        if begun.last() != Some(&plan.task.name()) && !matches!(plan.task, Task::Idle) {
+            begun.push(plan.task.name());
+        }
+        let acts = plan.take_acts();
+        p.step(acts);
+    }
+    let log = ledger(&plan);
+    assert!(plan.met, "{begun:?}\n{log}");
+    assert_eq!(begun, vec!["place", "stash", "fetch"], "{log}");
+    assert!(log.contains("chest trip: place the chest"), "{log}");
+    assert!(
+        log.contains("chest trip: stash 74 cobblestone, 3 string"),
+        "{log}"
+    );
+    assert!(log.contains("stash moved 10 cobblestone"), "{log}");
+    assert!(log.contains("chest trip: fetch"), "{log}");
+    assert!(log.contains("chest trip met"), "{log}");
+    assert_eq!((plan.stash.stashes, plan.stash.fetches), (1, 1), "{log}");
+    assert_eq!(p.held(ItemKind::Cobblestone), 138);
+    assert_eq!(p.held(ItemKind::String), 3);
+    let (_, home) = plan.stash.home.clone().unwrap();
+    let model = p.sim.survival.chests.get(&home).unwrap();
+    assert_eq!(model.count(ItemKind::Cobblestone), 0);
+    assert!(p.sim.violations.is_empty(), "{:?}", p.sim.violations);
+}

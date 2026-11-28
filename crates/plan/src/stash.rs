@@ -771,6 +771,23 @@ pub fn wood_to_spare(held: &BTreeMap<ItemKind, i32>, table: bool) -> (i32, i32) 
     (spare, want)
 }
 
+/// What the development aim `chest-trip` stashes and fetches back: the parity row's numbers
+/// (lead-77, 2026-11-28), those of `plan/tests/stash.rs`: of 138 cobblestone held (64, 64, 10)
+/// the 64 and the 10, never the other 64 (a stack over what is left stays held), and 3 string.
+pub const TRIP: [(ItemKind, i32); 2] = [(ItemKind::Cobblestone, 74), (ItemKind::String, 3)];
+
+/// The development aim `chest-trip`'s steps, in order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TripStep {
+    /// The held chest put down (it becomes the home chest).
+    #[default]
+    Place,
+    Stash,
+    Fetch,
+    /// Fetched: the aim is met.
+    Over,
+}
+
 /// The planner's chest state: the home chest, the legs passed, a fetch due.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct StashState {
@@ -791,6 +808,9 @@ pub struct StashState {
     /// Stashes and fetches ended, and how many items each way.
     pub stashes: u32,
     pub fetches: u32,
+    /// The development aim `chest-trip`'s next step.
+    #[serde(default)]
+    pub trip: TripStep,
     /// The need table the planner asks; empty until the keep table is wired (77-keep).
     #[serde(skip)]
     pub needs: NeedRows,
@@ -1124,6 +1144,88 @@ impl Plan {
             "wanted by a stage ahead and not held".to_owned(),
         );
         Some(Task::Fetch(Box::new(f)))
+    }
+
+    /// The development aim `chest-trip` (parity only; never a frontier start nor a race's
+    /// evidence): the held chest put down, `TRIP` stashed in it, then fetched back, each a task
+    /// of the planner's own and each noted; met when the fetch has ended.
+    pub(crate) fn chest_trip_aim(&mut self, w: &World, tick: u64) -> Task {
+        let Some(dim) = w.dimension.as_ref().map(|d| d.name.clone()) else {
+            return Task::Idle;
+        };
+        self.home_placed(w, &dim, tick);
+        let met = |p: &mut Plan, why: String| {
+            p.stash.trip = TripStep::Over;
+            p.met = true;
+            p.note(tick, "chest trip met".to_owned(), why);
+            Task::Idle
+        };
+        match self.stash.trip {
+            TripStep::Place => {
+                if let Some((_, c)) = self.stash.home.clone() {
+                    self.stash.trip = TripStep::Stash;
+                    self.note(
+                        tick,
+                        format!("chest trip: the chest at {c:?} is down"),
+                        "stash next".to_owned(),
+                    );
+                    return Task::Idle;
+                }
+                if self.stash.placing.is_some() || self.stash.chest_tasks >= CHEST_TASKS {
+                    return met(self, "the chest was not put down".to_owned());
+                }
+                let Some(pl) = crate::place::Place::new(data::BlockKind::Chest, tick)
+                    .filter(|_| crate::craft::count(w, ItemKind::Chest) > 0)
+                else {
+                    return met(self, "no chest held".to_owned());
+                };
+                self.stash.chest_tasks += 1;
+                self.stash.placing =
+                    Some(w.memory.chests(&dim).into_iter().map(|(c, _)| c).collect());
+                self.note(
+                    tick,
+                    "chest trip: place the chest".to_owned(),
+                    "the development aim chest-trip, its first step".to_owned(),
+                );
+                Task::Place(pl)
+            }
+            TripStep::Stash | TripStep::Fetch => {
+                let Some((_, c)) = self.stash.home.clone() else {
+                    return met(self, "the chest is gone".to_owned());
+                };
+                let stash = self.stash.trip == TripStep::Stash;
+                let t = if stash {
+                    Stash::new(w, c, &TRIP, tick).map(|s| Task::Stash(Box::new(s)))
+                } else {
+                    Fetch::new(w, c, &TRIP, tick).map(|f| Task::Fetch(Box::new(f)))
+                };
+                let Some(t) = t else {
+                    return met(self, format!("the chest at {c:?} is not in memory"));
+                };
+                self.stash.trip = if stash {
+                    TripStep::Fetch
+                } else {
+                    TripStep::Over
+                };
+                self.note(
+                    tick,
+                    format!(
+                        "chest trip: {} {} at {c:?}",
+                        if stash { "stash" } else { "fetch" },
+                        list_text(&TRIP)
+                    ),
+                    "the development aim chest-trip".to_owned(),
+                );
+                t
+            }
+            TripStep::Over => met(
+                self,
+                format!(
+                    "{} stashes and {} fetches ended",
+                    self.stash.stashes, self.stash.fetches
+                ),
+            ),
+        }
     }
 
     /// The chest task in hand, one tick: its acts sent, its notes into the ledger, its end
