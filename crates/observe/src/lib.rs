@@ -608,6 +608,9 @@ pub struct Snapshot {
     /// before it said.
     #[serde(default)]
     pub sprint_server: Option<bool>,
+    /// Issue 56: the sprint last reported to the server (`World::sent_sprinting`).
+    #[serde(default)]
+    pub sprinting: bool,
 }
 
 /// A fact for the ledger.
@@ -902,6 +905,13 @@ pub enum Fact {
     SprintServer {
         on: bool,
     },
+    /// Issue 56: the bot reported a sprint begun or ended (`player_command`, from the body's
+    /// sprint after the stop rules): `why` is the first rule that explains it (`sprint_why`),
+    /// so a race counts sprints and what stopped them.
+    Sprint {
+        on: bool,
+        why: String,
+    },
 }
 
 /// A fact and the server tick it was seen.
@@ -1129,8 +1139,40 @@ pub fn snapshot(w: &World) -> Snapshot {
         gazes: gazes(w),
         // <<< E1
         sprint_server: w.player.sprinting,
+        sprinting: w.sent_sprinting,
     }
 }
+
+/// Why the bot sprints or stopped, from the world it reported in: a sprint begun is the key
+/// held (`asked`); one ended is the first of the client's stop rules (`LocalPlayer.aiStep`) that
+/// holds: the key let go, no forward key, sneaking, food at or under `SPRINT_FOOD`, a wall,
+/// water. None of them is `rule`: a rule this list does not name.
+pub fn sprint_why(w: &World) -> String {
+    if w.sent_sprinting {
+        return "asked".to_owned();
+    }
+    let c = &w.controls;
+    let body = w.body.unwrap_or_default();
+    if !c.sprint {
+        "released".to_owned()
+    } else if !c.forward {
+        "no forward".to_owned()
+    } else if c.sneak {
+        "sneak".to_owned()
+    } else if let Some(food) = w.player.food.filter(|f| *f <= SPRINT_FOOD) {
+        format!("food {food}")
+    } else if body.horizontal_collision {
+        "wall".to_owned()
+    } else if body.in_water {
+        "water".to_owned()
+    } else {
+        "rule".to_owned()
+    }
+}
+
+/// Food at or under this stops a sprint (`LocalPlayer.hasEnoughFoodToSprint`: over 6.0, the
+/// player's `foodData` level), for `sprint_why`'s words only: physics holds the rule.
+const SPRINT_FOOD: i32 = 6;
 
 /// Loud sounds heard from farther than `HEAR`: shots, warnings, stares, screams, teleports,
 /// deaths (clojurecraft's far-sound list).
@@ -1325,6 +1367,12 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
         && (on || prev.sprint_server.is_some())
     {
         out.push(Fact::SprintServer { on });
+    }
+    if next.sprinting != prev.sprinting {
+        out.push(Fact::Sprint {
+            on: next.sprinting,
+            why: sprint_why(w),
+        });
     }
     for (id, n) in &mut next.endermen {
         let d = dist(n.pos, bot);
@@ -2459,6 +2507,8 @@ impl Fact {
             Fact::SprintServer { on } => {
                 format!("server: sprint {}", if *on { "on" } else { "off" })
             }
+            Fact::Sprint { on: true, why } => format!("sprint on ({why})"),
+            Fact::Sprint { on: false, why } => format!("sprint off ({why})"),
         }
     }
 }

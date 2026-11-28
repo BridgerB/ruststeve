@@ -1333,3 +1333,38 @@ fn the_servers_sprint_flag_is_a_fact_when_it_changes() {
         "server: sprint off"
     );
 }
+
+/// Issue 56: each sprint reported is a fact with the rule that explains it.
+#[test]
+fn a_sprint_reported_is_a_fact_with_its_reason() {
+    let mut w = World::new();
+    let a = snapshot(&w);
+    w.sent_sprinting = true;
+    w.controls.sprint = true;
+    w.controls.forward = true;
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        facts.contains(&Fact::Sprint {
+            on: true,
+            why: "asked".to_owned()
+        }),
+        "{facts:?}"
+    );
+    // Still held, the food fell to 6: the sprint stopped for food.
+    w.sent_sprinting = false;
+    w.player.food = Some(6);
+    let (c, facts) = facts_between(&b, &w);
+    let off = Fact::Sprint {
+        on: false,
+        why: "food 6".to_owned(),
+    };
+    assert!(facts.contains(&off), "{facts:?}");
+    assert_eq!(off.line(), "sprint off (food 6)");
+    let (_, facts) = facts_between(&c, &w);
+    assert!(
+        !facts.iter().any(|f| matches!(f, Fact::Sprint { .. })),
+        "{facts:?}"
+    );
+    w.controls.sprint = false;
+    assert_eq!(observe::sprint_why(&w), "released");
+}

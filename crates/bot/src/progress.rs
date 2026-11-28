@@ -162,7 +162,7 @@ impl Progress {
                 | observe::Fact::Breath { .. }
                 | observe::Fact::GazeNearMiss { .. } => {} // <<< E1
                 // A sprint is how the bot moves, not where it got.
-                observe::Fact::SprintServer { .. } => {}
+                observe::Fact::SprintServer { .. } | observe::Fact::Sprint { .. } => {}
             }
         }
         if place.is_some_and(|p| self.regions.insert(region(p))) {

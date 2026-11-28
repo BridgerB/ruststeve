@@ -220,7 +220,8 @@ fn key_of(f: &Fact) -> Key {
         | Fact::GazeNearMiss { .. }
         | Fact::DragonDead
         | Fact::Credits { .. }
-        | Fact::SprintServer { .. } => Key::Other(f.line()),
+        | Fact::SprintServer { .. }
+        | Fact::Sprint { .. } => Key::Other(f.line()),
     }
 }
 

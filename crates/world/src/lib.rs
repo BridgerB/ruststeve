@@ -21,9 +21,9 @@ use physics::{Body, Controls, Fluid, FluidKind, Surface};
 use protocol::chunk::Column;
 use protocol::metadata::MetaValue;
 use protocol::nbt::Death;
-use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT};
+use protocol::packets::{INPUT_FORWARD, INPUT_JUMP, INPUT_SHIFT, INPUT_SPRINT};
 use protocol::slot::{Slot, Wear};
-use protocol::{C2s, Out, S2c, Session};
+use protocol::{C2s, Out, PlayerCommandAction, S2c, Session};
 
 pub mod biome;
 pub mod stage;
@@ -632,6 +632,10 @@ pub struct World {
     /// only when they change, as the client's `lastSentInput` does.
     #[serde(default)]
     pub sent_input: u8,
+    /// Whether the server was last told the bot sprints (`player_command` START or STOP), as
+    /// the client's `wasSprinting`: a report goes out when the body's sprint differs from it.
+    #[serde(default)]
+    pub sent_sprinting: bool,
     /// Hits on the bot in the last `HITS_KEPT_TICKS` server ticks, oldest first.
     #[serde(default)]
     pub hits: Vec<Hit>,
@@ -950,12 +954,15 @@ impl World {
         Some(Fluid { kind, level })
     }
 
-    /// The keys held, as the server is told them: forward, jump and shift from the controls.
-    /// The bot has no backward, strafe or sprint key (it walks; sprinting is never reported).
+    /// The keys held, as the server is told them: forward, jump, shift and sprint from the
+    /// controls. The bot has no backward or strafe key. The sprint bit is the key held
+    /// (`KeyboardInput.tick` builds the `Input` from `keySprint.isDown()`), not whether the
+    /// body sprints: that is `player_command`'s (`report_sprint`).
     pub fn input_flags(controls: &Controls) -> u8 {
         (if controls.forward { INPUT_FORWARD } else { 0 })
             | (if controls.jump { INPUT_JUMP } else { 0 })
             | (if controls.sneak { INPUT_SHIFT } else { 0 })
+            | (if controls.sprint { INPUT_SPRINT } else { 0 })
     }
 
     /// One tick of the body: the keys when they changed, physics, then the movement packet
@@ -981,6 +988,33 @@ impl World {
         }
         self.sent_input = flags;
         vec![Effect::Send(C2s::PlayerInput { flags })]
+    }
+
+    /// The sprint, when the body's differs from the last report: vanilla's
+    /// `LocalPlayer.sendPosition` begins with `sendIsSprintingIfNeeded`, which sends
+    /// `player_command` START_SPRINTING or STOP_SPRINTING when `isSprinting()` is not
+    /// `wasSprinting`, after the tick's movement and before the move packet. The server sets the
+    /// player's sprint flag, and the sprint modifier on its speed, only from this
+    /// (`handlePlayerCommand`); `observe` tells each report as `Fact::Sprint`. With no entity id
+    /// (before the play login) nothing can be sent, and nothing is marked sent.
+    fn report_sprint(&mut self, sprinting: bool) -> Vec<Effect> {
+        if sprinting == self.sent_sprinting {
+            return Vec::new();
+        }
+        let Some(entity) = self.player.entity_id else {
+            return Vec::new();
+        };
+        self.sent_sprinting = sprinting;
+        let action = if sprinting {
+            PlayerCommandAction::StartSprinting
+        } else {
+            PlayerCommandAction::StopSprinting
+        };
+        vec![Effect::Send(C2s::PlayerCommand {
+            entity,
+            action,
+            data: 0,
+        })]
     }
 
     fn move_body(&mut self, body: Body) -> Vec<Effect> {
@@ -1028,6 +1062,7 @@ impl World {
         let moved = physics::step_on(&solid, &fluid, &surface, &body, &self.controls);
         self.body = Some(moved);
         self.player.pos = Some(moved.pos);
+        let mut out = self.report_sprint(moved.sprinting);
         // Physics and the movement packets use the controls' yaw; the pitch is the controls' when
         // set (a bucket aimed, issue 14a), else the server's look is kept.
         #[allow(clippy::cast_possible_truncation)]
@@ -1043,20 +1078,19 @@ impl World {
             self.sent_look = Some(look);
             self.sent_tick = self.ticks;
             let [x, y, z] = moved.pos;
-            return vec![Effect::Send(C2s::MovePlayerPosRot {
+            out.push(Effect::Send(C2s::MovePlayerPosRot {
                 x,
                 y,
                 z,
                 yaw: look.0,
                 pitch: look.1,
                 flags,
-            })];
-        }
-        if self.ticks - self.sent_tick >= STATUS_ONLY_EVERY {
+            }));
+        } else if self.ticks - self.sent_tick >= STATUS_ONLY_EVERY {
             self.sent_tick = self.ticks;
-            return vec![Effect::Send(C2s::MovePlayerStatusOnly { flags })];
+            out.push(Effect::Send(C2s::MovePlayerStatusOnly { flags }));
         }
-        Vec::new()
+        out
     }
 
     fn enter(&mut self, type_id: i32, name: &str) {
@@ -1512,6 +1546,10 @@ impl World {
                 // (`LocalPlayer`'s `lastSentInput` starts empty), and after a death the server's
                 // new player holds no shift key: keys still held are reported again.
                 self.sent_input = 0;
+                // The sprint last reported is kept, unlike vanilla's new player (`wasSprinting`
+                // false): a portal's respawn keeps the server's player and its sprint flag, so a
+                // body that walks on after it sends the STOP. After a death the server's new
+                // player is not sprinting and that STOP is harmless.
             }
             S2c::LevelChunkWithLight { x, z, column } => {
                 let at = ChunkPos { x: *x, z: *z };
@@ -2460,6 +2498,33 @@ mod sight_tests {
 mod body_tests {
     use super::*;
     use protocol::BossOp;
+
+    /// Issue 56: a sprint is reported once on each change, START then STOP, with the player's
+    /// entity id; before the play login gives one, nothing is sent or marked sent.
+    #[test]
+    fn a_sprint_is_reported_once_per_change() {
+        let command = |entity, action| {
+            vec![Effect::Send(C2s::PlayerCommand {
+                entity,
+                action,
+                data: 0,
+            })]
+        };
+        let mut w = World::new();
+        assert!(w.report_sprint(true).is_empty(), "no entity id yet");
+        assert!(!w.sent_sprinting);
+        w.player.entity_id = Some(9);
+        assert_eq!(
+            w.report_sprint(true),
+            command(9, PlayerCommandAction::StartSprinting)
+        );
+        assert!(w.report_sprint(true).is_empty(), "sent once");
+        assert_eq!(
+            w.report_sprint(false),
+            command(9, PlayerCommandAction::StopSprinting)
+        );
+        assert!(w.report_sprint(false).is_empty());
+    }
 
     /// Issue 16e: effects, attributes, chat, the boss bar and the win reach the world by name.
     #[test]
