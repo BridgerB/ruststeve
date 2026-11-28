@@ -5,8 +5,8 @@ type: reference
 tags: [plan, planner, tasks, decisions, churn]
 aliases: [Aim::Table, take_acts, met, Plan, Aim, Task, ToLog, Explore, PlanEvent, churn invariant, refused, area refused, stuck, max unwalkable, --goal, plan notes]
 status: verified
-lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@9b5da2e clojurecraft@be85a92
+lastUpdated: 2026-11-28
+verifiedAgainst: ruststeve@4936cc2 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/lib.rs#pub fn step(&mut self, w: &World) -> Controls {"
   - "ruststeve:crates/plan/src/dragon.rs#pub fn decide(w: &World, ask: &Ask) -> Want {"
@@ -34,7 +34,7 @@ Issue 09a begins the `plan` crate (core): `Plan::step(&World) -> Controls`, the 
 
 ## How it works
 - **Aims**: `ReachLog { min_distance }` (`--goal log` or `log:<min>`), issue 09's measure; goal rows decided each idle tick by the needs planner ([[goal-table-and-needs]]): `Table` (`--goal table`, issue 10's kit), and issue 11's `pickaxe`, `cobblestone`, `stone-pickaxe`, `stone-tools`.
-- **Tasks** (`Task`, an enum): `Idle`, `ToLog(Walk)`, `Explore(Walk)`, since issue 10 `Dig` ([[digging]]) and `Craft` ([[crafting-window]]), since issue 11 `Place` ([[placing]]) and `Stairs` ([[stairs-down]]). Under a goal aim a walk to a block (a log, exposed stone) ends beside it and becomes a dig.
+- **Tasks** (`Task`, an enum): `Idle`, `ToLog(Walk)`, `Explore(Walk)`, since issue 10 `Dig` ([[digging]]) and `Craft` ([[crafting-window]]), since issue 11 `Place` ([[placing]]) and `Stairs` ([[stairs-down]]), since issue 77 `Stash` and `Fetch` beside `Smelt` (a known chest's stacks in or out, chosen by `Plan::stash_gate` as the planner chooses; [[chests]]). Under a goal aim a walk to a block (a log, exposed stone) ends beside it and becomes a dig.
 - **Acts**: a dig or a craft makes `world::Act`s; the shell takes them with `take_acts` after each step and sends them as events (recorded, replayed), in `bot::run`, lockstep and the landing measure. A target is held until the walk ends, never re-chosen per tick.
 - **Choosing**: the nearest log *sighting* (memory: seen with an exposed face, so no X-ray) at least `min_distance` from where the planner began, found by a ring query over memory's chunk-column index, never a scan; else explore 48 blocks out on a held heading, turned a quarter after each failure.
 - **The churn invariant** (clojurecraft's `churn_guard`): every candidate is routed before it is chosen, so a chosen task always has a way and is not over after one tick; at most 2 candidates a tick. A test checks it over generated worlds.
