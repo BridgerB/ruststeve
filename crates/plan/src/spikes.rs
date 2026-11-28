@@ -896,6 +896,14 @@ pub struct PillarRec {
 /// The block under the feet is one of a pillar: a pillar the bot put up there (recorded, the
 /// feet over its base), or a placed block no End ground is made of.
 pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
+    on_marked_pillar(w, feet, pillars)
+        || (full(kind(w, (feet.0, feet.1 - 1, feet.2))) && tower(w, feet))
+}
+
+/// `on_pillar` without the bare tower: a pillar of record, or of placed blocks standing free.
+/// What the dragon's rows yield to (`spikes_up_high`): a tower of no record is the crystals'
+/// once their task has adopted it.
+pub fn on_marked_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
     let under = kind(w, (feet.0, feet.1 - 1, feet.2));
     let recorded = pillars
         .iter()
@@ -914,7 +922,7 @@ pub fn on_pillar(w: &World, feet: Cell, pillars: &[PillarRec]) -> bool {
             >= 3
     };
     let placed = under.is_some_and(|k| PLACED.contains(&k)) && free();
-    full(under) && (recorded || placed || tower(w, feet))
+    full(under) && (recorded || placed)
 }
 
 /// Blocks of a free-standing column under the feet that make it a pillar with no record.
@@ -2005,7 +2013,7 @@ impl Plan {
             return false;
         };
         let feet = path::stand_cell(w, body.pos);
-        on_pillar(w, feet, &self.spikes.pillars)
+        on_marked_pillar(w, feet, &self.spikes.pillars)
             || on_spike(w, feet)
             || matches!(
                 self.spikes.doing,
