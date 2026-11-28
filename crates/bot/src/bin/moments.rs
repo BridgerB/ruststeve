@@ -31,8 +31,8 @@ use world::World;
 const SETTLE: u64 = bot::SETTLE_TICKS;
 /// The table's stated tolerance: all but 2 of the moments match in every field (48 of issue
 /// 08's 50; 78 of 80 with issue 10b's dig and craft rows; 103 of 105 with issue 11a's stone and
-/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows; 176 of 178 with issue 19's eye rows; 179 of 181 with its portal room rows, y04 differing until silverfish are modelled).
-const TOLERANCE: usize = 179;
+/// table rows; 117 of 119 with issue 12a's survival rows; 126 of 128 with 12b's escape rows; 135 of 137 with 13a's smelting rows; 150 of 152 with 14a's bucket rows; 156 of 158 with the sneak rows of client parity; 158 of 160 with its soul sand rows; 162 of 164 with issue 17's enderman rows; 168 of 170 with issue 18's burrow rows; 176 of 178 with issue 19's eye rows; 179 of 181 with its portal room rows, y04 differing until silverfish are modelled; 183 with issue 56's four sprint rows, m00-3 a timing row: docs/problems/sprint.md).
+const TOLERANCE: usize = 183;
 /// A placed mob that ends farther than this from where it was put moved (it ticked).
 const MOB_MOVED: f64 = 0.5;
 /// An enderman's creepy flag (`EnderMan.DATA_CREEPY`, entity data 17).

@@ -47,6 +47,38 @@ What this changes in the plan:
 
 Not read: the client's side of a sprint hit (`MultiPlayerGameMode.attack` running `Player.attack` locally), swimming's speed (`Player.travel` in water), and `AttributeInstance.calculateValue` (the standard `value × (1 + amount)` is assumed for `add_multiplied_total`).
 
+## S3: physics and parity
+
+### Inertia before the move (fixed)
+The sprint-jump test measured 8.756 b/s against vanilla's 7.127 (CI 46118649784). The cause was older than the sprint: a tick's horizontal inertia was taken from where the body ended the move (clojurecraft's `landed`), not from where it stood before it (`LivingEntity.travelInAir`). Fixed in 653ac072; see [[inertia-before-the-move]]. The jump and ledge rows now also compare the final position within 0.25 blocks (05a491d3), so an error of this kind can no longer hide inside a block cell.
+
+### m00-3: a hurt's motion lands a client tick early or late (open, not physics)
+**The last recorded failure:** parity 46121838127 on 8643d925 passed 219 of 239. m00-3 differs:
+- real ended at (-34.065, 69.420, 0.5): the first tick of a jump from y 69;
+- sim ended at (-34.879, 70.249, 0.5): the top of a jump, about 5 ticks further on.
+
+On main (parity 46123165102) the row matched by cell, with real at -37.167 and sim at -37.531: a 0.36 gap that the cell comparison hid.
+
+**What the real recording shows.** These come from `replay export` of `m00-3.real.rsr` (probe 46124185859). Ticks are script ticks, events are the recording's.
+- **Tick 34, the first fall.** The bot lands at y 78.0 after falling 8 blocks. The damage event (ev 2378) and the server's `set_entity_motion` for the bot (ev 2389) both arrive before tick 35 (ev 2404). The motion zeroes the horizontal velocity, and tick 35 jumps from it whole (y 78.42).
+- **Tick 65, a second fall.** The new inertia made this fall 4.25 blocks, from 78.25 to 74.0; on main the fall here was 3.25 and did no damage. The damage (ev 3519) arrives before tick 66, but the motion (ev 3533) arrives after it. By then tick 66 has jumped, to (-16.639, 74.42).
+  - The motion sets the velocity to (0, -0.078, 0), so tick 67 moves 0.0196 in x (the air input alone) and falls to 74.342.
+  - The jump is lost. The body lands at tick 69 and waits out the 10-tick jump cooldown. That is the 5-tick lag at the end.
+- **Main's run did the opposite at its first fall.** It landed at tick 35, and the motion (ev 2377) came after tick 36 (ev 2361).
+- No column was missing, no position was sent twice, and no block changed near the path. Real reported clean: no teleport.
+
+**The cause.** The client takes the server's `set_entity_motion` for its own body as vanilla does: it sets the velocity, so a jump the server has not yet seen is lost.
+- A real server sends the motion at the end of the server tick that handled the landing move. Whether it reaches the client before the client's next tick or the one after depends on where the two ticks' phases fall. Here that was once early, twice late, and once split, with the damage early and the motion late.
+- The model (`bot::lockstep::run_acting`) always delivers the motion late. It sets `motion_due` while it handles the move, sends the motion from the next `In::Tick`, and the bot reads it only after its next tick.
+- So any row that takes fall damage and jumps on the next tick has a timing coin-flip in real that the model cannot match. The inertia fix moved m00-3's path onto a second hurt fall, which exposed it.
+
+**Proposed, for the lead to choose:**
+1. **Write m00-3 down as the table's timing row**, alongside y04's silverfish, and keep TOLERANCE at the count that holds. This needs no code.
+2. **A start with fall damage off for the `jump:` m-rows**, so no hurt motion meets a jump. This changes their health class, so it is a parity-table decision (moments.toml and the real side's gamerule, in moments.rs).
+3. **Not proposed:** delivering the motion early in the model. That would trade m00-3 for main's case, and the real server does both.
+
+Physics needs no change: the real body moved exactly as the client physics predicts, tick by tick, between the motion packets.
+
 ## Lead: walls found in the races
 
 ### Wall L1: a retreat that circles the same creeper never ends (progress-invariant gap)
@@ -55,3 +87,4 @@ Not read: the client's side of a sprint hit (`MultiPlayerGameMode.attack` runnin
 - **Needs:** a retreat from a `never_fight` kind, repeated around the same entity and the same work site, must end the loop. After N returns, the work site is given up (a new furnace elsewhere), or the bot waits out of sight until the creeper is gone. N comes from data, and every firing writes a ledger note.
 - **Decision:** fixed in #56 only if the sprint arm does not clear it. Sprinting widens the gap on each retreat, but it does not end the loop.
 - **Done, in world terms:** in the races, no bot dies to a creeper after more than two retreats from the same creeper.
+||||||| 8744ed3b
