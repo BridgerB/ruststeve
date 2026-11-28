@@ -2638,8 +2638,8 @@ watch = [[40, 20, 0], [40, 19, 0]]
 [[moment]]
 id = "e07-bow-high"
 landing = 10
-dx = 60
-dz = -180
+dx = -60
+dz = 70
 script = "bow:20"
 ticks = 220
 difficulty = "normal"
