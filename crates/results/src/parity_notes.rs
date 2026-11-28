@@ -12,7 +12,8 @@ fn fired(notes: &[String], needle: &str) -> usize {
 }
 
 /// Every miss, as a line for the report: the row, the side, the note, the count asked and the
-/// count fired. A row with `notes` and no result on a side is a miss for each of its notes.
+/// count fired, then each note that matched (so a substring two notes share is seen as such). A
+/// row with `notes` and no result on a side is a miss for each of its notes.
 pub fn check(moments: &[Moment], results: &[MomentResult]) -> Vec<String> {
     let mut misses = Vec::new();
     for m in moments.iter().filter(|m| !m.notes.is_empty()) {
@@ -24,11 +25,19 @@ pub fn check(moments: &[Moment], results: &[MomentResult]) -> Vec<String> {
                 let got = run.map(|r| fired(&r.notes, needle));
                 let want = usize::try_from(*want).unwrap_or(usize::MAX);
                 if got != Some(want) {
-                    misses.push(format!(
+                    let mut line = format!(
                         "{} {side:?}: \"{needle}\" fired {}, want {want}",
                         m.id,
                         got.map_or_else(|| "no result".to_owned(), |n| n.to_string())
-                    ));
+                    );
+                    for n in run
+                        .into_iter()
+                        .flat_map(|r| &r.notes)
+                        .filter(|n| n.contains(needle))
+                    {
+                        line.push_str(&format!("\n  - matched: {n}"));
+                    }
+                    misses.push(line);
                 }
             }
         }
@@ -112,6 +121,27 @@ mod tests {
         let misses = check(&[asked()], &rs);
         assert_eq!(misses.len(), 1, "{misses:?}");
         assert!(misses[0].contains("Sim") && misses[0].contains("fired 2, want 1"));
+    }
+
+    /// Parity 46130761031: "stash done" was in two notes of one stash, the window's close and
+    /// the planner's end; the miss shows both, and a substring only one carries counts one.
+    #[test]
+    fn a_substring_two_notes_share_counts_both_and_shows_them() {
+        let notes = [
+            "chest closed at (21, 80, 20): stash done, 74 of 74 cobblestone",
+            "stash done: 77 items at (21, 80, 20)",
+        ];
+        let rs = [result(Source::Real, &notes), result(Source::Sim, &notes)];
+        let shared = check(&[moment(&[("stash done", 1)])], &rs);
+        assert_eq!(shared.len(), 2, "{shared:?}");
+        assert!(shared[0].contains("fired 2, want 1"));
+        assert!(shared[0].contains("matched: chest closed at"));
+        assert!(shared[0].contains("matched: stash done: 77 items"));
+        let unique = check(
+            &[moment(&[("stash done:", 1), ("chest closed at", 1)])],
+            &rs,
+        );
+        assert!(unique.is_empty(), "{unique:?}");
     }
 
     #[test]
