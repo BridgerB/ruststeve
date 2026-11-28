@@ -836,6 +836,99 @@ mod tests {
         assert_eq!(plan.pace.stops, 2);
     }
 
+    /// The gate only ever writes `sprint`: every other key, the look and the pitch are the
+    /// task's own, whatever the verdict (lead-56 on the planner test's walk under the log).
+    #[test]
+    fn the_gate_changes_nothing_but_the_sprint_key() {
+        let cases: Vec<(World, Controls)> = vec![
+            (flat(), ahead()),
+            (
+                flat(),
+                Controls {
+                    jump: true,
+                    yaw: 37.0,
+                    pitch: Some(12.0),
+                    ..ahead()
+                },
+            ),
+            (
+                flat(),
+                Controls {
+                    sneak: true,
+                    ..ahead()
+                },
+            ),
+            (
+                flat(),
+                Controls {
+                    forward: false,
+                    ..ahead()
+                },
+            ),
+            {
+                let mut w = flat();
+                put(&mut w, (0, 63, 2), BlockKind::Lava);
+                (w, ahead())
+            },
+            {
+                let mut w = flat();
+                w.player.food = Some(HUNGRY);
+                w.player.saturation = Some(0.0);
+                (w, ahead())
+            },
+        ];
+        let mut plan = Plan::new(crate::Aim::Table);
+        plan.task = Task::ToLog(crate::walk::Walk::new(
+            (0, 64, 40),
+            path::Goal::Block { pos: (0, 64, 40) },
+            crate::walk::Arrive::Goal,
+            0,
+        ));
+        for (t, (mut w, c)) in cases.into_iter().enumerate() {
+            for tick in 0..3u64 {
+                w.ticks = 100 * t as u64 + tick;
+                let out = plan.pace_gate(&w, c);
+                assert_eq!(
+                    Controls {
+                        sprint: c.sprint,
+                        ..out
+                    },
+                    c,
+                    "case {t} tick {tick}"
+                );
+            }
+        }
+    }
+
+    /// A walk to within reach of a block 3 over the floor: the route's goal (`Near`, height in
+    /// its range) takes the cell under it, the arrival (`PICKUP_RISE` 2) never would; that end
+    /// is refused and the route goes up the step beside it instead.
+    #[test]
+    fn a_route_end_the_arrival_refuses_is_planned_again() {
+        let mut w = flat();
+        put(&mut w, (1, 64, 10), BlockKind::Stone);
+        for y in 65..=68 {
+            for x in -1..=2 {
+                for z in 8..=12 {
+                    if (x, y, z) != (1, 64, 10) {
+                        put(&mut w, (x, y, z), BlockKind::Air);
+                    }
+                }
+            }
+        }
+        let mut walk = crate::walk::Walk::to_block((0, 67, 10), 0);
+        assert!(walk.route_now(&w, 0));
+        let end = walk.waypoints.as_ref().and_then(|v| v.last().copied());
+        assert_eq!(end, Some((1, 65, 10)), "{:?}", walk.waypoints);
+        assert!(walk.more.blocked.contains(&(0, 64, 10)));
+        assert!(
+            walk.more
+                .said
+                .iter()
+                .any(|(w, _)| w.starts_with("walk: route end"))
+        );
+    }
+
     /// The constants are config/sprint.toml's `[policy]` (and its `[exhaustion]`, which they
     /// come from).
     #[test]

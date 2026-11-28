@@ -55,6 +55,7 @@ In the End a side whose floor neighbour and every cell under it to the dimension
 ## Issue 56: the walk asks to sprint
 - `toward` (and so `follow`) holds the sprint key; the pace gate ([[sprint]], `plan::sprint`) keeps it where the food and the ground allow. A bridge or a sneak at an edge clears it and sets `More.step`, which `Walk::pace` hands the gate for its "sprint refused" note. `Walk::left` is the route still to go.
 - A waypoint reached is a tick with no key held, except while the body sprints: then the walk steers on to the next waypoint the same tick, since a release ends the sprint (CI 46120536785: a stop and a start every few ticks).
+- A walk to within reach (`Arrive::Reach`) refuses a found route whose end is under its block by more than `PICKUP_RISE`: the route's `Goal::Near` counts height in its range and took such a cell, which the arrival never accepts. The end is added to `More.blocked` and the route planned again, at most `END_REFUSALS` (4) times, with a note "walk: route end refused" (probe 46126047959: the planner test's walk ended at (189, 72, 24) under the log at (189, 75, 24) and turned on the spot until NoProgress).
 
 ## See also
 - [[pathfinding]] - the routes.
