@@ -6,7 +6,7 @@ tags: [world, chunks, overlay, fold, state]
 aliases: [World, World::step, block_at, state_at, overlay, chunk columns, Event, Effect, world crate]
 status: verified
 lastUpdated: 2026-11-27
-verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
+verifiedAgainst: ruststeve@36b9952 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn step(&mut self, e: &Event) -> Vec<Effect> {"
   - "ruststeve:crates/world/src/lib.rs#pub fn state_at(&self, pos: BlockPos) -> Option<u32> {"
@@ -36,10 +36,10 @@ related:
   - `dimension`: type id, name, `min_y` and height from the generated dimension types;
   - `columns`: `BTreeMap<ChunkPos, Arc<Column>>`, as received;
   - `overlay`: block changes by column;
-  - `player`: entity id, position and look from teleports (relative flags applied), health, food, saturation; air, on fire, effects, attributes, in combat, experience;
+  - `player`: entity id, position and look from teleports (relative flags applied), health, food, saturation; air, on fire, the server's sprint flag, effects, attributes, in combat, experience;
   - `entities`, `inventory` (window 0) and `memory` (sightings) ([[entities-and-inventory]], [[memory-sightings]]);
   - `held`, the dig `sequence_sent`/`sequence_acked`, the pending `click` and `pickups` (issue 10a, [[entities-and-inventory]], [[wire-actions]]);
-  - `body`, `controls` and what was last sent (position, look, and `sent_input`, the keys): the physics body and what it presses ([[physics]]);
+  - `body`, `controls` and what was last sent (position, look, `sent_input`, the keys, and `sent_sprinting`, the sprint reported): the physics body and what it presses ([[physics]]);
   - `hits`, `death` and `stage_reached`: the hits on the bot in the last minute, the server's death message, the highest stage held ([[entities-and-inventory]], [[race-and-results]]);
   - `window` and `closed_window`: the window open besides the inventory and the one the bot last closed ([[table-window]], [[wire-container-click]]); `kills` ([[entities-and-inventory]]);
   - what the bot hears and is told (issue 16e), each list the newest 64 (`SOUNDS_KEPT`): `sounds`, `level_events`, `explosions`, `game_events`, `chat`; and `bosses`, `spawner_mobs` (each spawner's mob from its block-entity data), `cracks`, `cooldowns`, `hurt_from`, `won` (the `win_game` game event), `dragon_dead` (issue 20b: the server tick of the dragon's entity event 3, or its boss bar removed in the End), `attacks_sent` and `last_attack` (the strikes the ledger names), `crystals_removed` and `crystals_absent` (issue 20 part 2: a crystal's removal held for its blast, a spike seen bare; a destruction goes to memory, [[entities-and-inventory]]), `chunk_center`, `view_radius`, `simulation_distance`, `biome_updates`;
