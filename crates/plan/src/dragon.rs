@@ -563,8 +563,12 @@ pub fn out_of_breath_except(w: &World, feet: [f64; 3], refused: &[[i32; 3]]) -> 
 
 /// Blocks from the bot a charging dragon counts within, and the cosine its facing must be within
 /// of the line to the bot (the charge flies at the player: `DragonChargePlayerPhase`).
-pub const CHARGE_RANGE: f64 = 40.0;
-pub const CHARGE_CONE: f64 = 0.8;
+/// Wall 61 (race 46103123144 lanes 5 and 8, hit on the ground at "charge: dodge to"): the dodge
+/// begun from the charge's first ticks. The charge starts from the perch with the bot past the
+/// scan's 20, so it is seen from up to 64 (was 40). Its facing turns onto the bot as it goes, so
+/// any facing within 90 degrees of the line counts (was 37).
+pub const CHARGE_RANGE: f64 = 64.0;
+pub const CHARGE_CONE: f64 = 0.0;
 /// Blocks on the plane a bunker is gone into from at a charge.
 pub const CHARGE_BUNKER_REACH: f64 = 12.0;
 
@@ -1190,6 +1194,10 @@ pub fn pour_cells(at: [i32; 3]) -> Vec<[i32; 3]> {
 /// dragon are kept by while it lasts.
 pub const RECOVER_BELOW: f32 = 10.0;
 pub const RECOVERED: f32 = 16.0;
+/// Ticks a recovery that cannot heal (food under `REGEN_FOOD` and none held) lasts before it is
+/// given up and the fight goes on under the danger-line rules (wall 60: race 46103123144 lanes 12
+/// and 13 sat 24,000 ticks at 6.4 health).
+pub const RECOVER_FUTILE_TICKS: u64 = 600;
 pub const RECOVER_CLEAR: f64 = 3.0;
 pub const RECOVER_DRAGON: f64 = 24.0;
 
@@ -2328,6 +2336,11 @@ pub struct DragonState {
     pub ender_water_at: u64,
     #[serde(default)]
     pub recovering: bool,
+    /// When this recovery began, and whether it was given up as one that cannot heal (wall 60).
+    #[serde(default)]
+    pub recover_since: Option<u64>,
+    #[serde(default)]
+    pub recover_futile: bool,
     /// The item in hand at the enderman's strikes and since when (a swap resets the charge).
     #[serde(default)]
     pub ender_hand: Option<ItemKind>,
@@ -4999,8 +5012,38 @@ impl Plan {
             return None;
         }
         let health = w.player.health?;
-        if health < RECOVER_BELOW && !self.dragon.recovering {
+        let fed = w.player.food.is_some_and(|f| f >= REGEN_FOOD);
+        let food_held = self
+            .table
+            .as_ref()
+            .and_then(|t| crate::eat::best_food(w, &t.survival))
+            .is_some();
+        // Given up as futile: again only once it can heal (fed, or food to eat) or once healed.
+        if self.dragon.recover_futile && (fed || food_held || health > RECOVERED) {
+            self.dragon.recover_futile = false;
+        }
+        if self.dragon.recovering
+            && !fed
+            && !food_held
+            && self
+                .dragon
+                .recover_since
+                .is_some_and(|t| tick >= t + RECOVER_FUTILE_TICKS)
+        {
+            self.dragon.recovering = false;
+            self.dragon.recover_futile = true;
+            self.note(
+                tick,
+                format!("recover: given up at {health:.1}"),
+                format!(
+                    "food {:?} under {REGEN_FOOD} and none held: no healing in {RECOVER_FUTILE_TICKS} ticks; on with the fight under the danger line's rules",
+                    w.player.food
+                ),
+            );
+        }
+        if health < RECOVER_BELOW && !self.dragon.recovering && !self.dragon.recover_futile {
             self.dragon.recovering = true;
+            self.dragon.recover_since = Some(tick);
             self.note(
                 tick,
                 format!("recover: health {health:.1} under {RECOVER_BELOW}"),

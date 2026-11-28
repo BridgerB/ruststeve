@@ -803,8 +803,16 @@ fn a_charge_is_waited_out_crouched_or_in_the_bunker() {
     with_dragon(&mut away, [-17.5, 64.0, 0.5], 8, 270.0);
     assert!(dragon::charging_at(&away, feet).is_none(), "facing away");
     let mut far = end_at(feet);
-    with_dragon(&mut far, [-40.5, 64.0, 0.5], 8, 90.0);
-    assert!(dragon::charging_at(&far, feet).is_none(), "53 off");
+    with_dragon(&mut far, [-60.5, 64.0, 0.5], 8, 90.0);
+    assert!(dragon::charging_at(&far, feet).is_none(), "73 off");
+    // From the charge's first ticks (wall 61): 53 off, its facing still turning (45 degrees off
+    // the line), the dodge already due.
+    let mut early = end_at(feet);
+    with_dragon(&mut early, [-40.5, 64.0, 0.5], 8, 45.0);
+    assert!(
+        dragon::charging_at(&early, feet).is_some(),
+        "53 off, turning"
+    );
     let mut holding = end_at(feet);
     with_dragon(&mut holding, [-17.5, 64.0, 0.5], 0, 90.0);
     assert!(
@@ -2851,4 +2859,29 @@ fn no_meal_begins_in_the_air() {
     }
     let p = Plan::new(Aim::Race);
     assert!(p.dragon_holds_meal(&air));
+}
+
+#[test]
+fn a_recovery_that_cannot_heal_is_given_up_after_its_cap() {
+    // Wall 60: race 46103123144 lanes 12 and 13 sat 24,000 ticks in recovery at 6.4 health, food
+    // under 18 (no natural regeneration).
+    let mut w = end_at([12.5, 64.0, 0.5]);
+    w.player.health = Some(6.4);
+    w.player.food = Some(17);
+    let mut p = Plan::new(Aim::Race);
+    assert!(p.recover_step(&w, 0).is_some());
+    assert!(p.dragon.recovering);
+    assert!(
+        p.recover_step(&w, dragon::RECOVER_FUTILE_TICKS - 1)
+            .is_some()
+    );
+    assert_eq!(p.recover_step(&w, dragon::RECOVER_FUTILE_TICKS), None);
+    assert!(!p.dragon.recovering);
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "recover: given up at 6.4")
+    );
+    // Not begun again while it still cannot heal.
+    assert_eq!(p.recover_step(&w, dragon::RECOVER_FUTILE_TICKS + 20), None);
 }
