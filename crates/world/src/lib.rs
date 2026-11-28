@@ -472,6 +472,10 @@ pub struct Window {
     /// time left, 1 lit total, 2 cook progress, 3 cook total (issue 13a).
     #[serde(default)]
     pub properties: BTreeMap<i16, i16>,
+    /// The block it was opened from: the last `Act::UseOn` before its `open_screen` (issue 77,
+    /// a chest's window says nothing of its block).
+    #[serde(default)]
+    pub block: Option<BlockPos>,
 }
 
 impl Window {
@@ -741,6 +745,10 @@ pub struct World {
     /// such an answer puts in the player's slots is still the player's.
     #[serde(default)]
     pub closed_window: Option<Window>,
+    /// The block the last `Act::UseOn` clicked: the window a server opens next is that block's
+    /// (issue 77).
+    #[serde(default)]
+    pub used_on: Option<BlockPos>,
     /// Entities the bot struck that the server then said died (entity event 3) (issue 12a):
     /// other deaths in view (another player's kill, a player in lava) are not the bot's.
     #[serde(default)]
@@ -1397,6 +1405,7 @@ impl World {
                 sequence: 0,
             })],
             Act::UseOn { pos, face } => {
+                self.used_on = Some(pos);
                 self.sequence_sent += 1;
                 // The cursor at the middle of the face clicked.
                 let cursor = match face {
@@ -1441,6 +1450,33 @@ impl World {
         self.window
             .as_ref()
             .map_or((0, self.inventory.state_id), |w| (w.id, w.state_id))
+    }
+
+    /// An open chest's window (`generic_9x3`, or `generic_9x6` for a double chest) told memory
+    /// what it shows (issue 77, brain/ruststeve/design/chests.md): its own slots, all but the
+    /// last 36. Memory takes them only for a chest it holds (placed or seen exposed).
+    fn fold_chest(&mut self) {
+        let Some(w) = self.window.as_ref() else {
+            return;
+        };
+        let Some(pos) = w.block else {
+            return;
+        };
+        let chest_menu = usize::try_from(w.menu)
+            .ok()
+            .and_then(|i| data::generated::registries::MENU.get(i))
+            .is_some_and(|m| matches!(*m, "generic_9x3" | "generic_9x6"));
+        let Some(dim) = self.dimension.as_ref().map(|d| d.name.clone()) else {
+            return;
+        };
+        if !chest_menu || w.size <= 36 {
+            return;
+        }
+        let own = w.size - 36;
+        let stacks: Vec<(ItemKind, i32)> = w.slots.range(0..own).map(|(_, s)| *s).collect();
+        let tick = self.session.server_ticks;
+        self.memory
+            .chest_contents(&dim, (pos.x, pos.y, pos.z), &stacks, tick);
     }
 
     /// The server answered the pending click: its window's state id moved.
@@ -1679,6 +1715,7 @@ impl World {
                     }
                     self.inventory.carried = carried.and_then(Inventory::stack);
                     self.window_moved(*window, *state_id);
+                    self.fold_chest();
                 } else if *window == 0 {
                     self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
@@ -1708,6 +1745,7 @@ impl World {
                         self.inventory.put(inv, *item);
                     }
                     self.window_moved(*window, *state_id);
+                    self.fold_chest();
                 } else if *window == 0 {
                     self.window_moved(0, *state_id);
                     self.inventory.state_id = *state_id;
@@ -1831,6 +1869,7 @@ impl World {
                 self.window = Some(Window {
                     id: *window,
                     menu: *menu,
+                    block: self.used_on.take(),
                     ..Window::default()
                 });
                 self.click = None;

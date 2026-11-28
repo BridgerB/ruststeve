@@ -65,6 +65,8 @@ enum Loc {
     Inv(usize),
     /// An open furnace's own slot: 0 input, 1 fuel, 2 result (issue 13a).
     Furnace(usize),
+    /// An open chest's own slot, 0-26 (issue 77).
+    Chest(usize),
 }
 
 /// A furnace's open menu (`FurnaceMenu`, issue 13a): its slots live in the block entity.
@@ -147,10 +149,13 @@ pub struct Survival {
     pub clicks: u64,
     /// A crafting table's menu, when one is open (issue 11a), and the last container id given.
     pub table: Option<Table>,
-    container_counter: i32,
+    pub(crate) container_counter: i32,
     /// Furnaces placed, by position, and the one whose menu is open (issue 13a).
     pub furnaces: std::collections::BTreeMap<(i32, i32, i32), crate::furnace::Furnace>,
     pub furnace: Option<FurnaceMenu>,
+    /// Chests opened, by position, and the one whose menu is open (issue 77).
+    pub chests: std::collections::BTreeMap<(i32, i32, i32), crate::chest::Chest>,
+    pub chest: Option<crate::chest::ChestMenu>,
     /// Blocks placed.
     pub placed: u64,
     /// Air, fire, hunger, eating and placed mobs (issue 12a, `life`).
@@ -179,6 +184,8 @@ impl Survival {
             container_counter: 0,
             furnaces: std::collections::BTreeMap::new(),
             furnace: None,
+            chests: std::collections::BTreeMap::new(),
+            chest: None,
             placed: 0,
             life: crate::life::Life::default(),
         }
@@ -364,7 +371,7 @@ pub fn property(state: u32, name: &str) -> Option<&'static str> {
     None
 }
 
-fn block_kind(sim: &Sim, (x, y, z): (i32, i32, i32)) -> Option<BlockKind> {
+pub(crate) fn block_kind(sim: &Sim, (x, y, z): (i32, i32, i32)) -> Option<BlockKind> {
     sim.state_at(x, y, z).and_then(data::block_of_state)
 }
 
@@ -1002,6 +1009,9 @@ impl Sim {
 
     /// The menu open now: a crafting table's, else the inventory's (window 0).
     fn menu_id(&self) -> i32 {
+        if let Some(c) = &self.survival.chest {
+            return c.id;
+        }
         match (&self.survival.table, &self.survival.furnace) {
             (Some(t), _) => t.id,
             (None, Some(f)) => f.id,
@@ -1011,6 +1021,9 @@ impl Sim {
 
     /// The open menu's slot count.
     fn menu_size(&self) -> usize {
+        if self.survival.chest.is_some() {
+            return crate::chest::MENU;
+        }
         if self.survival.furnace.is_some() {
             FURNACE_MENU_SLOTS
         } else {
@@ -1020,6 +1033,9 @@ impl Sim {
 
     /// The client's view of a menu slot, as the server last told it.
     fn remote_slot(&self, i: usize) -> Option<Stack> {
+        if let Some(c) = &self.survival.chest {
+            return c.remote.get(i).copied().flatten();
+        }
         match (&self.survival.table, &self.survival.furnace) {
             (Some(t), _) => t.remote.get(i).copied().flatten(),
             (None, Some(f)) => f.remote.get(i).copied().flatten(),
@@ -1028,10 +1044,15 @@ impl Sim {
     }
 
     fn set_remote_slot(&mut self, i: usize, v: Option<Stack>) {
-        let cell = match (&mut self.survival.table, &mut self.survival.furnace) {
-            (Some(t), _) => t.remote.get_mut(i),
-            (None, Some(f)) => f.remote.get_mut(i),
-            (None, None) => self.survival.remote.get_mut(i),
+        let cell = match (
+            &mut self.survival.table,
+            &mut self.survival.furnace,
+            &mut self.survival.chest,
+        ) {
+            (_, _, Some(c)) => c.remote.get_mut(i),
+            (Some(t), _, None) => t.remote.get_mut(i),
+            (None, Some(f), None) => f.remote.get_mut(i),
+            (None, None, None) => self.survival.remote.get_mut(i),
         };
         if let Some(c) = cell {
             *c = v;
@@ -1042,6 +1063,13 @@ impl Sim {
     /// menu slots. A crafting table's: 0 the result, 1-9 its 3x3 grid, 10-45 the inventory's main
     /// and hotbar slots (window 0's 9-44).
     fn loc(&self, slot: usize) -> Option<Loc> {
+        // A chest's: 0-26 its own, 27-62 the inventory's main and hotbar slots (issue 77).
+        if self.survival.chest.is_some() {
+            return match slot {
+                0..=26 => Some(Loc::Chest(slot)),
+                _ => crate::chest::inventory_slot(slot).map(Loc::Inv),
+            };
+        }
         // A furnace's: 0-2 its own, 3-38 the inventory's main and hotbar slots.
         if self.survival.furnace.is_some() {
             return match slot {
@@ -1061,6 +1089,17 @@ impl Sim {
     }
 
     fn get(&self, l: Loc) -> Option<Stack> {
+        if let Loc::Chest(i) = l {
+            let pos = self.survival.chest.as_ref()?.pos;
+            return self
+                .survival
+                .chests
+                .get(&pos)?
+                .items
+                .get(i)
+                .copied()
+                .flatten();
+        }
         if let Loc::Furnace(i) = l {
             let pos = self.survival.furnace.as_ref()?.pos;
             return self
@@ -1078,11 +1117,23 @@ impl Sim {
             (None, Loc::Result) => self.survival.slots.get(RESULT).copied().flatten(),
             (None, Loc::Grid(i)) => self.survival.slots.get(1 + i).copied().flatten(),
             (_, Loc::Inv(i)) => self.survival.slots.get(i).copied().flatten(),
-            (_, Loc::Furnace(_)) => None,
+            (_, Loc::Furnace(_) | Loc::Chest(_)) => None,
         }
     }
 
     fn put(&mut self, l: Loc, v: Option<Stack>) {
+        if let Loc::Chest(i) = l {
+            if let Some(pos) = self.survival.chest.as_ref().map(|c| c.pos)
+                && let Some(cell) = self
+                    .survival
+                    .chests
+                    .get_mut(&pos)
+                    .and_then(|c| c.items.get_mut(i))
+            {
+                *cell = v;
+            }
+            return;
+        }
         if let Loc::Furnace(i) = l {
             if let Some(pos) = self.survival.furnace.as_ref().map(|f| f.pos)
                 && let Some(f) = self.survival.furnaces.get_mut(&pos)
@@ -1097,7 +1148,7 @@ impl Sim {
             (None, Loc::Result) => self.survival.slots.get_mut(RESULT),
             (None, Loc::Grid(i)) => self.survival.slots.get_mut(1 + i),
             (_, Loc::Inv(i)) => self.survival.slots.get_mut(i),
-            (_, Loc::Furnace(_)) => None,
+            (_, Loc::Furnace(_) | Loc::Chest(_)) => None,
         };
         if let Some(c) = cell {
             *c = v;
@@ -1129,6 +1180,9 @@ impl Sim {
     }
 
     fn state_id_mut(&mut self) -> &mut i32 {
+        if let Some(c) = &mut self.survival.chest {
+            return &mut c.state_id;
+        }
         match (&mut self.survival.table, &mut self.survival.furnace) {
             (Some(t), _) => &mut t.state_id,
             (None, Some(f)) => &mut f.state_id,
@@ -1453,7 +1507,7 @@ impl Sim {
             Loc::Furnace(crate::furnace::FUEL) => {
                 data::generated::fuel::fuel_ticks(item).is_some() || item == ItemKind::Bucket
             }
-            Loc::Furnace(_) => true,
+            Loc::Furnace(_) | Loc::Chest(_) => true,
         }
     }
 
@@ -1585,6 +1639,10 @@ impl Sim {
             self.furnace_quick_move(i, l, stack);
             return Ok(out);
         }
+        if self.survival.chest.is_some() {
+            self.chest_quick_move(i, l, stack);
+            return Ok(out);
+        }
         let grid_before = self.grid();
         self.put(l, None);
         let left = match (table, i) {
@@ -1647,6 +1705,17 @@ impl Sim {
         }
     }
 
+    /// `ChestMenu.quickMoveStack` (issue 77): a chest slot to the inventory from its end, an
+    /// inventory slot to the chest from its start; what does not fit stays where it was.
+    fn chest_quick_move(&mut self, i: usize, l: Loc, stack: Stack) {
+        self.put(l, None);
+        let (range, reverse) = crate::chest::quick_move_target(i);
+        let left = self.move_to(stack, range, reverse);
+        if left > 0 {
+            self.put(l, Some((stack.0, left)));
+        }
+    }
+
     /// The client closed a menu (`removed`): its grid goes back into the inventory, and so does
     /// the cursor (`dropOrPlaceInInventory`: a live player keeps it; only a full inventory drops
     /// what does not fit).
@@ -1654,8 +1723,8 @@ impl Sim {
         if window != self.menu_id() {
             return Ok(Vec::new());
         }
-        if self.survival.furnace.take().is_some() {
-            // A furnace keeps its slots; only the cursor goes back.
+        if self.survival.furnace.take().is_some() || self.survival.chest.take().is_some() {
+            // A furnace or a chest keeps its slots; only the cursor goes back.
             if let Some(c) = self.survival.carried.take() {
                 let left = self.survival.add(c);
                 if left > 0 {
@@ -1733,6 +1802,8 @@ impl Sim {
                 out.extend(self.open_table(pos)?);
             } else if block_kind(self, pos) == Some(BlockKind::Furnace) {
                 out.extend(self.open_furnace(pos)?);
+            } else if block_kind(self, pos) == Some(BlockKind::Chest) {
+                out.extend(self.open_chest(pos)?);
             } else if self.survival.held_stack().map(|(k, _)| k)
                 == Some(data::ItemKind::FlintAndSteel)
             {
@@ -1773,7 +1844,7 @@ impl Sim {
     }
 
     /// Another menu is open: the server closes it first.
-    fn close_open_menu(&mut self) -> Result<Vec<Wire>, EncodeError> {
+    pub(crate) fn close_open_menu(&mut self) -> Result<Vec<Wire>, EncodeError> {
         let id = self.menu_id();
         if id == 0 {
             return Ok(Vec::new());
@@ -1892,10 +1963,16 @@ impl Sim {
     /// `stillValid`: a crafting table's menu closes when the player is more than 8 blocks from
     /// it (or it is gone), told by `container_close`.
     pub(crate) fn tick_menu(&mut self) -> Result<Vec<Wire>, EncodeError> {
-        let (id, (x, y, z), kind) = match (&self.survival.table, &self.survival.furnace) {
-            (Some(t), _) => (t.id, t.pos, BlockKind::CraftingTable),
-            (None, Some(f)) => (f.id, f.pos, BlockKind::Furnace),
-            (None, None) => return Ok(Vec::new()),
+        self.forget_broken_chests();
+        let (id, (x, y, z), kind) = match (
+            &self.survival.table,
+            &self.survival.furnace,
+            &self.survival.chest,
+        ) {
+            (_, _, Some(c)) => (c.id, c.pos, BlockKind::Chest),
+            (Some(t), _, None) => (t.id, t.pos, BlockKind::CraftingTable),
+            (None, Some(f), None) => (f.id, f.pos, BlockKind::Furnace),
+            (None, None, None) => return Ok(Vec::new()),
         };
         let c = [f64::from(x) + 0.5, f64::from(y) + 0.5, f64::from(z) + 0.5];
         let d2: f64 = (0..3).map(|i| (self.pos[i] - c[i]).powi(2)).sum();

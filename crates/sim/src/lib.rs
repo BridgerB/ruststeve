@@ -836,6 +836,7 @@ pub fn flat_world(radius: i32, ground_y: i32) -> Result<ModelWorld, EncodeError>
     })
 }
 
+pub mod chest;
 pub mod end;
 pub mod enderman;
 pub mod eye;

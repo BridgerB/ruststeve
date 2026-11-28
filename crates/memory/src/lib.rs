@@ -12,10 +12,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use data::BlockKind;
 use data::generated::shapes::collision;
 use data::generated::tags::block_tag;
 use data::types::Collision;
+use data::{BlockKind, ItemKind};
 
 /// A block position.
 pub type Cell = (i32, i32, i32);
@@ -25,9 +25,13 @@ pub type Cell = (i32, i32, i32);
 /// bricks). A position on record is then followed through every change. Water and lava are not
 /// cells here: clojurecraft found one fact per fluid cell froze a forest run (600,000 water
 /// cells); fluids become per-chunk pools later.
-const WATCHED: [BlockKind; 19] = [
+const WATCHED: [BlockKind; 20] = [
     BlockKind::CraftingTable,
     BlockKind::Furnace,
+    // A chest (issue 77, brain/ruststeve/design/chests.md): one the bot placed (the server's
+    // block update after the place) or one seen with an exposed face. Its contents are known
+    // only as its window showed them (`Memory::chest_contents`).
+    BlockKind::Chest,
     BlockKind::NetherBricks,
     BlockKind::Spawner,
     BlockKind::Obsidian,
@@ -301,6 +305,32 @@ pub struct Memory {
     /// snapshot's resume knows them; an untracked crystal is never one.
     #[serde(default)]
     crystals_destroyed: BTreeSet<(i32, i32)>,
+    /// Chests known (issue 77), by dimension and cell: made when a chest's cell is recorded
+    /// (placed by the bot or seen exposed), gone when that cell is seen to hold something else.
+    #[serde(default)]
+    chests: BTreeMap<(String, Cell), ChestSeen>,
+}
+
+/// A chest the bot knows of (issue 77, brain/ruststeve/design/chests.md). Its contents are only
+/// what its window showed, never guessed: `None` until it is opened.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChestSeen {
+    /// The server tick the chest was first recorded.
+    pub seen_tick: u64,
+    /// Each kind and its count, as the chest's window last showed them (a kind at 0 is absent).
+    pub contents: Option<BTreeMap<ItemKind, i32>>,
+    /// The server tick its window last showed them.
+    #[serde(default)]
+    pub opened_tick: Option<u64>,
+}
+
+impl ChestSeen {
+    /// How many of a kind the window last showed; `None` for a chest never opened.
+    pub fn count(&self, kind: ItemKind) -> Option<i32> {
+        self.contents
+            .as_ref()
+            .map(|c| c.get(&kind).copied().unwrap_or(0))
+    }
 }
 
 /// Kinds kept in `Memory::by_kind`.
@@ -434,6 +464,16 @@ impl Memory {
             .and_then(|s| data::block_of_state(s.state));
         let now = data::block_of_state(seen.state);
         if was != now {
+            let chest_key = (seen.dimension.clone(), seen.pos);
+            if now == Some(BlockKind::Chest) {
+                self.chests.entry(chest_key).or_insert(ChestSeen {
+                    seen_tick: at_tick,
+                    contents: None,
+                    opened_tick: None,
+                });
+            } else if was == Some(BlockKind::Chest) {
+                self.chests.remove(&chest_key);
+            }
             if let Some(k) = was.filter(|k| INDEXED.contains(k))
                 && let Some(set) =
                     self.by_kind
@@ -638,6 +678,41 @@ impl Memory {
             .sum()
     }
 
+    /// What a chest's window showed (issue 77): its slots' stacks, folded by kind. Only a chest on
+    /// record takes them (one placed or seen exposed: no X-ray); returns whether it was one.
+    pub fn chest_contents(
+        &mut self,
+        dimension: &str,
+        pos: Cell,
+        stacks: &[(ItemKind, i32)],
+        at_tick: u64,
+    ) -> bool {
+        let Some(chest) = self.chests.get_mut(&(dimension.to_owned(), pos)) else {
+            return false;
+        };
+        let mut contents = BTreeMap::new();
+        for (k, n) in stacks.iter().filter(|(_, n)| *n > 0) {
+            *contents.entry(*k).or_insert(0) += n;
+        }
+        chest.contents = Some(contents);
+        chest.opened_tick = Some(at_tick);
+        true
+    }
+
+    /// A chest on record at a cell.
+    pub fn chest(&self, dimension: &str, pos: Cell) -> Option<&ChestSeen> {
+        self.chests.get(&(dimension.to_owned(), pos))
+    }
+
+    /// Every chest on record in a dimension, in cell order.
+    pub fn chests(&self, dimension: &str) -> Vec<(Cell, &ChestSeen)> {
+        self.chests
+            .iter()
+            .filter(|((d, _), _)| d == dimension)
+            .map(|((_, c), s)| (*c, s))
+            .collect()
+    }
+
     /// Record a spike's crystal destroyed; whether it was new.
     pub fn record_crystal_destroyed(&mut self, spike: (i32, i32)) -> bool {
         self.crystals_destroyed.insert(spike)
@@ -779,6 +854,48 @@ mod tests {
 
     fn state(kind: BlockKind) -> u32 {
         kind.info().map(|i| i.default_state).unwrap()
+    }
+
+    /// Issue 77: a chest is on record once its cell is seen exposed, with no contents until a
+    /// window shows them; a cell never seen as a chest takes none; a chest dug is forgotten.
+    #[test]
+    fn a_chest_is_known_from_its_cell_and_its_contents_only_from_its_window() {
+        let ow = "minecraft:overworld";
+        let air = Some(state(BlockKind::Air));
+        let stone = Some(state(BlockKind::Stone));
+        let at = (10, 64, -3);
+        let mut m = Memory::new();
+        assert!(watched(state(BlockKind::Chest)));
+        // Buried: no exposed face, so never seen and never a chest.
+        assert!(Seen::check(ow, at, state(BlockKind::Chest), [stone; 6]).is_none());
+        assert!(!m.chest_contents(ow, at, &[(ItemKind::Cobblestone, 64)], 5));
+        assert!(m.chest(ow, at).is_none());
+        let seen = Seen::check(
+            ow,
+            at,
+            state(BlockKind::Chest),
+            [stone, air, stone, stone, stone, stone],
+        )
+        .unwrap();
+        assert!(m.record(seen, 7));
+        let c = m.chest(ow, at).unwrap();
+        assert_eq!((c.seen_tick, c.contents.clone()), (7, None));
+        assert_eq!(c.count(ItemKind::Cobblestone), None);
+        let shown = [
+            (ItemKind::Cobblestone, 64),
+            (ItemKind::Cobblestone, 10),
+            (ItemKind::String, 3),
+        ];
+        assert!(m.chest_contents(ow, at, &shown, 9));
+        let c = m.chest(ow, at).unwrap();
+        assert_eq!(c.count(ItemKind::Cobblestone), Some(74));
+        assert_eq!(c.count(ItemKind::Stick), Some(0));
+        assert_eq!(c.opened_tick, Some(9));
+        assert_eq!(m.chests(ow).len(), 1);
+        assert!(m.chests("minecraft:the_nether").is_empty());
+        let dug = Seen::check(ow, at, state(BlockKind::Air), [air; 6]).unwrap();
+        assert!(m.record(dug, 11));
+        assert!(m.chest(ow, at).is_none());
     }
 
     /// The kind index follows the latest sighting: a spawner seen is listed in its column, the
