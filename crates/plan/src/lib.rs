@@ -5691,11 +5691,10 @@ impl Plan {
                 ),
                 "a site beside lava seen exposed".to_owned(),
             );
-            let cast = if fresh {
-                cast::Cast::fresh(site, tick)
-            } else {
-                cast::Cast::new(site, tick)
-            };
+            // Wall 1's lava first is off (docs/problems/lava-portal.md wall 7: from the cast's
+            // start it gave up sites the room-first order fills); `fresh` is kept for the note.
+            let _ = fresh;
+            let cast = cast::Cast::new(site, tick);
             // Defend's own ranges, for the hold on a feet-level station sight dig (wall 4).
             let cast = match self.table.as_ref() {
                 Some(t) => cast.with_sight_hold(cast::SightHold::of(&t.survival)),
