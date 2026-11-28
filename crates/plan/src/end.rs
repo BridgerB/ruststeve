@@ -2972,30 +2972,17 @@ impl Plan {
         })
     }
 
-    /// The calm gate, the dragon's distance sampled each tick it is asked (`CALM_FROM`,
-    /// `CALM_TICKS`, `CALM_CLOSING`): no dragon sent, or holding at least 40 off and not closing.
+    /// The calm gate (the coordinator's rule, shared with E4): no dragon sent, or the dragon holding
+    /// (phase 0) at least `CALM_FROM` off.
     pub fn calm(&mut self, w: &World, tick: u64) -> bool {
+        // Holding and at least `CALM_FROM` off; no closing test (race 46079924222: a holding
+        // circle closes on part of every arc, and 13 of 14 climbs stopped for it, a holding dragon
+        // 93 and 97 off among them). `tick` is kept for the callers.
+        let _ = tick;
         let Some(body) = w.body else {
             return true;
         };
-        let Some((pos, phase)) = dragon(w) else {
-            self.end.dragon_dists.clear();
-            return true;
-        };
-        let d = dist(pos, body.pos);
-        if self.end.dragon_dists.last().is_none_or(|(t, _)| *t != tick) {
-            self.end.dragon_dists.push((tick, d));
-            self.end
-                .dragon_dists
-                .retain(|(t, _)| tick.saturating_sub(*t) <= CALM_TICKS + 5);
-        }
-        let closing = self
-            .end
-            .dragon_dists
-            .iter()
-            .find(|(t, _)| tick.saturating_sub(*t) >= CALM_TICKS)
-            .is_some_and(|(_, old)| old - d > CALM_CLOSING);
-        phase == Some(0) && d >= CALM_FROM && !closing
+        dragon(w).is_none_or(|(pos, phase)| phase == Some(0) && dist(pos, body.pos) >= CALM_FROM)
     }
 
     /// In the End a look no act asked for is straight down (`end_look`); every look still goes

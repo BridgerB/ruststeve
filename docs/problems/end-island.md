@@ -165,3 +165,5 @@ From the `end` frontier (or `dev-end-arrival` for development only), the ledger 
 ### 30. "Holding over 64 off" seldom holds (the coordinator, from race 46071506005)
 - **What happened**: the lull gate (no dragon, or holding farther than 64) was seldom true for long; it starved E4's climbs in 46071506005, and gates my stock's first start, its resume, the wooden pickaxe run, the retreat and the notch climb.
 - **Fix**: one rule with E4's: calm is the dragon holding (phase 0), at least `CALM_FROM` 40 off, and not closing (its distance not fallen by more than `CALM_CLOSING` 1 over the last `CALM_TICKS` 20: `Plan::calm`, sampling the distance each tick it is asked); every lull gate of mine reads it. Landing, perching, strafe, charge and fireballs keep their own stops. Test `calm_is_holding_forty_off_and_not_closing`.
+
+- **Changed** (race 46079924222 on 3911d67, read by E9: 14 climbs begun, 13 stopped for "not calm", a holding dragon 93 and 97 off among them: a holding circle closes on part of every arc): calm is the dragon holding (phase 0) at least 40 off, with no closing test. Test `calm_is_holding_forty_off` (95 off on an approaching arc: calm).
