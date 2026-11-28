@@ -988,6 +988,7 @@ impl Defend {
                 sneak: false,
                 yaw,
                 pitch: c.pitch,
+                sprint: false,
             };
             return (c, act, status);
         }
@@ -1147,6 +1148,7 @@ impl Defend {
                             sneak: false,
                             yaw,
                             pitch: None,
+                            sprint: false,
                         },
                         None,
                         DefendStatus::Running,
@@ -1216,6 +1218,7 @@ impl Defend {
                         sneak: false,
                         yaw: away,
                         pitch: None,
+                        sprint: false,
                     },
                     strike,
                     DefendStatus::Running,
@@ -1317,6 +1320,7 @@ impl Defend {
                                 sneak: false,
                                 yaw,
                                 pitch: None,
+                                sprint: false,
                             },
                             act,
                             DefendStatus::Running,
@@ -1373,6 +1377,7 @@ impl Defend {
                                 sneak: false,
                                 yaw,
                                 pitch: None,
+                                sprint: false,
                             },
                             None,
                             DefendStatus::Running,
@@ -1431,6 +1436,7 @@ impl Defend {
                             sneak: false,
                             yaw: toward,
                             pitch: None,
+                            sprint: false,
                         },
                         None,
                         DefendStatus::Running,

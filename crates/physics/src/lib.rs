@@ -246,6 +246,10 @@ pub struct Body {
     pub in_water: bool,
     pub in_lava: bool,
     pub eye_in_water: bool,
+    /// Sprinting after the stop rules (`sprint_allowed`), as `step_on` left it: what the client
+    /// reports to the server with a start or stop sprinting command.
+    #[serde(default)]
+    pub sprinting: bool,
 }
 
 /// What is pressed this tick.
@@ -260,6 +264,10 @@ pub struct Controls {
     /// bucket is used along the look); `None` keeps the pitch the server last set.
     #[serde(default)]
     pub pitch: Option<f32>,
+    /// The client's wish to sprint (the sprint key held): the body sprints only while
+    /// `sprint_allowed` holds.
+    #[serde(default)]
+    pub sprint: bool,
 }
 
 fn floor(v: f64) -> i32 {
@@ -648,6 +656,7 @@ pub fn step_on(
         in_water,
         in_lava,
         eye_in_water: eye_in_water(fluid, pos2),
+        sprinting: false,
     }
 }
 
