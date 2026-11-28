@@ -37,3 +37,19 @@ From spawn, a long run on a new seed keeps what later stages will want: a full p
 - **What happened**: the notes check failed: "stash done" and "fetch done" fired 2 each, real and sim alike.
 - **Read**: the recorded notes held one "chest opened" per task; the substring matched both the window's close note and the task's end note.
 - **Fix**: each asked note matches one line (`stash done:`, `chest closed at` twice); a miss lists the notes it matched; a unit test with two notes sharing a substring.
+
+### 3. No home chest when the deaths come (race 46140744043; for #81 death recovery)
+- **What happened**: the seeds race (cold, pale-garden, far-stronghold from their gear frontiers, far-fortress from its nether frontier; revive on) had 75 deaths in 38 of 56 runs, and every one wrote `fetch after the respawn skipped (no home chest)`. `results keep` (probe 46146387380): stash 0, fetch 0, home chests 0. No gear bot reached `ready` (0 of 42), so none came to a portal; far-fortress began past it.
+- **Cause**: by design the home chest is made at the Nether portal, before the first dangerous leg. The deaths on these worlds come earlier, in the gear stage (water, walls, skeletons, a warden), where there is nothing stashed to fetch.
+- **Not fixed here**: a home chest before the gear stage is beyond issue 77's design (the director, 2026-11-28). Tagged for #81 (death recovery). The stash's live evidence is taken from typecraft's `ready` snapshot instead, where bots reach the portal.
+
+### 4. A respawn's note says the items were kept; they were not (race 46140744043; for #81)
+- **What happened**: pale-garden rs-l01-b12's ledger:
+  ```text
+     46640 note drop Cobblestone from slot 23 (fewer than 6 main slots free; needed: 64 by win; stage gear; always)
+     46680 note died (death.attack.sonic_boom warden) and respawned (death 2; items kept, the aim carries on)
+     46700 item cobblestone 64 -> 0
+     46760 note want Blackstone|CobbledDeepslate|Cobblestone 3 for goal gear (the needs planner makes tag:stone_tool_materials rather than holds it)
+  ```
+- **Read**: race.yml never sets `keep_inventory` (only marathon.yml runs `gamerule keep_inventory true`), so a race's server drops the pack on a death; the revive note's "items kept" holds only on the marathon's server.
+- **Effect on this issue**: all 6 of the probe's dropped-then-wanted were wants after such a death (cold b03, pale-garden b02 twice, b09, b12 twice): each drop had left the keep count, and the death took the rest. The counter is made death-aware.
