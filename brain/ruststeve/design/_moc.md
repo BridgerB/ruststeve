@@ -32,6 +32,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[physics]] - the body moves: a bit-exact port of clojurecraft's physics step, the movement packets, zero server corrections live.
 - [[race-and-results]] - the race on runners, starts as data, the stage ladder, case and batch files, coverage, k/n.
 - [[seeds]] - the fixed list of worlds the bot is measured on (config/seeds.toml), `xtask seeds`/`seed`/`server --seed`, and what is fitted to `typecraft` (issue 69).
+- [[relay]] - race.yml across seeds: the seed input, lanes per seed, the per-seed frontier, and the relay's legs from each seed's furthest snapshot (issue 69).
 - [[insight-store]] - the SurrealDB 4 store built from the race's files, its views, the schema that is steve's contract.
 - [[snapshot-stream]] - the live view: a bot pushes MessagePack frames to steve's local relay, never in the way of a run.
 - [[server-model]] - the vanilla server as a pure reducer, the bot's body without Java, grown per issue.
