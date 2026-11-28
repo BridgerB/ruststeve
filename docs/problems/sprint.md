@@ -57,3 +57,8 @@ Which moves sprint, as a closed `sprint::Pace` read from the task in hand; the g
 - **Counted**: "sprint begun, <pace>" once a task, "sprint refused, <reason>" once a task for each reason and "sprint restarted, <n>" on each later start (a stop holds `hold_ticks`, doubled per stop up to `max_doublings`, and until `clear_blocks` from where it stopped), in the race summary's notes by kind; `Plan.pace` keeps the run's sprint and refused ticks.
 
 Unverified until a race: the sprint's effect on waypoint following at corners (0.28 a tick against `WAYPOINT_REACH` 0.35), and the first CI and race counts of each note.
+
+### S5 walls found by the sprint (issue 56)
+- **A reach walk's route ended where it could not arrive** (probe 46126047959): `Goal::Near` counts height in its range, the reach arrival allows the block at most 2 over the feet; the planner test's walk stood under a log 3 up and turned on the spot until NoProgress. Fix: `Goal::Reach`, one rule (`path::reach_rise`) for the route's goal and the arrival.
+- **Explores went back and forth** (CI 46126753035): an explore's `Goal::Afar` ends anywhere far enough from its start, and `choose`'s explore had no check against targets explored before (`explore_walk` had one); two targets alternated from tick 872 to the end. Fix: the same check, the heading turned a quarter, noted "explore turned from".
+- **Open: a log only a pillar reaches.** A tree's log 3 or more over the only ground beside it has no `Goal::Reach` route (the arrival needs it at most 2 over the feet), and `stairs_to_log` cuts stairs only for a log roofed below. Such a log is refused and the planner looks for another; a pillar or stairs-up finish is a feature of its own, not issue 56's.
