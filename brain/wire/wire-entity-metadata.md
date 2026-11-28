@@ -47,7 +47,7 @@ The full serializer list (components, particles, block positions, variants) is n
 - **The cause**: the coverage row's "entity data cut short at ITEM_STACK" had one cause: an item stack whose `potion_contents` the slot reader could not step over. The read of a stack that ends `Truncated` ends the entries with `Unread("ITEM_STACK")`.
 - **The evidence**: `replay cuts` on CI (probe 46152583531) re-read the recordings and matched each lane's coverage exactly. In race 46140744043 lane 2, 131 ITEM_STACK stops were 131 stacks cut at `potion_contents`, mostly thrown splash potions. In race 46124595679 lane 0 they were 44, matching its coverage, and that lane also had 8 inventory slots (tipped arrows).
 - **The fix**: `potion_contents` is now stepped over ([[wire-slots]]), and the test `a_thrown_potions_stack_reads_whole` uses a splash potion's real entity data.
-- The same lanes stop at `PARTICLES` (581 and 177). That stop is on purpose and listed apart in the coverage row (`SKIPPED_SERIALIZERS`), not a `!!`.
+- After the fix (probe 46154529546, re-read at 045a313a) those lanes show no ITEM_STACK stop. The same lanes stop at `PARTICLES` (581 and 177, the same before and after). That stop is on purpose and listed apart in the coverage row (`SKIPPED_SERIALIZERS`), not a `!!`.
 
 ## See also
 - [[entities-and-inventory]] - ruststeve's skim (`protocol::metadata`): serializers looked up by name in the generated table, stopping at the first without a reader.
