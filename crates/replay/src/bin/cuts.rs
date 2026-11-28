@@ -1,7 +1,10 @@
 //! Where a recording's item stacks were cut short (issue 77, brain/wire/wire-slots.md): every
 //! slot the protocol layer could not read whole, in entity data (`ITEM_STACK`), windows, the
-//! cursor, the player's inventory and equipment, counted by the data component it stopped at,
-//! with the first packets of each in hex, so a decoder test can be made of the real bytes.
+//! cursor, the player's inventory and equipment, counted by where it was and the data component
+//! it stopped at; every entity-data read that stopped early, by its serializer (the coverage
+//! row's own count); and every packet that would not decode, by id. The first packets of each
+//! are printed in hex, so a decoder test can be made of the real bytes. Counts are given a file
+//! too, so they can be held against a lane's coverage.
 //!
 //!     cuts <recording.rsr> [<more.rsr> ...] [--examples <n>]
 //!
@@ -88,31 +91,53 @@ fn run() -> Result<(), String> {
     }
     let mut cuts: BTreeMap<String, Cut> = BTreeMap::new();
     let mut packets = 0u64;
+    let keep = |cuts: &mut BTreeMap<String, Cut>, key: String, at: String, item: String, h| {
+        let c = cuts.entry(key).or_default();
+        c.count += 1;
+        if c.examples.len() < examples {
+            c.examples.push((at, item, h));
+        }
+    };
     for f in files {
         let (_, records) = Recording::read_all(Path::new(f))?;
+        let mut here: BTreeMap<String, u64> = BTreeMap::new();
         for rec in &records {
             let Record::Event(EventRecord::Packet { state, id, body }) = rec else {
                 continue;
             };
             packets += 1;
-            let Ok(p) = decode(*state, *id, body) else {
-                continue;
-            };
-            for (place, slot) in cut_slots(&p) {
-                let component = slot.stopped_at().unwrap_or("unnamed").to_owned();
-                let c = cuts.entry(component).or_default();
-                c.count += 1;
-                if c.examples.len() < examples {
-                    let item = slot.stack().map_or_else(String::new, |(i, _)| item_name(i));
-                    c.examples
-                        .push((format!("{f} packet {id:#04x} ({place})"), item, hex(body)));
+            let at = format!("{f} packet {id:#04x}");
+            let p = match decode(*state, *id, body) {
+                Ok(p) => p,
+                Err(e) => {
+                    let key = format!("decode error, packet {id:#04x}: {e:?}");
+                    *here.entry(key.clone()).or_default() += 1;
+                    keep(&mut cuts, key, at, String::new(), hex(body));
+                    continue;
                 }
+            };
+            if let S2c::SetEntityData { entries, .. } = &p
+                && let Some(serializer) = protocol::metadata::unread(entries)
+            {
+                let key = format!("entity data stopped at {serializer}");
+                *here.entry(key.clone()).or_default() += 1;
+                keep(&mut cuts, key, at.clone(), String::new(), hex(body));
             }
+            for (place, slot) in cut_slots(&p) {
+                let component = slot.stopped_at().unwrap_or("unnamed");
+                let key = format!("{place} slot cut at {component}");
+                *here.entry(key.clone()).or_default() += 1;
+                let item = slot.stack().map_or_else(String::new, |(i, _)| item_name(i));
+                keep(&mut cuts, key, format!("{at} ({place})"), item, hex(body));
+            }
+        }
+        for (key, n) in &here {
+            println!("{f}: {key}: {n}");
         }
     }
     println!("packets read: {packets}");
     for (component, c) in &cuts {
-        println!("\n== {component}: {} slots cut", c.count);
+        println!("\n== {component}: {}", c.count);
         for (place, item, h) in &c.examples {
             println!("- {place}, {item}\n  {h}");
         }
