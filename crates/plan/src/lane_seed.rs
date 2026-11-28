@@ -107,6 +107,11 @@ pub fn start(seed: u64) -> Start {
 }
 
 impl Draw {
+    /// Held with no seed: the old defaults for the whole run (heading 0, turns of +90), whatever
+    /// the ticks carry. For a fixture laid out for heading 0 (a lava face placed ahead on +z),
+    /// which tests the code behind the tie, not the tie.
+    pub const DEFAULTS: Self = Self { seed: Some(0) };
+
     /// The tick's seed taken, the first time a non-zero one comes: `Some(start)` that once, else
     /// `None`.
     pub fn from_tick(&mut self, tick_seed: u64) -> Option<Start> {
@@ -119,7 +124,10 @@ impl Draw {
 
     /// The quarter turn for this run: +90 with no seed (the old default), else the seed's side.
     pub fn turn(&self) -> f64 {
-        self.seed.map_or(DEFAULT_START.turn, |s| start(s).turn)
+        match self.seed {
+            None | Some(0) => DEFAULT_START.turn,
+            Some(s) => start(s).turn,
+        }
     }
 }
 

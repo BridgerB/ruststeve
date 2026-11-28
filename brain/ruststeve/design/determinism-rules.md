@@ -17,6 +17,7 @@ sourceRefs:
   - "ruststeve:crates/plan/src/lane_seed.rs#pub fn derive"
   - "ruststeve:crates/plan/src/lane_seed.rs#pub fn pick"
   - "ruststeve:crates/plan/src/lane_seed.rs#pub fn from_tick"
+  - "ruststeve:crates/plan/src/lane_seed.rs#pub const DEFAULTS: Self = Self { seed: Some(0) };"
   - "ruststeve:crates/plan/src/lib.rs#fn lane_seed_watch"
   - "ruststeve:crates/bot/src/lib.rs#pub seed: Option<u64>,"
   - "ruststeve:crates/bot/src/bin/race.rs#seed: Some(plan::lane_seed::derive(&a.run, a.lane, i)),"
@@ -64,6 +65,8 @@ The planner holds the first non-zero tick seed for the run (`Plan.lane`, `Draw::
 | `TurnSide` | a failure's quarter turn, +90 or +270; either reaches all four in four turns (`Plan::turned`, every heading turn) | the same note |
 
 The heading also steers the mine fallback's level tunnel (the nearest cardinal) and the stairs, so lanes from one snapshot dig apart from their first tunnel. Tests: `crates/plan/tests/lane_seed.rs`.
+
+Two sim fixtures were fitted to heading 0 and failed on the seed's heading (probe 46161667574): the plains log 30 out (`crates/bot/tests/planner.rs`) and the tunnel walls in the rock (`crates/bot/tests/tunnel.rs`). They hold `Draw::DEFAULTS` (the old defaults, whatever the ticks carry), because they test the code behind the tie, not the tie. A new fixture should pass on every start quarter or say why not.
 
 ## Gotchas
 - Any text form of a recording (the `replay export` view) must round-trip floats exactly: the guide found `serde_json` drifts in the last bit unless `float_roundtrip` is on. The recording itself is binary ([[recording-format]]).

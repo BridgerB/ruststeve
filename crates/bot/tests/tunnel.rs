@@ -270,6 +270,10 @@ fn in_the_rock(
     let goals = concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/goals.toml");
     let table = std::sync::Arc::new(bot::goals_table(goals).unwrap());
     let mut p = Plan::with_table(Aim::Fortress, table);
+    // >>> lane seed (gen): these walls were passed on heading 0; on the seed's heading the lava
+    // face across the tunnel was not met (probe 46161667574). They test the tunnel, not the tie.
+    p.lane = plan::lane_seed::Draw::DEFAULTS;
+    // <<< lane seed
     let config = Config {
         view_distance: view,
         simulation_distance: 3,

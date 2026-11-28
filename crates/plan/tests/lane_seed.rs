@@ -140,8 +140,8 @@ fn with_no_seed_the_old_default_stands() {
     );
     assert_eq!(
         explore(&notes).as_deref(),
-        Some("explore toward (8, 64, 40)"),
-        "heading 0 is +z, 32 blocks"
+        Some("explore toward (8, 64, 56)"),
+        "heading 0 is +z, EXPLORE_DISTANCE 48 blocks"
     );
     assert_eq!(Draw::default().turn(), DEFAULT_START.turn);
 }
@@ -155,6 +155,28 @@ fn the_seed_is_held_from_its_first_tick() {
     assert_eq!(d.from_tick(78), None, "a later tick's seed changes nothing");
     assert_eq!(d.seed, Some(77));
     assert_eq!(d.turn(), lane_seed::start(77).turn);
+}
+
+#[test]
+fn held_defaults_ignore_the_ticks() {
+    let mut d = Draw::DEFAULTS;
+    assert_eq!(d.from_tick(77), None);
+    assert_eq!(d.turn(), DEFAULT_START.turn);
+    let mut w = flat();
+    let mut p = Plan::new(Aim::ReachLog { min_distance: 0.0 });
+    p.lane = Draw::DEFAULTS;
+    for t in 100..120 {
+        w.seed = 0x5EED + t;
+        w.ticks = t;
+        p.step(&w);
+        p.take_acts();
+    }
+    let notes: Vec<String> = p.events.iter().map(|e| e.what.clone()).collect();
+    assert_eq!(
+        explore(&notes).as_deref(),
+        Some("explore toward (8, 64, 56)"),
+        "{notes:?}"
+    );
 }
 
 #[test]

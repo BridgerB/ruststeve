@@ -55,6 +55,10 @@ fn churned(p: &Plan) -> Option<String> {
 #[test]
 fn the_planner_reaches_a_log_thirty_blocks_out_on_real_terrain() {
     let mut p = Plan::new(Aim::ReachLog { min_distance: 30.0 });
+    // >>> lane seed (gen): the plains landing's log was reached on heading 0; with the seed's
+    // heading 270 the 3,000 ticks ran out (CI 46160303999), so this keeps the old defaults.
+    p.lane = plan::lane_seed::Draw::DEFAULTS;
+    // <<< lane seed
     let run = bot::lockstep::run(Sim::new(CONFIG, plains()), "rs-p", 1, 3000, 20, |w, _| {
         p.step(w)
     });
