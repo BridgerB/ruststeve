@@ -37,6 +37,9 @@ pub enum Gain {
     /// Issue 19b: an eye thrown or picked up, an end portal frame seen, or a new dimension: the
     /// search for the stronghold goes on while the eyes held stay at most what was held.
     Eyes,
+    /// Issue 20b: the End going on: an eye placed in a frame, the End entered, a crystal gone, a
+    /// pillar up or down, a blow landed on the dragon, the dragon dead, the credits.
+    End,
 }
 
 /// The run's progress so far.
@@ -141,6 +144,23 @@ impl Progress {
                 | observe::Fact::EndermanStill { .. }
                 | observe::Fact::Death
                 | observe::Fact::Won => {}
+                // >>> E1 (issue 20b)
+                observe::Fact::EyePlaced { .. }
+                | observe::Fact::PortalEntered { .. }
+                | observe::Fact::CrystalGone { .. }
+                | observe::Fact::PillarUp { .. }
+                | observe::Fact::PillarDown { .. }
+                | observe::Fact::DragonHit { .. }
+                | observe::Fact::DragonDead
+                | observe::Fact::Credits { .. } => gain = gain.or(Some(Gain::End)),
+                // A crystal seen, a strike sent, a phase, a blow taken, a cloud or a look is not
+                // by itself: a bot striking air or watching the dragon is stuck.
+                observe::Fact::CrystalSeen { .. }
+                | observe::Fact::Strike { .. }
+                | observe::Fact::DragonPhase { .. }
+                | observe::Fact::DragonBlow { .. }
+                | observe::Fact::Breath { .. }
+                | observe::Fact::GazeNearMiss { .. } => {} // <<< E1
             }
         }
         if place.is_some_and(|p| self.regions.insert(region(p))) {
@@ -448,5 +468,76 @@ mod tests {
         assert_eq!(p.see(104, &[fact(104, seen)], HERE), None);
         let forest = observe::Fact::ForestSeen { column: (30, -8) };
         assert_eq!(p.see(105, &[fact(105, forest)], HERE), Some(Gain::Biome));
+    }
+
+    /// Issue 20b: a crystal gone, a pillar, a blow on the dragon, the credits are progress; a
+    /// strike, a crystal seen, a phase, a blow taken, breath and a near miss are not.
+    #[test]
+    fn the_end_going_on_is_progress() {
+        let fact = |at, fact| observe::Stamped { at, fact };
+        let mut p = Progress::new(BTreeMap::new());
+        p.see(100, &[], HERE);
+        let quiet = [
+            observe::Fact::CrystalSeen {
+                id: 1,
+                pos: [0.0; 3],
+                d: 40.0,
+            },
+            observe::Fact::Strike {
+                target: "end_crystal".to_owned(),
+                id: 1,
+                reach: Some(2.9),
+            },
+            observe::Fact::DragonPhase {
+                from: Some(0),
+                to: 2,
+            },
+            observe::Fact::DragonBlow {
+                lost: 6.0,
+                damage_type: "mob_attack".to_owned(),
+            },
+            observe::Fact::Breath {
+                id: 2,
+                radius: 5.0,
+                dist: 3.0,
+            },
+            observe::Fact::GazeNearMiss {
+                id: 3,
+                d: 20.0,
+                stare: false,
+            },
+        ];
+        for (i, f) in quiet.into_iter().enumerate() {
+            assert_eq!(p.see(101 + i as u64, &[fact(101, f)], HERE), None);
+        }
+        for (i, f) in [
+            observe::Fact::EyePlaced { cell: [1, 19, 1] },
+            observe::Fact::CrystalGone {
+                id: 1,
+                pos: [0.0; 3],
+                how: "struck".to_owned(),
+            },
+            observe::Fact::PillarUp {
+                height: 20,
+                cell: [0, 80, 0],
+            },
+            observe::Fact::PillarDown { height: 20 },
+            observe::Fact::DragonHit {
+                part: Some("head".to_owned()),
+                health: Some(190.0),
+            },
+            observe::Fact::DragonDead,
+            observe::Fact::Credits {
+                dragon_dead: Some(5),
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                p.see(110 + i as u64, &[fact(110, f)], HERE),
+                Some(Gain::End)
+            );
+        }
     }
 }

@@ -5,8 +5,8 @@ type: reference
 tags: [wire, actions, attack, dig, use-item]
 aliases: [use_item, release use, LpVec3, set_entity_motion, attack packet, interact, player-action, use-item, use-item-on, swing, 0x01, melee does nothing]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@f427d67
+lastUpdated: 2026-11-27
+verifiedAgainst: clojurecraft@be85a92 ruststeve-v1@9e1567f ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub enum Act {"
   - "ruststeve:crates/protocol/tests/encode.rs#fn a_dig_carries_its_sequence() {"

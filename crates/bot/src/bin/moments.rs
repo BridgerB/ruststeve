@@ -249,6 +249,239 @@ fn frames_outcome(w: &World) -> FramesOutcome {
     }
 }
 
+/// A block state by name, with properties when the name carries them as a command does
+/// (`iron_bars[north=true,south=true]`, issue 20's cage): the kind's default state with each
+/// property set.
+fn state_named(b: &str) -> Option<u32> {
+    let (name, props) = match b.split_once('[') {
+        Some((n, rest)) => (n, rest.strip_suffix(']')?),
+        None => (b, ""),
+    };
+    let base = data::BlockKind::from_name(name)?.info()?.default_state;
+    props
+        .split(',')
+        .filter(|p| !p.is_empty())
+        .try_fold(base, |st, p| {
+            let (k, v) = p.split_once('=')?;
+            sim::survival::with_property(st, k.trim(), v.trim())
+        })
+}
+
+/// A block state as a command names it: `end_portal_frame[eye=true,facing=north]`.
+fn state_text(state: u32) -> String {
+    let Some(kind) = data::block_of_state(state) else {
+        return format!("unknown:{state}");
+    };
+    let name = kind.name().unwrap_or("unknown");
+    let props: Vec<String> = kind
+        .info()
+        .map(|i| i.properties)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|p| sim::survival::property(state, p.name).map(|v| format!("{}={v}", p.name)))
+        .collect();
+    if props.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{name}[{}]", props.join(","))
+    }
+}
+
+/// Issue 20's End rows (`report`): what the bot's world was told, tick by tick, folded into
+/// lines: its health at each change, the hits and blasts on it, its dimension and where it
+/// stood after a change, and every crystal, dragon and enderman within 64 (added, its health,
+/// an enderman's creepy flag, removed).
+#[derive(Default)]
+struct Detail {
+    lines: Vec<String>,
+    health: Option<f32>,
+    dimension: Option<String>,
+    placed_after_change: bool,
+    hits_to: u64,
+    hits_seen: usize,
+    blasts_seen: usize,
+    seen: std::collections::BTreeMap<i32, (data::EntityKind, Option<f32>, bool)>,
+    /// The row's watched cells and what each last held (issue 20's e09: when the water came).
+    watch: Vec<(i32, i32, i32)>,
+    cells: std::collections::BTreeMap<(i32, i32, i32), Option<String>>,
+    /// In a fall last tick (e09: the landing's tick).
+    falling: bool,
+}
+
+/// A use sent (issue 20's e09 sweep): from where the body was, which is the position the server
+/// last heard (the tick's move goes out after its acts), its fall, the eye over the ground under
+/// it against the bucket's 4.5, and where the tick's move then takes it.
+fn detail_use(w: &World, d: &mut Detail) {
+    let Some(b) = w.body else {
+        return;
+    };
+    let eye = bot::script::ground_under(w, b.pos).map_or_else(
+        || "none".to_owned(),
+        |g| format!("{:.3}", b.pos[1] + physics::EYE_HEIGHT - g),
+    );
+    d.lines.push(format!(
+        "t {} use_item from y {:.3} vy {:.3} on_ground {} eye over ground {eye} next y {:.3}",
+        w.ticks,
+        b.pos[1],
+        b.vel[1],
+        b.on_ground,
+        b.pos[1] + b.vel[1]
+    ));
+}
+
+/// Entities a report follows.
+fn reported(k: data::EntityKind) -> bool {
+    matches!(
+        k,
+        data::EntityKind::EndCrystal | data::EntityKind::EnderDragon | data::EntityKind::Enderman
+    )
+}
+
+fn detail_step(w: &World, d: &mut Detail) {
+    let t = w.ticks;
+    let f = |p: [f64; 3]| format!("({:.3} {:.3} {:.3})", p[0], p[1], p[2]);
+    let dim = w.dimension.as_ref().map(|x| x.name.clone());
+    if dim != d.dimension {
+        d.lines.push(format!(
+            "t {t} dimension {}",
+            dim.as_deref().unwrap_or("none")
+        ));
+        d.placed_after_change = false;
+        d.dimension = dim;
+    }
+    if let (false, Some(b)) = (d.placed_after_change, w.body) {
+        d.placed_after_change = true;
+        d.lines.push(format!("t {t} body at {}", f(b.pos)));
+    }
+    if let Some(b) = w.body {
+        if !b.on_ground && b.vel[1] < -0.2 {
+            d.falling = true;
+            d.lines
+                .push(format!("t {t} fall y {:.3} vy {:.3}", b.pos[1], b.vel[1]));
+        } else if d.falling && b.on_ground {
+            d.falling = false;
+            d.lines.push(format!(
+                "t {t} landed y {:.3} in water {} fall distance {:.2}",
+                b.pos[1], b.in_water, b.fall_distance
+            ));
+        }
+    }
+    for c in d.watch.clone() {
+        let now = w
+            .state_at(world::BlockPos::new(c.0, c.1, c.2))
+            .map(state_text);
+        if d.cells.get(&c) != Some(&now) {
+            d.lines.push(format!(
+                "t {t} cell ({} {} {}) {}",
+                c.0,
+                c.1,
+                c.2,
+                now.as_deref().unwrap_or("unknown")
+            ));
+            d.cells.insert(c, now);
+        }
+    }
+    if w.player.health != d.health {
+        d.lines.push(format!(
+            "t {t} health {:?} at {}",
+            w.player.health,
+            w.body.map_or_else(|| "none".to_owned(), |b| f(b.pos))
+        ));
+        d.health = w.player.health;
+    }
+    // Hits are pruned by age: count only those past the last printed tick (several in one
+    // tick print together).
+    let fresh: Vec<&world::Hit> = w
+        .hits
+        .iter()
+        .filter(|h| h.at_tick > d.hits_to || (h.at_tick == d.hits_to && d.hits_seen == 0))
+        .collect();
+    for h in &fresh {
+        d.lines.push(format!(
+            "t {} hit {} cause {:?} direct {:?}",
+            h.at_tick, h.damage_type, h.cause, h.direct
+        ));
+    }
+    if let Some(last) = fresh.last() {
+        d.hits_to = last.at_tick;
+        d.hits_seen = 1;
+    }
+    for b in w.explosions.iter().skip(d.blasts_seen) {
+        d.lines.push(format!(
+            "t {} blast at {} knockback {:?}",
+            b.at_tick,
+            f(b.center),
+            b.knockback
+        ));
+    }
+    d.blasts_seen = w.explosions.len();
+    let Some(body) = w.body else {
+        return;
+    };
+    let near = |p: [f64; 3]| (0..3).map(|i| (p[i] - body.pos[i]).powi(2)).sum::<f64>() <= 4096.0;
+    for (id, e) in w
+        .entities
+        .iter()
+        .filter(|(_, e)| reported(e.kind) && !e.dead && near(e.pos))
+    {
+        let now = (e.kind, e.health(), flag(e, CREEPY));
+        match d.seen.get(id) {
+            None => d.lines.push(format!(
+                "t {t} added {:?} {id} at {} health {:?} creepy {} yaw {:?}",
+                e.kind,
+                f(e.pos),
+                now.1,
+                now.2,
+                e.head_yaw
+            )),
+            Some(was) if *was != now => d.lines.push(format!(
+                "t {t} {:?} {id} at {} health {:?} creepy {}",
+                e.kind,
+                f(e.pos),
+                now.1,
+                now.2
+            )),
+            Some(_) => {}
+        }
+        d.seen.insert(*id, now);
+    }
+    let gone: Vec<i32> = d
+        .seen
+        .keys()
+        .filter(|id| w.entities.get(id).is_none_or(|e| e.dead))
+        .copied()
+        .collect();
+    for id in gone {
+        if let Some((k, _, _)) = d.seen.remove(&id) {
+            d.lines.push(format!("t {t} removed {k:?} {id}"));
+        }
+    }
+}
+
+/// A report's last lines: where the bot ended, its health and the watched cells' full states.
+fn detail_end(
+    w: &World,
+    d: &Detail,
+    watch: &[(i32, i32, i32)],
+    min_health: Option<f32>,
+) -> Vec<String> {
+    let mut lines = d.lines.clone();
+    lines.push(format!(
+        "end: dimension {} at {:?} health {:?} lowest in the script {min_health:?}",
+        w.dimension.as_ref().map_or("none", |x| x.name.as_str()),
+        w.body.map(|b| b.pos),
+        w.player.health
+    ));
+    lines.extend(watch.iter().map(|&(x, y, z)| {
+        format!(
+            "end: block ({x} {y} {z}) {}",
+            w.state_at(world::BlockPos::new(x, y, z))
+                .map_or_else(|| "unknown".to_owned(), state_text)
+        )
+    }));
+    lines
+}
+
 /// Whether an entity's boolean data `i` is true.
 fn flag(e: &world::Entity, i: u8) -> bool {
     matches!(
@@ -271,6 +504,9 @@ struct Args {
     wave: usize,
     tolerance: usize,
     report: Option<PathBuf>,
+    /// Run only the rows whose id starts with one of these (issue 20: `--only e01-,e03-`), so a
+    /// new row's parity costs minutes, not the table's hour; empty runs every row.
+    only: Vec<String>,
 }
 
 fn args() -> Result<Args, String> {
@@ -290,6 +526,7 @@ fn args() -> Result<Args, String> {
         wave: 10,
         tolerance: TOLERANCE,
         report: None,
+        only: Vec::new(),
     };
     while let Some(flag) = all.next() {
         if !flag.starts_with("--") {
@@ -310,10 +547,27 @@ fn args() -> Result<Args, String> {
             "--wave" => a.wave = usize::try_from(num(&v)?).map_err(|e| e.to_string())?,
             "--tolerance" => a.tolerance = usize::try_from(num(&v)?).map_err(|e| e.to_string())?,
             "--report" => a.report = Some(PathBuf::from(v)),
+            "--only" => {
+                a.only = v
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
     Ok(a)
+}
+
+/// The rows `--only` names (every row when it names none).
+fn chosen(a: &Args, mut m: Moments) -> Moments {
+    if !a.only.is_empty() {
+        m.moment
+            .retain(|r| a.only.iter().any(|p| r.id.starts_with(p.as_str())));
+    }
+    m
 }
 
 /// A moment's start: the landing's captured world and the surface position to stand on.
@@ -331,9 +585,12 @@ fn start_of(
     let model = world.model([0.0; 3])?;
     let y = match m.feet_y {
         Some(y) => f64::from(y),
-        None => model
-            .surface(x, z)
-            .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?,
+        None => {
+            model
+                .surface(x, z)
+                .ok_or_else(|| format!("{}: no surface at {x} {z}", m.id))?
+                + f64::from(m.lift.unwrap_or(0))
+        }
     };
     Ok((world, [f64::from(x) + 0.5, y, f64::from(z) + 0.5]))
 }
@@ -538,6 +795,7 @@ fn trace_recording(
     path: &Path,
     tracks: &mut [Track],
     eye: &mut EyeTrack,
+    detail: &mut Detail,
 ) -> Result<Vec<String>, String> {
     let (_, records) = record::Recording::read_all(path)?;
     let mut folder = record::Folder::new();
@@ -546,6 +804,9 @@ fn trace_recording(
     for rec in &records {
         match rec {
             record::Record::Event(e) => {
+                if matches!(e, record::EventRecord::Act(world::Act::UseItem)) {
+                    detail_use(&folder.world, detail);
+                }
                 folder.step(e)?;
             }
             record::Record::Checkpoint {
@@ -556,6 +817,7 @@ fn trace_recording(
             _ => continue,
         }
         eye_step(&folder.world, eye);
+        detail_step(&folder.world, detail);
         let t = folder.world.ticks;
         if t.is_multiple_of(TRACE_EVERY) && last != Some(t) {
             last = Some(t);
@@ -669,7 +931,7 @@ fn save(out: &Path, r: &MomentResult) -> Result<(), String> {
 }
 
 fn real(a: &Args) -> Result<(), String> {
-    let moments = Moments::read(&a.moments)?;
+    let moments = chosen(a, Moments::read(&a.moments)?);
     let landings = Landings::read(&a.landings)?;
     let password =
         std::env::var("RUSTSTEVE_RCON_PASSWORD").map_err(|_| "set RUSTSTEVE_RCON_PASSWORD")?;
@@ -731,7 +993,14 @@ fn real_waves(
             let name = format!("rs-m{:02}-{:04x}", w * a.wave + i, nonce);
             let rcon_addr = format!("{}:{}", a.host, a.rcon_port);
             let password = password.to_owned();
-            let tp = format!("tp {name} {} {} {}", start[0], start[1], start[2]);
+            // A lifted start (issue 20) is first stood on the ground under it, so the chunk loads
+            // for the row's `fill` and the bot does not fall before its pillar is laid; the
+            // last command lifts it onto the pillar.
+            let ground = start[1] - f64::from(m.lift.unwrap_or(0));
+            let tp = format!("tp {name} {} {ground} {}", start[0], start[2]);
+            let lifted = m
+                .lift
+                .map(|_| format!("tp {name} {} {} {}", start[0], start[1], start[2]));
             // The model has no air supply yet (issue 12, survival): a real bot waiting under
             // water for its chunks would drown on a clock the model does not keep, so the real
             // side breathes. Stated in the report; drowning joins the table with issue 12.
@@ -767,8 +1036,15 @@ fn real_waves(
                 }))
                 .chain(m.summon.iter().map(|(e, dx, dy, dz)| {
                     let (x, y, z) = feet_cell(start);
+                    let more = m
+                        .summon_nbt
+                        .as_deref()
+                        .map_or_else(String::new, |n| format!(",{n}"));
+                    // A row's own NoAI wins (issue 20: a dragon with no AI never moves its
+                    // parts, parity 45864998071).
+                    let ai = if more.contains("NoAI") { "" } else { "NoAI:1b," };
                     format!(
-                        "summon minecraft:{e} {} {} {} {{NoAI:1b,DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b,Silent:1b}}",
+                        "summon minecraft:{e} {} {} {} {{{ai}DeathLootTable:\"minecraft:empty\",PersistenceRequired:1b,Silent:1b{more}}}",
                         f64::from(x + dx) + 0.5,
                         y + dy,
                         f64::from(z + dz) + 0.5
@@ -795,6 +1071,7 @@ fn real_waves(
                         f64::from(z + dz) + 0.5
                     )
                 }))
+                .chain(lifted)
                 .collect();
             let opts = bot::Opts {
                 host: a.host.clone(),
@@ -851,8 +1128,12 @@ fn real_waves(
             let id = m.id.clone();
             let watch = watched(start, m);
             let mobs = mob_spots(start, m);
-            let traced =
-                !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some() || m.frames;
+            let traced = !m.mobs.is_empty()
+                || !m.items.is_empty()
+                || m.stronghold.is_some()
+                || m.frames
+                || m.report;
+            let report_row = m.report;
             let eye_row = m.stronghold.map(|s| (s, m.script.starts_with("fetch:")));
             let frames_row = m.frames;
             handles.push((
@@ -862,11 +1143,12 @@ fn real_waves(
                 traced,
                 eye_row,
                 frames_row,
+                report_row,
                 std::thread::spawn(move || bot::run(opts)),
             ));
             std::thread::sleep(Duration::from_millis(500));
         }
-        for (id, watch, mobs, traced, eye_row, frames_row, h) in handles {
+        for (id, watch, mobs, traced, eye_row, frames_row, report_row, h) in handles {
             let trace_id = id.clone();
             let r = match h.join() {
                 Ok(Ok(o)) => MomentResult {
@@ -885,9 +1167,18 @@ fn real_waves(
                             let rsr = a.out.join(format!("{trace_id}.real.rsr"));
                             let mut tracks = tracks_of(&mobs);
                             let mut eye = EyeTrack::default();
-                            let text = trace_recording(&rsr, &mut tracks, &mut eye)
+                            let mut detail = Detail {
+                                watch: watch.clone(),
+                                ..Detail::default()
+                            };
+                            let text = trace_recording(&rsr, &mut tracks, &mut eye, &mut detail)
                                 .unwrap_or_else(|e| vec![format!("no trace: {e}")]);
                             write_trace(&a.out, &trace_id, "real", &text)?;
+                            if report_row {
+                                let lines =
+                                    detail_end(&o.world, &detail, &watch, o.min_health_in_script);
+                                write_trace(&a.out, &trace_id, "real.end", &lines)?;
+                            }
                             if let Some(c) = class.as_mut() {
                                 c.mobs = tracked(&o.world, &tracks);
                             }
@@ -928,7 +1219,7 @@ fn real_waves(
 }
 
 fn sim(a: &Args) -> Result<(), String> {
-    let moments = Moments::read(&a.moments)?;
+    let moments = chosen(a, Moments::read(&a.moments)?);
     let landings = Landings::read(&a.landings)?;
     let (race, _) = RaceConfig::read(&a.config)?;
     let config = sim::Config {
@@ -945,12 +1236,7 @@ fn sim(a: &Args) -> Result<(), String> {
         let (script, aim) = script_or_aim(m)?;
         let script = homed(script, start);
         let mut world = captured.model(start)?;
-        let state_of = |b: &str| {
-            data::BlockKind::from_name(b)
-                .and_then(|k| k.info())
-                .map(|i| i.default_state)
-                .ok_or_else(|| format!("{}: no block {b}", m.id))
-        };
+        let state_of = |b: &str| state_named(b).ok_or_else(|| format!("{}: no block {b}", m.id));
         for (b, x1, y1, z1, x2, y2, z2) in &m.fill {
             let (x, y, z) = feet_cell(start);
             let state = state_of(b)?;
@@ -1050,6 +1336,10 @@ fn sim(a: &Args) -> Result<(), String> {
         }
         let traced = !m.mobs.is_empty() || !m.items.is_empty() || m.stronghold.is_some();
         let mut eye = EyeTrack::default();
+        let mut detail = Detail {
+            watch: watched(start, m),
+            ..Detail::default()
+        };
         let mut trace = Vec::new();
         let mut tracks = tracks_of(&mob_spots(start, m));
         let mut planner = aim.map(|a| plan::Plan::with_table(a, table.clone()));
@@ -1063,22 +1353,38 @@ fn sim(a: &Args) -> Result<(), String> {
                 if m.stronghold.is_some() {
                     eye_step(w, &mut eye);
                 }
+                if m.report {
+                    detail_step(w, &mut detail);
+                }
                 if traced && w.ticks.is_multiple_of(TRACE_EVERY) {
                     trace.extend(trace_line(w));
                     track_step(w, &mut tracks);
                 }
-                match (&mut planner, script) {
+                let (c, acts) = match (&mut planner, script) {
                     (Some(p), _) => {
                         let c = p.step(w);
                         (c, p.take_acts())
                     }
                     (None, Some(s)) => (s.steer(t, w), s.acts(t, w)),
                     (None, None) => (physics::Controls::default(), Vec::new()),
+                };
+                if m.report && acts.contains(&world::Act::UseItem) {
+                    detail_use(w, &mut detail);
                 }
+                (c, acts)
             },
         );
         if traced {
             write_trace(&a.out, &m.id, "sim", &trace)?;
+        }
+        if m.report {
+            let lines = detail_end(
+                &run.world,
+                &detail,
+                &watched(start, m),
+                run.min_health_in_script,
+            );
+            write_trace(&a.out, &m.id, "sim.end", &lines)?;
         }
         let eye_class = match m.stronghold {
             Some(at) => {

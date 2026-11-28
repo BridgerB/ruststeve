@@ -84,6 +84,19 @@ pub struct Moment {
     /// room's wall, laid by the row's `fill`).
     #[serde(default)]
     pub feet_y: Option<i32>,
+    /// Blocks the start stands over the surface (issue 20: a pillar, a spike's top, a fall laid by
+    /// the row's `fill` from the raised feet cell).
+    #[serde(default)]
+    pub lift: Option<i32>,
+    /// More NBT for the row's `summon`s, inside their braces (issue 20: a dragon's
+    /// `DragonPhase:6,Rotation:[0f,0f]`): the real side only; the model reads none.
+    #[serde(default)]
+    pub summon_nbt: Option<String>,
+    /// The row writes `<id>.<real|sim>.end.txt` (issue 20): the bot's health at each change, the
+    /// hits and blasts on it, its dimension, the crystals, dragons and endermen near it with their
+    /// health, and the full block states of the `watch` cells at the end.
+    #[serde(default)]
+    pub report: bool,
 }
 
 fn yes() -> bool {

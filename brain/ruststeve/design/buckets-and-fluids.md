@@ -5,8 +5,8 @@ type: reference
 tags: [fluids, buckets, water, lava, obsidian, portal, look, sim, parity]
 aliases: [bucket, buckets, look_at, pitch, Controls.pitch, FlowingFluid, fluid tick, tick_fluids, use_bucket, obsidian, portal lighting, PortalShape, flint and steel, use script, light script, watch cells]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@9b5da2e clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn tick_fluids(&mut self) -> Result<Vec<Wire>, EncodeError> {"
   - "ruststeve:crates/sim/src/fluid.rs#pub(crate) fn use_bucket(&mut self) -> Option<Result<Vec<Wire>, EncodeError>> {"
@@ -64,6 +64,10 @@ Left out, and why: waterlogged blocks; partial shapes occluding a flow; drops fr
 - Two sight lines, two jobs: the sampled line (`aim_for`, `clear_ray`) finds stands and routes; the exact line (`aim_at_use`, `exact_ray`) decides the use and every "a use from here would fill" check. A use on a face only the sampled line passes filled nothing 342 times in one race ([[portal-cast]] walls 34 and 36).
 - A stand is judged from its cell's middle; a walk ends off it. When the real eye sees no face there the scoop centres, sneaking, for up to 20 ticks (wall 37).
 - A scoop walk tries the four nearest guessed stands, then one search for any bank cell beside the source with the feet level with the surface or one above (`Goal::Pickup`, range 1, rise 1: clojurecraft's scoop walk), then a `Near` walk (wall 39).
+
+## Issue 20: a pour while falling (the water clutch, docs/problems/end-model.md)
+- Rows `e06-clutch-*` and `e06-drop`: a 21 fall onto water poured on the way down cost 0; the same fall dry cost 18.
+- Rows `e09-pour-*` (parity 45929976619, falls of 8 to 60 onto end stone): water is placed exactly when the eye is within the bucket's 4.5 of the ground at the **last position the server heard** (a tick's acts go out before its move), whatever the fall's speed. A use on the tick whose move lands is not too late. So a clutch pours by height (the eye 4.5 or less over the ground now), never by ticks before the landing ([[end-crystals]]).
 
 ## See also
 - [[server-model]] - the model these rules join.

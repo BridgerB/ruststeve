@@ -5,8 +5,8 @@ type: reference
 tags: [plan, walk, progress, watchdog, invariants]
 aliases: [Walk, walk task, follow, waypoint, replan, NoProgress, NoPath, Deadline, patience, longest stall, TaskStatus, Failure]
 status: verified
-lastUpdated: 2026-11-26
-verifiedAgainst: ruststeve@b8dc00e clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/walk.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, TaskStatus) {"
   - "ruststeve:crates/plan/src/walk.rs#pub const PATIENCE_TICKS: u64 = 200;"
@@ -48,6 +48,9 @@ Issue 09a: clojurecraft's walk intent, made to fail fast when it stops getting c
 
 ## Issue 19: sneak at a lava edge (docs/problems/eyes-home.md wall 21)
 - **`lava_edge`**: a side of a cell whose floor neighbour is lava, or open with lava within `LAVA_DROP` 8 under it. At such an edge (the feet or the next waypoint, never on a step down, which a sneaking body is held back from) the walk and its bridge move hold sneak (`edge_sneak`): the server backs a sneaking body off an edge, its own step or a knock-back (`physics::back_off_from_edge`). Its ticks (`More::sneak_ticks`) are added to the deadline (sneaking is 0.3 of a walk); "walk: sneak at a lava edge from …" once a walk. An idle body at a lava edge sneaks too (the planner's `Task::Idle`). In the Nether a touch of lava is a death: no water puts the fire out (race 45742350492 lane 3).
+
+## Issue 20e: the void is an edge (docs/problems/end-island.md)
+In the End a side whose floor neighbour and every cell under it to the dimension's floor are loaded and clear (`end::void_edge`, `end::void_column`) is an edge as lava is: the walk sneaks there, "walk: sneak at a void edge from …" once a walk. Unloaded cells under it are not a known void. The End's bridge is its own ([[end-island]]), not the far walk's bridge move.
 
 ## See also
 - [[pathfinding]] - the routes.

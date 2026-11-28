@@ -83,6 +83,10 @@ pub struct Entity {
     /// Where its head points, degrees (`rotate_head`): an enderman facing the bot.
     #[serde(default)]
     pub head_yaw: Option<f32>,
+    /// Its body's yaw, degrees, from the moves that carry one (issue 20g: the perched dragon's
+    /// facing, `plan::dragon`). `None` until one comes.
+    #[serde(default)]
+    pub yaw: Option<f32>,
     /// What it holds and wears, by equipment slot (0 main hand, 1 off hand, 2 to 5 feet to
     /// head, 6 body, 7 saddle): a wither skeleton's sword, a piglin's crossbow.
     #[serde(default)]
@@ -157,6 +161,27 @@ pub struct Blast {
     pub center: [f64; 3],
     pub knockback: Option<[f64; 3]>,
 }
+
+/// A crystal's removal and its blast within this many server ticks of each other are its
+/// destruction (the same tick on a real server; a second of slack, as `observe`'s strikes).
+pub const CRYSTAL_BLAST_TICKS: u64 = 20;
+/// A blast this near a removed crystal's position is its own (the crystal explodes at its feet
+/// position, `EndCrystal.hurtServer`).
+pub const CRYSTAL_BLAST_NEAR: f64 = 1.0;
+/// A destroyed crystal belongs to the spike whose centre column is this near, horizontally (the
+/// crystal stands on the centre + 0.5, config/end.toml).
+pub const CRYSTAL_SPIKE_NEAR: f64 = 2.0;
+
+/// Whether a blast's centre is a removed crystal's own (`CRYSTAL_BLAST_NEAR`).
+fn blast_near(center: [f64; 3], pos: [f64; 3]) -> bool {
+    let d = [0, 1, 2].map(|i| center[i] - pos[i]);
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= CRYSTAL_BLAST_NEAR
+}
+
+/// A spike seen with no crystal this many world ticks running is one gone (20 s: a resume's
+/// re-send of the crystals is done within about 80, race 46044026128 lane 0: untracked on tick
+/// 40, every one sent again by tick 100).
+pub const CRYSTAL_ABSENT_TICKS: u64 = 400;
 
 /// Entity-event statuses kept per entity.
 pub const ENTITY_STATUSES_KEPT: usize = 4;
@@ -614,6 +639,18 @@ pub struct World {
     /// Blasts heard and felt, newest last (`SOUNDS_KEPT`).
     #[serde(default)]
     pub explosions: Vec<Blast>,
+    /// End crystals removed with no explosion at their spot yet, (tick, position), newest last:
+    /// the server removes a crystal before its blast (`EndCrystal.hurtServer`: `remove`, then
+    /// `explode`), so a removal waits `CRYSTAL_BLAST_TICKS` for one (issue 20 part 2).
+    #[serde(default)]
+    pub crystals_removed: Vec<(u64, [f64; 3])>,
+    /// Spikes (centre columns) seen with no crystal on them, since this world tick: the bot
+    /// within `stage::CRYSTALS_NEAR` of the fountain (every crystal then inside the tracking
+    /// distance) and the spike's column loaded. Held `CRYSTAL_ABSENT_TICKS`, it is a crystal gone
+    /// that the bot did not see go (a development start's RCON kill, a synthetic island). Counted
+    /// from `ticks` before its increment: recorded on the `CRYSTAL_ABSENT_TICKS` + 1th tick.
+    #[serde(default)]
+    pub crystals_absent: BTreeMap<(i32, i32), u64>,
     /// Each spawner's mob from its block-entity data (`blaze`): which spawner is the blaze one,
     /// with no blaze in sight (blaze wall 4 took a dungeon spawner for it).
     #[serde(default)]
@@ -633,6 +670,20 @@ pub struct World {
     /// The game said the run is won (`win_game`, after the dragon).
     #[serde(default)]
     pub won: bool,
+    // >>> E1 (issue 20b)
+    /// The server tick the dragon was first seen dead: entity event 3 on an `ender_dragon`
+    /// (LivingEntity.die at the killing blow, the 26.1.2 jar) or, in the End, the dragon's boss
+    /// bar removed (EnderDragonFight.setDragonKilled hides it after the 200-tick death). The
+    /// `win` stage asks for it before `won`.
+    #[serde(default)]
+    pub dragon_dead: Option<u64>,
+    /// Attacks the bot has sent (`Act::Attack`), and the last one's server tick and target id
+    /// (a dragon part's id is not an entity of its own): the ledger's strikes.
+    #[serde(default)]
+    pub attacks_sent: u64,
+    #[serde(default)]
+    pub last_attack: Option<(u64, i32)>,
+    // <<< E1
     /// Chat and the screen's text, newest last (`SOUNDS_KEPT`).
     #[serde(default)]
     pub chat: Vec<ChatLine>,
@@ -720,6 +771,80 @@ impl World {
         Self::default()
     }
 
+    // >>> E9 (issue 20 part 2): a crystal is gone only when destroyed, never when untracked.
+    /// A crystal removed: destroyed if a blast at its spot came just before, else held for one.
+    fn crystal_removed(&mut self, pos: [f64; 3]) {
+        let now = self.session.server_ticks;
+        let blast = self
+            .explosions
+            .iter()
+            .any(|b| b.at_tick + CRYSTAL_BLAST_TICKS >= now && blast_near(b.center, pos));
+        if blast {
+            self.crystal_destroyed(pos);
+            return;
+        }
+        self.crystals_removed
+            .retain(|(t, _)| t + CRYSTAL_BLAST_TICKS >= now);
+        self.crystals_removed.push((now, pos));
+    }
+
+    /// A blast: every crystal removed just before at its spot was destroyed by it.
+    fn crystal_blast(&mut self, center: [f64; 3]) {
+        let now = self.session.server_ticks;
+        let (hit, kept): (Vec<_>, Vec<_>) = self
+            .crystals_removed
+            .iter()
+            .filter(|(t, _)| t + CRYSTAL_BLAST_TICKS >= now)
+            .partition(|(_, p)| blast_near(center, *p));
+        self.crystals_removed = kept;
+        for (_, p) in hit {
+            self.crystal_destroyed(p);
+        }
+    }
+
+    /// Each spike with no crystal on it, seen as `crystals_absent` says: held
+    /// `CRYSTAL_ABSENT_TICKS`, recorded gone. Any break (a crystal there, the bot far off, the
+    /// column unloaded, out of the End) starts it again.
+    fn crystals_absent_tick(&mut self) {
+        let near = stage::in_end(self)
+            && stage::from_fountain(self).is_some_and(|d| d <= stage::CRYSTALS_NEAR);
+        let now = self.ticks;
+        let done = self.memory.crystals_destroyed().clone();
+        for [x, z] in stage::SPIKES {
+            let loaded = self.columns.contains_key(&ChunkPos {
+                x: x.div_euclid(16),
+                z: z.div_euclid(16),
+            });
+            let crystal = self.entities.values().any(|e| {
+                e.kind == EntityKind::EndCrystal
+                    && !e.dead
+                    && (e.pos[0] - (f64::from(x) + 0.5)).hypot(e.pos[2] - (f64::from(z) + 0.5))
+                        <= CRYSTAL_SPIKE_NEAR
+            });
+            if !near || !loaded || crystal || done.contains(&(x, z)) {
+                self.crystals_absent.remove(&(x, z));
+                continue;
+            }
+            let since = *self.crystals_absent.entry((x, z)).or_insert(now);
+            if now >= since + CRYSTAL_ABSENT_TICKS {
+                self.memory.record_crystal_destroyed((x, z));
+                self.crystals_absent.remove(&(x, z));
+            }
+        }
+    }
+
+    /// Record the spike under a destroyed crystal; one off every spike is not counted.
+    fn crystal_destroyed(&mut self, pos: [f64; 3]) {
+        let spike = stage::SPIKES.iter().find(|[x, z]| {
+            (pos[0] - (f64::from(*x) + 0.5)).hypot(pos[2] - (f64::from(*z) + 0.5))
+                <= CRYSTAL_SPIKE_NEAR
+        });
+        if let Some([x, z]) = spike {
+            self.memory.record_crystal_destroyed((*x, *z));
+        }
+    }
+    // <<< E9
+
     /// The time of day, 0 to 23,999 (`time`'s helpers read it): the overworld clock as last
     /// told, run on by the game ticks since at its rate, so a `set_time` that leaves the clock
     /// out still moves it. `None` before any `set_time` with the overworld clock.
@@ -749,6 +874,7 @@ impl World {
                 // thousands of sightings a tick (callgrind of a replay of race 45350933958 lane 1:
                 // `Stage::highest` -> `kind_near` -> `Memory::in_column`).
                 let scans = self.ticks.is_multiple_of(stage::STAGE_EVERY_TICKS);
+                self.crystals_absent_tick();
                 if let Some(s) = Stage::highest_above(self, self.stage_reached, scans) {
                     self.stage_reached = Some(s);
                 }
@@ -851,6 +977,32 @@ impl World {
     fn move_body(&mut self, body: Body) -> Vec<Effect> {
         let at = BlockPos::containing(body.pos[0], body.pos[1], body.pos[2]).chunk();
         if !self.columns.contains_key(&at) {
+            // >>> E3 (issue 20e): a look asked for goes out though the ground is not loaded yet.
+            // The server judges an enderman's stare by the look it holds, and after a teleport
+            // that is the one it set (pitch 0 on arriving in the End) until a look packet comes;
+            // with no column under the feet none was sent (E5's race 45913296602 lane 1: an
+            // enderman angered at tick 60 of the arrival, the bot killed fighting it).
+            if let Some(pitch) = self.controls.pitch {
+                #[allow(clippy::cast_possible_truncation)]
+                let look = (self.controls.yaw as f32, pitch);
+                if self.sent_look != Some(look) {
+                    self.sent_look = Some(look);
+                    self.sent_pos = Some(body.pos);
+                    self.sent_tick = self.ticks;
+                    self.player.yaw = look.0;
+                    self.player.pitch = look.1;
+                    let [x, y, z] = body.pos;
+                    return vec![Effect::Send(C2s::MovePlayerPosRot {
+                        x,
+                        y,
+                        z,
+                        yaw: look.0,
+                        pitch: look.1,
+                        flags: u8::from(body.on_ground),
+                    })];
+                }
+            }
+            // <<< E3
             // No physics without the ground, but still the once-a-second status: the server
             // re-centres a player's chunks only when the client reports a move (handleMovePlayer
             // calls ServerChunkCache.move), so a teleport far from the loaded columns would
@@ -945,7 +1097,7 @@ impl World {
         self.memory
             .forget_sign(&dim, cell, data::block_of_state(state));
         let sign = memory::is_sign(state);
-        let watched = memory::watched(state) || self.memory.on_record(&dim, cell);
+        let watched = memory::watched_in(&dim, state) || self.memory.on_record(&dim, cell);
         if !sign && !watched {
             return;
         }
@@ -1082,13 +1234,21 @@ impl World {
         self.observe_column_signs(at, &column);
         let (bx, bz) = (at.x * 16, at.z * 16);
         let mut cells = Vec::new();
+        // >>> E1 (issue 20b): the End's kinds are watched in the End only.
+        let here = self
+            .dimension
+            .as_ref()
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        let watched = |s: u32| memory::watched_in(&here, s);
+        // <<< E1
         for (si, section) in column.sections.iter().enumerate() {
-            if !section.blocks.may_contain(memory::watched) {
+            if !section.blocks.may_contain(watched) {
                 continue;
             }
             let by = column.min_y + 16 * si as i32;
             for i in 0..4096usize {
-                if section.blocks.get(i).is_some_and(memory::watched) {
+                if section.blocks.get(i).is_some_and(watched) {
                     let (lx, lz, ly) = ((i & 15) as i32, ((i >> 4) & 15) as i32, (i >> 8) as i32);
                     cells.push(BlockPos::new(bx + lx, by + ly, bz + lz));
                 }
@@ -1114,7 +1274,7 @@ impl World {
                 // on that axis, 0 when above.
                 let edge = |d: i32| if d < 0 { 15 } else { 0 };
                 for (si, section) in nc.sections.iter().enumerate() {
-                    if !section.blocks.may_contain(memory::watched) {
+                    if !section.blocks.may_contain(watched) {
                         continue;
                     }
                     let by = nc.min_y + 16 * si as i32;
@@ -1126,7 +1286,7 @@ impl World {
                                 (a, edge(dz))
                             };
                             let i = protocol::chunk::block_index(lx, ly, lz);
-                            if section.blocks.get(i).is_some_and(memory::watched) {
+                            if section.blocks.get(i).is_some_and(watched) {
                                 cells.push(BlockPos::new(n.x * 16 + lx, by + ly, n.z * 16 + lz));
                             }
                         }
@@ -1198,6 +1358,10 @@ impl World {
                 if let Some(e) = self.entities.get_mut(&entity) {
                     e.struck = true;
                 }
+                // >>> E1 (issue 20b)
+                self.attacks_sent += 1;
+                self.last_attack = Some((self.session.server_ticks, entity));
+                // <<< E1
                 vec![Effect::Send(C2s::Attack { entity })]
             }
             Act::Respawn => {
@@ -1389,6 +1553,7 @@ impl World {
                             statuses: Vec::new(),
                             hurts: Vec::new(),
                             head_yaw: None,
+                            yaw: None,
                             equipment: BTreeMap::new(),
                             swung_at: None,
                             power: None,
@@ -1402,10 +1567,20 @@ impl World {
             }
             S2c::RemoveEntities { ids } => {
                 for id in ids {
-                    self.entities.remove(id);
+                    if let Some(e) = self.entities.remove(id)
+                        && e.kind == EntityKind::EndCrystal
+                    {
+                        self.crystal_removed(e.pos);
+                    }
                 }
             }
-            S2c::MoveEntity { id, dx, dy, dz } => {
+            S2c::MoveEntity {
+                id,
+                dx,
+                dy,
+                dz,
+                yaw,
+            } => {
                 let tick = self.session.server_ticks;
                 match self.entities.get_mut(id) {
                     Some(e) => {
@@ -1413,21 +1588,44 @@ impl World {
                         if moved.iter().all(|v| v.is_finite()) {
                             e.pos = moved;
                         }
+                        if let Some(y) = yaw {
+                            e.yaw = Some(*y);
+                        }
                         e.last_seen = tick;
                     }
                     None => self.unknown_entity_updates += 1,
                 }
             }
-            S2c::MoveEntityRot { id } => {
+            S2c::MoveEntityRot { id, yaw } => {
                 let tick = self.session.server_ticks;
                 match self.entities.get_mut(id) {
-                    Some(e) => e.last_seen = tick,
+                    Some(e) => {
+                        e.yaw = Some(*yaw);
+                        e.last_seen = tick;
+                    }
                     None => self.unknown_entity_updates += 1,
                 }
             }
             S2c::EntityPositionSync { id, x, y, z } => self.place_entity(*id, [*x, *y, *z], 0),
-            S2c::TeleportEntity { id, x, y, z, flags } => {
-                self.place_entity(*id, [*x, *y, *z], *flags)
+            S2c::TeleportEntity {
+                id,
+                x,
+                y,
+                z,
+                flags,
+                yaw,
+            } => {
+                self.place_entity(*id, [*x, *y, *z], *flags);
+                if let Some(e) = self.entities.get_mut(id)
+                    && yaw.is_finite()
+                {
+                    // Flag bit 3: the yaw is relative (`PositionMoveRotation.calculateAbsolute`).
+                    e.yaw = Some(if flags & (1 << 3) != 0 {
+                        e.yaw.unwrap_or(0.0) + yaw
+                    } else {
+                        *yaw
+                    });
+                }
             }
             S2c::SetEntityData { id, entries } if Some(*id) == self.player.entity_id => {
                 self.count_unread(entries);
@@ -1622,6 +1820,11 @@ impl World {
                         self.kills += 1;
                     }
                     e.dead = true;
+                    // >>> E1 (issue 20b)
+                    if e.kind == EntityKind::EnderDragon && self.dragon_dead.is_none() {
+                        self.dragon_dead = Some(self.session.server_ticks);
+                    }
+                    // <<< E1
                 }
             }
             S2c::OpenScreen { window, menu } => {
@@ -1789,6 +1992,7 @@ impl World {
                 });
                 let over = self.explosions.len().saturating_sub(SOUNDS_KEPT);
                 self.explosions.drain(..over);
+                self.crystal_blast(*center);
             }
             S2c::BlockEntityData { pos, spawns, .. } => {
                 if let Some(m) = spawns {
@@ -1874,6 +2078,22 @@ impl World {
                     self.bosses.insert(*uuid, (name.clone(), *progress));
                 }
                 protocol::BossOp::Remove => {
+                    // >>> E1 (issue 20b): the dragon's bar goes when it is killed.
+                    let in_end = self
+                        .dimension
+                        .as_ref()
+                        .is_some_and(|d| d.name == "minecraft:the_end");
+                    if in_end
+                        && self.dragon_dead.is_none()
+                        && self.bosses.get(uuid).is_some_and(|b| {
+                            b.0.to_lowercase()
+                                .replace(' ', "_")
+                                .contains("ender_dragon")
+                        })
+                    {
+                        self.dragon_dead = Some(self.session.server_ticks);
+                    }
+                    // <<< E1
                     self.bosses.remove(uuid);
                 }
                 protocol::BossOp::Progress(p) => {
@@ -1996,6 +2216,7 @@ mod blaze_charge {
             statuses: Vec::new(),
             hurts: Vec::new(),
             head_yaw: None,
+            yaw: None,
             equipment: BTreeMap::new(),
             swung_at: None,
             power: None,

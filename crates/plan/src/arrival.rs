@@ -206,6 +206,10 @@ pub struct Shaft {
     /// Since when a stack has been on the cursor.
     #[serde(default)]
     pub cursor_at: Option<u64>,
+    // >>> E2 (issue 20c): a shaft that ends once the feet stand at this y (`arrival_rise_to`).
+    #[serde(default)]
+    pub stop_at: Option<i32>,
+    // <<< E2
 }
 
 /// The shaft's next step from the feet.
@@ -398,6 +402,71 @@ pub fn side_cell(w: &World, feet: Cell, items: &[ItemKind]) -> Option<Cell> {
     })
 }
 
+// >>> E4 (issue 20f): the rise's two halves, shared by the shaft and the spike pillar
+// (`spikes`), lifted out of `shaft_tick` unchanged.
+/// In the air on a rise's jump from `j`: at its top (the feet a block over `j`), the block into
+/// `j` against the top of the one under it, once (`clicked`), with no other act this tick and no
+/// click pending.
+pub(crate) fn rise_click(
+    w: &World,
+    body: &physics::Body,
+    j: Cell,
+    clicked: &mut bool,
+    acts: &mut Vec<world::Act>,
+) {
+    if !*clicked
+        && body.pos[1] >= f64::from(j.1) + 1.0
+        && open(kind(w, j))
+        && acts.is_empty()
+        && w.click.is_none()
+    {
+        *clicked = true;
+        acts.push(world::Act::UseOn {
+            pos: BlockPos::new(j.0, j.1 - 1, j.2),
+            face: 1,
+        });
+    }
+}
+
+/// On the ground at `feet`, a rise's next step: to the cell's centre first, slowly (sneaking
+/// keeps the feet off any edge), then `item` to hand, then the jump (`jump_from` kept). `None`
+/// when the item is not in the inventory.
+pub(crate) fn rise_jump(
+    w: &World,
+    body: &physics::Body,
+    feet: Cell,
+    item: ItemKind,
+    down: Controls,
+    jump_from: &mut Option<Cell>,
+    acts: &mut Vec<world::Act>,
+) -> Option<Controls> {
+    let centre = [f64::from(feet.0) + 0.5, f64::from(feet.2) + 0.5];
+    let (dx, dz) = (centre[0] - body.pos[0], centre[1] - body.pos[2]);
+    if dx.abs() > CENTRE || dz.abs() > CENTRE {
+        return Some(Controls {
+            forward: true,
+            sneak: true,
+            yaw: (-dx).atan2(dz).to_degrees(),
+            ..down
+        });
+    }
+    match hold::toward(w, item) {
+        hold::Hold::Held => {
+            *jump_from = Some(feet);
+            Some(Controls { jump: true, ..down })
+        }
+        hold::Hold::Act(a) => {
+            if acts.is_empty() {
+                acts.push(a);
+            }
+            Some(down)
+        }
+        hold::Hold::Wait => Some(down),
+        hold::Hold::Missing => None,
+    }
+}
+// <<< E4
+
 fn items(w: &World) -> Vec<ItemKind> {
     w.inventory
         .slots
@@ -413,6 +482,17 @@ impl Plan {
     /// leg (refused here, noted once). `Some(Task::Idle)` while a shaft runs: `arrival_step`
     /// drives it.
     pub(crate) fn arrival_climb(&mut self, w: &World, tick: u64) -> Option<Task> {
+        self.arrival_shaft(w, tick, None)
+    }
+
+    // >>> E2 (issue 20c, docs/problems/end-portal.md): the same shaft, ended once the feet stand
+    // at `top` (the End kit's way up: a drop of 4 in its own way from the portal room).
+    pub(crate) fn arrival_rise_to(&mut self, w: &World, tick: u64, top: i32) -> Option<Task> {
+        self.arrival_shaft(w, tick, Some(top))
+    }
+    // <<< E2
+
+    fn arrival_shaft(&mut self, w: &World, tick: u64, stop_at: Option<i32>) -> Option<Task> {
         let body = w.body?;
         let feet = path::feet_cell(body.pos);
         if self.ender.home.arrival.shaft.is_some() {
@@ -459,6 +539,7 @@ impl Plan {
                     sides: 0,
                     sides_all: 0,
                     cursor_at: None,
+                    stop_at,
                 });
                 self.note(
                     tick,
@@ -789,22 +870,20 @@ impl Plan {
             }
             s.clicked = false;
         }
+        // >>> E2: risen to its stop.
+        if let Some(top) = s.stop_at
+            && body.on_ground
+            && feet.1 >= top
+        {
+            self.shaft_end(tick, s, feet, "risen to its stop", false);
+            return None;
+        }
+        // <<< E2
         // In the air on a jump: at its top, the block into the cell the feet left.
         if let Some(j) = s.jump_from
             && !body.on_ground
         {
-            if !s.clicked
-                && body.pos[1] >= f64::from(j.1) + 1.0
-                && open(kind(w, j))
-                && self.acts.is_empty()
-                && w.click.is_none()
-            {
-                s.clicked = true;
-                self.acts.push(world::Act::UseOn {
-                    pos: BlockPos::new(j.0, j.1 - 1, j.2),
-                    face: 1,
-                });
-            }
+            rise_click(w, &body, j, &mut s.clicked, &mut self.acts);
             return Some(down);
         }
         if !body.on_ground {
@@ -882,7 +961,12 @@ impl Plan {
                     && craft::count(w, ItemKind::Cobblestone)
                         + craft::count(w, ItemKind::CobbledDeepslate)
                         >= 3
-                    && self.ender.home.pick_runs < r.pick_runs;
+                    && self.ender.home.pick_runs < r.pick_runs
+                    // >>> E2: a shaft with a stop (the End kit's) digs by hand: no table or wood
+                    // under the room makes a pickaxe (race 45870075221: "the pickaxes first"
+                    // ended both pillars at once).
+                    && s.stop_at.is_none();
+                // <<< E2
                 if low {
                     self.shaft_end(tick, s, feet, "the pickaxes first", false);
                     return None;
@@ -902,30 +986,9 @@ impl Plan {
                     self.shaft_end(tick, s, feet, "no block held to put under the feet", true);
                     return None;
                 };
-                // To the cell's centre first, slowly (sneaking keeps the feet off any edge).
-                let centre = [f64::from(feet.0) + 0.5, f64::from(feet.2) + 0.5];
-                let (dx, dz) = (centre[0] - body.pos[0], centre[1] - body.pos[2]);
-                if dx.abs() > CENTRE || dz.abs() > CENTRE {
-                    return Some(Controls {
-                        forward: true,
-                        sneak: true,
-                        yaw: (-dx).atan2(dz).to_degrees(),
-                        ..down
-                    });
-                }
-                match hold::toward(w, item) {
-                    hold::Hold::Held => {
-                        s.jump_from = Some(feet);
-                        Some(Controls { jump: true, ..down })
-                    }
-                    hold::Hold::Act(a) => {
-                        if self.acts.is_empty() {
-                            self.acts.push(a);
-                        }
-                        Some(down)
-                    }
-                    hold::Hold::Wait => Some(down),
-                    hold::Hold::Missing => {
+                match rise_jump(w, &body, feet, item, down, &mut s.jump_from, &mut self.acts) {
+                    Some(c) => Some(c),
+                    None => {
                         self.shaft_end(tick, s, feet, "the block went missing", true);
                         None
                     }

@@ -181,6 +181,11 @@ impl Case {
         self.story.as_ref().and_then(|s| s.eyes)
     }
 
+    /// The run's End (issue 20b), from its story.
+    pub fn end(&self) -> Option<story::EndCounts> {
+        self.story.as_ref().and_then(|s| s.end.clone())
+    }
+
     /// `[ending killer doing why]`: what the batch groups endings by.
     pub fn signature(&self) -> [String; 4] {
         let killer = match &self.ending {
@@ -327,6 +332,9 @@ pub struct Row {
     /// The run's eyes (`Case::eyes`, issue 19b); `None` when it had none or in older rows.
     #[serde(default)]
     pub eyes: Option<story::EyeCounts>,
+    /// The run's End (`Case::end`, issue 20b); `None` when it had none or in older rows.
+    #[serde(default)]
+    pub end: Option<story::EndCounts>,
 }
 
 /// What a batch could see: full sight is every ratio 1.0 and the counts 0 (issue 16e). A column
@@ -635,7 +643,7 @@ impl SensesFile {
                 })
                 .collect();
             out.push_str(&format!(
-                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{}{} | {} ({}) | {}\n",
+                "{:>8} {pos} {} hp {} food {} held {}{}{}{}{}{}{}{} | {} ({}) | {}\n",
                 r.at,
                 r.standing(),
                 r.health
@@ -658,6 +666,7 @@ impl SensesFile {
                 r.travel(),
                 r.hunt(),
                 r.eyes(),
+                r.end(),
                 r.task,
                 r.why,
                 near.join(", ")
@@ -823,6 +832,11 @@ pub fn render_summary(
         lines.push(String::new());
         lines.extend(eyes);
     }
+    let end = end_lines(batches);
+    if !end.is_empty() {
+        lines.push(String::new());
+        lines.extend(end);
+    }
     // The planner's aims, when runs had one: met over counted runs, per aim.
     let mut aims: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for row in batches
@@ -949,6 +963,114 @@ pub fn eyes_lines(batches: &[Batch]) -> Vec<String> {
     ]
 }
 
+// >>> E1 (issue 20b)
+/// The End lines, only when a run had an End: per bot, crystals left and gone by how, pillars,
+/// strikes, the dragon's blows both ways, breath and gaze, the dragon health trail.
+/// `end rs-l00-b00: eyes placed 11, entered; crystals 10 seen, left 3, gone struck 7;
+/// pillars 7 up (top 38) 6 down; strikes 9; dragon hits 0, blows 0 (0.0 health); breath 0;
+/// gaze near 2 (stares 0)` and `dragon health rs-l00-b00: 200@40000 180@41200 …`.
+pub fn end_lines(batches: &[Batch]) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in batches.iter().flat_map(|b| &b.rows) {
+        let Some(e) = &r.end else { continue };
+        let gone = e
+            .crystals_gone
+            .iter()
+            .map(|(k, n)| format!("{k} {n}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push(format!(
+            "end {}: eyes placed {}{}; crystals {} seen, left {}, gone {}; pillars {} up (top {}) {} down; strikes {}; dragon hits {}, blows {} ({:.1} health); breath {}; gaze near {} (stares {}){}{}",
+            r.bot,
+            e.eyes_placed,
+            if e.entered { ", entered" } else { "" },
+            e.crystals_seen,
+            e.crystals_left.map_or_else(|| "-".to_owned(), |n| n.to_string()),
+            if gone.is_empty() { "none".to_owned() } else { gone },
+            e.pillars_up,
+            e.pillar_top,
+            e.pillars_down,
+            e.strikes,
+            e.dragon_hits,
+            e.dragon_blows,
+            e.blow_health,
+            e.breath,
+            e.near_misses,
+            e.stares,
+            if e.dragon_dead { "; dragon dead" } else { "" },
+            if e.credits { "; credits" } else { "" },
+        ));
+        if !e.dragon_health.is_empty() {
+            out.push(format!(
+                "dragon health {}: {}",
+                r.bot,
+                e.dragon_health
+                    .iter()
+                    .map(|(t, h)| format!("{h:.0}@{t}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod end_tests {
+    use super::*;
+
+    /// Issue 20b: a run with an End gets its line and its dragon trail; one without none.
+    #[test]
+    fn the_end_lines_name_each_bot() {
+        let mut e = story::EndCounts {
+            eyes_placed: 11,
+            entered: true,
+            crystals_seen: 10,
+            crystals_left: Some(3),
+            pillars_up: 7,
+            pillar_top: 38,
+            pillars_down: 6,
+            strikes: 9,
+            dragon_health: vec![(100, 200.0), (1300, 180.0)],
+            ..story::EndCounts::default()
+        };
+        e.crystals_gone.insert("struck".to_owned(), 7);
+        let row = |bot: &str, end| Row {
+            bot: bot.to_owned(),
+            stage_reached: Some(Stage::End),
+            ending: Ending::Cap,
+            signature: Default::default(),
+            server_ticks: 0,
+            wall_ms: 0,
+            case: None,
+            recording: None,
+            aim: None,
+            pearls: None,
+            eyes: None,
+            end,
+        };
+        let b = Batch {
+            format_version: FORMAT_VERSION,
+            run: "r".to_owned(),
+            commit: "c".to_owned(),
+            lane: 0,
+            start: "s".to_owned(),
+            source: Source::Real,
+            config_hash: String::new(),
+            bots: 2,
+            server: String::new(),
+            server_tick_rate: 20.0,
+            rows: vec![row("rs-l00-b00", Some(e)), row("rs-l00-b01", None)],
+            coverage: Coverage::default(),
+        };
+        let lines = end_lines(std::slice::from_ref(&b));
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("end rs-l00-b00: eyes placed 11, entered; crystals 10 seen, left 3, gone struck 7; pillars 7 up (top 38) 6 down; strikes 9"), "{}", lines[0]);
+        assert_eq!(lines[1], "dragon health rs-l00-b00: 200@100 180@1300");
+    }
+}
+// <<< E1
+
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
@@ -1062,6 +1184,13 @@ mod text_tests {
             sword_uses: None,
             eyes: None,
             frames: None,
+            dragon_health: None,
+            dragon_phase: None,
+            crystals: None,
+            fountain: None,
+            over: None,
+            endermen_16: None,
+            crystals_left: None,
         }
     }
 
@@ -1196,6 +1325,7 @@ mod pearls_tests {
             aim: None,
             pearls,
             eyes: None,
+            end: None,
         }
     }
 

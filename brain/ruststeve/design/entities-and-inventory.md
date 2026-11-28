@@ -5,8 +5,8 @@ type: reference
 tags: [world, entities, metadata, inventory, slots]
 aliases: [kills, struck, air, on fire, uses_finished, Entity, entities map, Inventory, window 0, menu slots, set_player_inventory, MetaValue, Slot, truncated slot, health index 9]
 status: verified
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@e96708e clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn item(&self) -> Option<(ItemKind, i32)> {"
   - "ruststeve:crates/world/src/lib.rs#pub struct Pickup {"
@@ -39,6 +39,8 @@ related:
 - Since issue 10a: `held` (the hotbar slot, set by `Act::Hold` and by the server's `set_held_slot`), `click` (the one pending click, cleared when window 0's state id moves, [[wire-container-click]]) with `clicks_sent`/`clicks_answered`, and `pickups`: the bot's own `take_item_entity`s (item entity, amount, tick), a ring of recent ones. `Entity::item` reads an item entity's stack at metadata index 8. `container_close` from the server drops the pending click. `set_cursor_item` (10b) sets the cursor; a click empties it first ([[wire-container-click]]). `window` (11a): a window besides the inventory, its last 36 slots mirrored into window 0's view ([[table-window]]).
 - Slots read the components clojurecraft reads (`max_stack_size`, `max_damage`, `damage`, `repair_cost`, `unbreakable`); any other ends the frame as `Slot::Truncated` (the item and count still right) and is counted in `truncated` ([[wire-slots]]).
 
+- An `end_crystal` removed is held in `crystals_removed` for `CRYSTAL_BLAST_TICKS` (20): an `explode` within `CRYSTAL_BLAST_NEAR` (1.0) of it, before or after (the server removes, then explodes: `EndCrystal.hurtServer`), is its destruction, recorded in memory against the spike within `CRYSTAL_SPIKE_NEAR` (2.0). A removal with no blast is an untracking, never a destruction (issue 20 part 2). A spike seen with no crystal for `CRYSTAL_ABSENT_TICKS` (400) running, the bot within 60 of the fountain and its column loaded (`crystals_absent`), is recorded gone too: a resume's re-send ends within about 80 ticks.
+
 ## Tests
 `crates/world/tests/acts.rs`: digs count their sequence and acks raise it; a click waits for the window to move; holding and pickups. `crates/world/tests/properties.rs`: any sequence of adds, moves, syncs, teleports, data, removals, inventory packets, chunks and block updates folds without panic; no entity holds the player's id; every position is finite; every count is at least 1.
 
@@ -57,8 +59,9 @@ related:
 ## Issue 16e: what the world keeps that it used to drop
 - **Wear**: `Inventory.wear` holds each slot's `damage`/`max_damage` from its components, and `Inventory::uses_left(slot)` is max damage (the component, else `item_props::max_damage`) less damage; `None` for an item that does not wear. A pickaxe wearing out was invisible to the planner before (blaze wall 7). `Inventory.truncated_by` counts slots cut short by the component that stopped them.
 - **Entities** keep their `uuid`, the `velocity` the server last set (a fireball's heading), the newest 4 entity-event `statuses`, and the newest 4 damage events on them (`hurts`: type, and whether the bot dealt it). A real server sends no hurt animation for a mob, so a damage event naming the bot is how a swing is known to land.
-- **Entity data cut short** ends the packet's entries with `MetaValue::Unread(serializer)`; the world counts it in `metadata_unread` and keeps the value the entry would have replaced.
+- **Entity data cut short** ends the packet's entries with `MetaValue::Unread(serializer)`; the world counts it in `metadata_unread` and keeps the value the entry would have replaced. Since issue 20b a `PARTICLE` entry of an area effect cloud reads whole (`MetaValue::Particle`: `dragon_breath` with its power, `entity_effect` with its colour), so the dragon's breath and fireball clouds are not cut short; any other particle kind still stops the read.
 - **What a mob shows**: `head_yaw` (`rotate_head`; `Entity::faces(target, degrees)` asks whether the head points at a position, yaw 0 toward +z, 90 toward -x), `equipment` by slot (`set_equipment`: 0 main hand, 1 off hand, 2-5 feet to head), `swung_at` (`animate` 0, the main-hand swing's tick), `power` (`projectile_power`, a fireball's), `passengers`, and `effects` and `attributes` by name (an attribute is its base plus the add-value modifiers). `Entity::blaze_charged` reads a blaze's metadata index 16, bit 0.
+- **A body's yaw** (issue 20g): `Entity::yaw` is set by `move_entity_rot`, `move_entity_pos_rot` (`S2c::MoveEntity::yaw`, a 1/256-turn byte) and `teleport_entity` (relative under flag bit 3); `None` until one comes (`add_entity` and `entity_position_sync` are not read for it yet). The perched dragon's facing comes from it (`plan::dragon`).
 - **The bot's own**: `Player.effects` (amplifier and the server tick it ends; a duration of -1 never ends), `attributes`, `in_combat`, `experience`; `World::hurt_from` is its last hurt flash (tick and the yaw the blow came from).
 
 ## See also

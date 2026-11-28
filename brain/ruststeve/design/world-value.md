@@ -5,8 +5,8 @@ type: reference
 tags: [world, chunks, overlay, fold, state]
 aliases: [World, World::step, block_at, state_at, overlay, chunk columns, Event, Effect, world crate]
 status: verified
-lastUpdated: 2026-11-24
-verifiedAgainst: ruststeve@c5791eb clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/world/src/lib.rs#pub fn step(&mut self, e: &Event) -> Vec<Effect> {"
   - "ruststeve:crates/world/src/lib.rs#pub fn state_at(&self, pos: BlockPos) -> Option<u32> {"
@@ -39,13 +39,13 @@ related:
   - `player`: entity id, position and look from teleports (relative flags applied), health, food, saturation; air, on fire, effects, attributes, in combat, experience;
   - `entities`, `inventory` (window 0) and `memory` (sightings) ([[entities-and-inventory]], [[memory-sightings]]);
   - `held`, the dig `sequence_sent`/`sequence_acked`, the pending `click` and `pickups` (issue 10a, [[entities-and-inventory]], [[wire-actions]]);
-  - `body`, `controls` and what was last sent: the physics body and what it presses ([[physics]]);
+  - `body`, `controls` and what was last sent (position, look, and `sent_input`, the keys): the physics body and what it presses ([[physics]]);
   - `hits`, `death` and `stage_reached`: the hits on the bot in the last minute, the server's death message, the highest stage held ([[entities-and-inventory]], [[race-and-results]]);
   - `window` and `closed_window`: the window open besides the inventory and the one the bot last closed ([[table-window]], [[wire-container-click]]); `kills` ([[entities-and-inventory]]);
-  - what the bot hears and is told (issue 16e), each list the newest 64 (`SOUNDS_KEPT`): `sounds`, `level_events`, `explosions`, `game_events`, `chat`; and `bosses`, `spawner_mobs` (each spawner's mob from its block-entity data), `cracks`, `cooldowns`, `hurt_from`, `won` (the `win_game` game event), `chunk_center`, `view_radius`, `simulation_distance`, `biome_updates`;
+  - what the bot hears and is told (issue 16e), each list the newest 64 (`SOUNDS_KEPT`): `sounds`, `level_events`, `explosions`, `game_events`, `chat`; and `bosses`, `spawner_mobs` (each spawner's mob from its block-entity data), `cracks`, `cooldowns`, `hurt_from`, `won` (the `win_game` game event), `dragon_dead` (issue 20b: the server tick of the dragon's entity event 3, or its boss bar removed in the End), `attacks_sent` and `last_attack` (the strikes the ledger names), `crystals_removed` and `crystals_absent` (issue 20 part 2: a crystal's removal held for its blast, a spike seen bare; a destruction goes to memory, [[entities-and-inventory]]), `chunk_center`, `view_radius`, `simulation_distance`, `biome_updates`;
   - `game_time` and `day_clock`: the level's game time and the overworld clock from the newest `set_time` (issue 16, `docs/problems/day-clock.md`). `World::day_time()` is the time of day, 0 to 23,999, run on from the last overworld clock by the game ticks since; `World::is_night()` and the pure `world::time` helpers (`is_night`, `ticks_to_dusk`, `ticks_to_dawn`, `DUSK` 12542 and `DAWN` 23460 from the jar's `timeline/day.json` `monsters_burn` track) are what the planner asks;
   - `now_ms`, `seed`.
-- **Acts**: `Event::Act` is what the bot does (dig, hold, click, close, swing, resync, use on a block, attack, use item, release use, respawn); the world turns it into the packet and the state it waits on, so an act is an input like a tick, recorded and replayed ([[wire-actions]]).
+- **Acts**: `Event::Act` is what the bot does (dig, hold, click, close, swing, resync, use on a block, attack, use item, use the off hand, release use, respawn); the world turns it into the packet and the state it waits on, so an act is an input like a tick, recorded and replayed ([[wire-actions]]).
 - **Chunks** are decoded on the net reader thread into `Column`s (and, since issue 08a, encoded back by `Column::encode` for the server model's generated worlds, [[server-model]]) whose sections stay packed paletted containers (no 4096-cell expansion); a cell is read on demand. A column's height comes from its section count: 24 starts at y −64, 16 at y 0.
 - **Block changes** (`block_update`, `section_blocks_update`) go to the overlay; a column resent or forgotten drops its overlay. `state_at` reads the overlay first, then the column; `block_at` maps the state through `data::block_of_state`.
 - **A dimension change** (respawn into another level) clears every column, the overlay, every entity and the body: chunks belong to one dimension. Memory keeps everything, by dimension.

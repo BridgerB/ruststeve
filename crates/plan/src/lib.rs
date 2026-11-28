@@ -14,6 +14,9 @@ pub mod arrival;
 // >>> base (P5, issue 18d)
 pub mod base;
 // <<< base
+// >>> E8 (issue 20, the bow line)
+pub mod bow;
+// <<< E8
 pub mod build;
 // >>> pearls (P3, issue 18e/f)
 pub mod burrow;
@@ -23,8 +26,17 @@ pub mod cover;
 pub mod craft;
 pub mod defend;
 pub mod dig;
+// >>> E5 (issue 20g, the dragon and the win)
+pub mod dragon;
+// <<< E5
 pub mod eat;
+// >>> E3 (issue 20e, the End's arrival and island)
+pub mod end;
+// <<< E3
 pub mod endermen;
+// >>> E2 (issue 20c/20d): the End kit and the portal.
+pub mod end_portal;
+// <<< E2
 pub mod escape;
 // >>> eyes (Q3, issue 19c)
 pub mod eyes;
@@ -58,6 +70,9 @@ pub mod redig;
 pub mod scoop;
 pub mod shield;
 pub mod smelt;
+// >>> E4 (issue 20f): the crystals by pillar and strike.
+pub mod spikes;
+// <<< E4
 pub mod stairs;
 pub mod station;
 // >>> stronghold (Q4, issue 19f)
@@ -180,6 +195,12 @@ const SHELTER_BLOCKS: &[data::ItemKind] = &[
     data::ItemKind::CobbledDeepslate,
     data::ItemKind::NetherBricks,
     data::ItemKind::Netherrack,
+    // >>> E3 (issue 20e): in the End the pack may hold only end stone (E5's race 45886819862
+    // lane 1: "no block held for a pocket" with 192 end stone, killed by an enderman). Last, so
+    // the pillars' end stone goes only when nothing else is held.
+    data::ItemKind::EndStone,
+    data::ItemKind::Obsidian,
+    // <<< E3
 ];
 /// Ticks between two shelter blocks: the block update arrives in a tick or two (the escape's
 /// `SEAL_EVERY_TICKS`).
@@ -505,6 +526,10 @@ pub enum Task {
     /// An eye of ender thrown, followed, read and picked up again (`eyes`).
     Throw(Box<eyes::Throw>),
     // <<< eyes
+    // >>> E5 (issue 20g)
+    /// The fight with the dragon and the way into the exit portal (`dragon`).
+    Dragon(Box<dragon::Fight>),
+    // <<< E5
 }
 
 impl Task {
@@ -530,6 +555,9 @@ impl Task {
             // >>> eyes
             Task::Throw(_) => "throw-eye",
             // <<< eyes
+            // >>> E5
+            Task::Dragon(_) => "dragon",
+            // <<< E5
         }
     }
 
@@ -553,6 +581,9 @@ impl Task {
             // >>> eyes
             Task::Throw(_) => None,
             // <<< eyes
+            // >>> E5
+            Task::Dragon(_) => None,
+            // <<< E5
             Task::ToLog(w) | Task::Explore(w) => Some(w),
         }
     }
@@ -890,6 +921,31 @@ pub struct Plan {
     #[serde(default)]
     pub eyes: eyes::EyeState,
     // <<< eyes
+    // >>> E5 (issue 20g): the dragon's record, its death and the credits (docs/problems/end-dragon.md).
+    #[serde(default)]
+    pub dragon: dragon::DragonState,
+    // <<< E5
+    // >>> E2 (issue 20c/20d, docs/problems/end-portal.md): the End kit and the portal.
+    #[serde(default)]
+    pub end_portal: end_portal::EndPortalState,
+    /// The dimension the last tick was in (`end_dimension_watch`).
+    #[serde(default)]
+    pub last_dimension: Option<String>,
+    // <<< E2
+    // >>> E4 (issue 20f): the crystals' state (docs/problems/end-crystals.md).
+    #[serde(default)]
+    pub spikes: spikes::SpikeState,
+    // <<< E4
+    // >>> E3 (issue 20e, docs/problems/end-island.md): the bunker's feet cell and the End's state.
+    #[serde(default)]
+    pub bunker: Option<[i32; 3]>,
+    #[serde(default)]
+    pub end: end::EndState,
+    // <<< E3
+    // >>> E8 (issue 20, the bow line, docs/problems/end-bow.md): the shot in hand and its counts.
+    #[serde(default)]
+    pub bow: bow::BowState,
+    // <<< E8
     /// Acts made this tick, for the shell (`take_acts`).
     #[serde(skip)]
     acts: Vec<world::Act>,
@@ -1021,6 +1077,23 @@ impl Plan {
             throws: Vec::new(),
             eyes: eyes::EyeState::default(),
             // <<< eyes
+            // >>> E5
+            dragon: dragon::DragonState::default(),
+            // <<< E5
+            // >>> E2
+            end_portal: end_portal::EndPortalState::default(),
+            last_dimension: None,
+            // <<< E2
+            // >>> E4
+            spikes: spikes::SpikeState::default(),
+            // <<< E4
+            // >>> E3
+            bunker: None,
+            end: end::EndState::default(),
+            // <<< E3
+            // >>> E8
+            bow: bow::BowState::default(),
+            // <<< E8
             acts: Vec::new(),
         }
     }
@@ -1101,6 +1174,12 @@ impl Plan {
         self.count_repickup(w);
         let c = self.shield_step(w, c, swings_before);
         // <<< shield
+        // >>> E5 (issue 20g): no walk steps into a breath's reach; it waits (`breath_ahead`).
+        let c = self.breath_ahead(w, c);
+        // <<< E5
+        // >>> E3 (issue 20e): in the End a look no act asked for is straight down.
+        let c = self.end_gaze(w, c);
+        // <<< E3
         // Never stare (issue 17e): every look the planner sends leaves here, kept off endermen.
         let c = self.keep_look(w, c);
         self.track(w.session.server_ticks, notes_before);
@@ -1353,6 +1432,9 @@ impl Plan {
             // >>> eyes
             | Task::Throw(_)
             // <<< eyes
+            // >>> E5
+            | Task::Dragon(_)
+            // <<< E5
             | Task::Swim(..) => false,
         };
         // A strike, a change of the held slot or a click to place a block is weighed by the
@@ -1551,6 +1633,20 @@ impl Plan {
 
     fn step_inner(&mut self, w: &World) -> Controls {
         let tick = w.ticks;
+        // >>> E5 (issue 20g): the dragon's record every tick, and the credits answered with the
+        // respawn (`dragon::Plan::dragon_watch`), ahead of everything: the body is gone then.
+        if let Some(c) = self.dragon_watch(w, tick) {
+            return c;
+        }
+        // The backstop (coordinator, wall 27): idle in the End with no note for 600 ticks, noted
+        // and handed back to the planner.
+        self.end_idle_watch(w, tick);
+        // >>> E2 (issue 20d, docs/problems/end-portal.md wall 11): a dimension change ends the task
+        // in hand and the traps' belief from the old dimension (race 45887747475 lane 1: an
+        // overworld lava escape carried into the End walked the bot off the platform).
+        self.end_dimension_watch(w, tick);
+        // <<< E2
+        // <<< E5
         let Some(body) = w.body else {
             return Controls::default();
         };
@@ -1605,25 +1701,90 @@ impl Plan {
             }
             Some(_) | None => self.mark = Some((body.pos, items, self.event_count, tick)),
         }
+        // >>> E4 (issue 20f): the water clutch ahead of everything: a fall waits for no row (race
+        // 45890149072 lane 0: struck off its pillar while an enderman's pocket held the planner,
+        // the clutch never ran, a fall of 22).
+        if let Some(c) = self.spikes_clutch(w, tick) {
+            return self.held("spikes_clutch", c);
+        }
+        // <<< E4
+        // >>> E3 (issue 20e): the head out of water before it drowns, ahead of every row and task
+        // but a live dodge (`end::Plan::drown_guard`; race 46045482138 lane 5 drowned in a pit).
+        if let Some(c) = self.drown_guard(w, tick) {
+            return self.held("drown_guard", c);
+        }
+        // <<< E3
+        // >>> E5 (issue 20g): in the End, out of a breath cloud on the feet, ahead of every row
+        // and task (`dragon::Plan::breath_step`, the one rule for every agent's work there).
+        if let Some(c) = self.charge_step(w, tick) {
+            return self.held("charge_step", c);
+        }
+        if let Some(c) = self.breath_step(w, tick) {
+            return self.held("breath_step", c);
+        }
+        // <<< E5
         // The always-rows come first, ahead of every goal and after the aim is met.
         if let Some(c) = self.always(w, &body, tick) {
-            return c;
+            return self.held("always", c);
         }
+        // >>> E5 (wall 46): recovery first at low health in the End.
+        if let Some(c) = self.recover_step(w, tick) {
+            return self.held("recover_step", c);
+        }
+        // <<< E5
         // >>> pearls (P3, issue 18f): the hunt's rule table, in the warped forest
         // (docs/problems/pearls-hunt.md). `None` lets the task in hand run.
         if let Some(c) = self.pearls_step(w, tick) {
-            return c;
+            return self.held("pearls_step", c);
         }
         // <<< pearls
         // A provoked enderman (issue 17e): sealed in where the bot stands, never a swing.
-        if let Some(c) = self.ender_threat(w, tick) {
-            return c;
+        // >>> E5 (issue 20g): not while a breath reaches the feet or the dragon sits near.
+        let dragon_first = self.dragon_first_step(w, tick);
+        // In the End no pocket is ever sealed (they held bots in the dragon's reach and a breath
+        // came through the walls): `dragon::Plan::end_enderman_step` answers instead.
+        let in_the_end = w
+            .dimension
+            .as_ref()
+            .is_some_and(|d| d.name == dragon::THE_END);
+        if in_the_end
+            && !dragon_first
+            && let Some(c) = self.end_enderman_step(w, tick)
+        {
+            return self.held("end_enderman_step", c);
+        }
+        // <<< E5
+        if !dragon_first
+            && !in_the_end
+            && let Some(c) = self.ender_threat(w, tick)
+        {
+            return self.held("ender_threat", c);
         }
         // >>> Q7: the arrival's shaft up, a tick at a time while no task runs.
         if let Some(c) = self.arrival_step(w, tick) {
-            return c;
+            return self.held("arrival_step", c);
         }
         // <<< Q7
+        // >>> E5 (issue 20g, wall 39): a perch the standing crystals cannot heal is fought, ahead
+        // of the crystals' own rows.
+        self.perch_fight_step(w, tick);
+        // <<< E5
+        // >>> E8 (issue 20, the bow line): the shot in hand, while no task runs (ahead of the
+        // pillar's driver: an open crystal is shot from the ground, docs/problems/end-bow.md).
+        if let Some(c) = self.bow_step(w, tick) {
+            return self.held("bow_step", c);
+        }
+        // <<< E8
+        // >>> E4 (issue 20f): the crystals' climb, block, strike or hold, while no task runs.
+        if let Some(c) = self.spikes_step(w, tick) {
+            return self.held("spikes_step", c);
+        }
+        // <<< E4
+        // >>> E3 (issue 20e): the End's bridge, bunker and stock, and its choice of task.
+        if let Some(c) = self.end_step(w, tick) {
+            return self.held("end_step", c);
+        }
+        // <<< E3
         if self.finished() {
             return Controls::default();
         }
@@ -1800,6 +1961,9 @@ impl Plan {
             // >>> eyes (Q3, issue 19c): the one call site of `eyes::Plan::throw_step`.
             Task::Throw(_) => return self.throw_step(w, tick),
             // <<< eyes
+            // >>> E5 (issue 20g): the one call site of `dragon::Plan::dragon_step`.
+            Task::Dragon(_) => return self.dragon_step(w, tick),
+            // <<< E5
             // `always` runs these (and ends them).
             Task::Escape(_) | Task::Defend(_) | Task::Eat(_) | Task::Hunt(_) => {
                 return Controls::default();
@@ -1858,6 +2022,8 @@ impl Plan {
                     | Task::Hunt(_) => {}
                     // >>> eyes
                     Task::Throw(_) => {} // <<< eyes
+                    // >>> E5
+                    Task::Dragon(_) => {} // <<< E5
                 }
                 Controls::default()
             }
@@ -1927,6 +2093,8 @@ impl Plan {
                     | Task::Hunt(_) => {}
                     // >>> eyes
                     Task::Throw(_) => {} // <<< eyes
+                    // >>> E5
+                    Task::Dragon(_) => {} // <<< E5
                 }
                 if give_up {
                     self.maroon = w.body.is_some_and(|b| wet(w, &b));
@@ -1975,7 +2143,10 @@ impl Plan {
             );
         }
         // A cast and a scoop stand beside lava on purpose; anything else answers lava at the door.
-        let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_));
+        let door = !matches!(self.task, Task::Cast(_) | Task::Scoop(_))
+            // >>> E2 (wall 11): lava under the lit end portal's cells is not at the door.
+            && !end_portal::over_portal(w, body.pos);
+        // <<< E2
         let trap = self.traps.tick(w, body, door);
         let rules = &table.survival;
         let mut ignored: Vec<i32> = self
@@ -2226,8 +2397,15 @@ impl Plan {
             // >>> eyes
             | Task::Throw(_)
             // <<< eyes
+            // >>> E5
+            | Task::Dragon(_)
+            // <<< E5
             | Task::Swim(..) => None,
         };
+        // >>> E5 (walls 39, 44): a meal in hand is cut when the dragon comes in the End, and any
+        // meal past its cap (dev race 46048455555 lane 1: an eat held 2,360 ticks).
+        let running = self.meal_cut(w, tick, running);
+        // <<< E5
         // The first row in force, in order; a running eat or hunt stays in force until it ends.
         let mut chosen: Option<(String, make::Always)> = None;
         for (id, row) in &table.always {
@@ -2241,6 +2419,9 @@ impl Plan {
                 // A hunt picks up all its drops before the meal: only an escape cuts it.
                 make::Always::Eat => {
                     running != Some(make::Always::Hunt)
+                        // >>> E5: never a meal in the perched dragon's reach.
+                        && !self.dragon_holds_meal(w)
+                        // <<< E5
                         && tick >= self.always_retry_at
                         && (eat::hungry(w, rules) || eat::eat_to_heal(w, rules))
                         && eat::best_food(w, rules).is_some()
@@ -2284,6 +2465,9 @@ impl Plan {
                     // >>> eyes
                     Task::Throw(_) => String::new(),
                     // <<< eyes
+                    // >>> E5
+                    Task::Dragon(_) => String::new(),
+                    // <<< E5
                 };
                 self.retry_at = tick;
                 self.note(
@@ -2497,6 +2681,9 @@ impl Plan {
             // >>> eyes
             | Task::Throw(_)
             // <<< eyes
+            // >>> E5
+            | Task::Dragon(_)
+            // <<< E5
             | Task::Swim(..) => return None,
         };
         self.acts.extend(act);
@@ -2823,6 +3010,12 @@ impl Plan {
         {
             return Task::Idle;
         }
+        // >>> E2 (issue 20c/20d, docs/problems/end-portal.md): from the portal room, the End's kit,
+        // the frames and the step in; `None` before the room or outside the overworld.
+        if let Some(t) = self.end_portal_task(w, tick) {
+            return t;
+        }
+        // <<< E2
         // >>> home (Q2, issue 19d, docs/problems/eyes-home.md): the way home, in either dimension;
         // `None` when not on it or once it is over.
         if let Some(t) = self.home_race_task(w, tick) {

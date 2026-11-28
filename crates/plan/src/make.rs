@@ -245,6 +245,10 @@ pub struct Goals {
     #[serde(default)]
     pub eyes: crate::eyes::EyeRules,
     // <<< eyes
+    // >>> E2 (issue 20c/20d): `[end_kit]`, the End kit's and the portal's numbers.
+    #[serde(default)]
+    pub end_kit: crate::end_portal::EndKitRules,
+    // <<< E2
 }
 
 /// `[survival]` in `config/goals.toml` (clojurecraft's eat.clj and forage.clj).
@@ -607,6 +611,9 @@ pub struct Table {
     // >>> eyes
     pub eyes: crate::eyes::EyeRules,
     // <<< eyes
+    // >>> E2
+    pub end_kit: crate::end_portal::EndKitRules,
+    // <<< E2
 }
 
 impl Table {
@@ -822,6 +829,9 @@ impl Table {
             // >>> eyes
             eyes: g.eyes.clone(),
             // <<< eyes
+            // >>> E2
+            end_kit: g.end_kit.clone(),
+            // <<< E2
         })
     }
 
@@ -1248,6 +1258,7 @@ mod tests {
             portal_way: crate::portal_way::WayRules::default(),
             fortress_way: crate::fortress_way::FortressRules::default(),
             eyes: crate::eyes::EyeRules::default(),
+            end_kit: crate::end_portal::EndKitRules::default(),
         };
         Table::new(&g).unwrap()
     }

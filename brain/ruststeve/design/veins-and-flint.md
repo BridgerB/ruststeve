@@ -5,8 +5,8 @@ type: reference
 tags: [plan, mine, ore, vein, flint, gravel, stairs]
 aliases: [mine-coal, mine-iron, dig-gravel, flint-from-gravel, Redig, redig, depth, tunnel, Stairs::level, vein, chance drops, make room, NoRoom]
 status: verified
-lastUpdated: 2026-11-23
-verifiedAgainst: ruststeve@ddae609 clojurecraft@be85a92
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4 clojurecraft@be85a92
 sourceRefs:
   - "ruststeve:crates/plan/src/redig.rs#pub fn step(&mut self, w: &World, tick: u64) -> (Controls, Option<Act>, RedigStatus) {"
   - "ruststeve:crates/plan/src/stairs.rs#pub fn level(dir: (i32, i32), tick: u64) -> Self {"

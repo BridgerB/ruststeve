@@ -401,7 +401,7 @@ spare_pickaxes = 2
 # could not be held for the cast). 64 cobblestone and deepslate cover stone tools, stairs' floors,
 # seals and the cast's placed blocks; gravel is kept for flint; nothing else here is ever used.
 junk = [
-  ["cobblestone", 64], ["cobbled_deepslate", 64], ["dirt", 16], ["gravel", 8],
+  ["cobblestone", 64], ["cobbled_deepslate", 64], ["dirt", 16], ["gravel", 16],
   ["andesite", 0], ["diorite", 0], ["granite", 0], ["tuff", 0], ["calcite", 0],
   ["smooth_basalt", 0], ["raw_copper", 0], ["lapis_lazuli", 0], ["glow_ink_sac", 0],
   ["rotten_flesh", 0], ["spider_eye", 0], ["bone", 0], ["leaf_litter", 0],
@@ -409,8 +409,13 @@ junk = [
   # leather and three colours of wool when it filled and its crafts failed). Leather is kept (4
   # items, one slot): dropped, it came back 167 times to a bot standing still (race 45703184922
   # lane 0) and still while walking (45714294764).
-  ["egg", 0], ["feather", 0], ["string", 0], ["white_wool", 0],
+  # >>> E8 (issue 20, the bow line): feathers and string are the bow's (race 46047707279 lane 1
+  # dropped every feather of four chickens, "fewer than 6 main slots free"); gravel kept to 16
+  # for the flint redig (the armed pack's 15). The pack's other leftovers go instead.
+  ["egg", 0], ["feather", 16], ["string", 8], ["white_wool", 0],
   ["light_gray_wool", 0], ["gray_wool", 0], ["black_wool", 0], ["brown_wool", 0],
+  ["magma_block", 0], ["oak_sapling", 0], ["red_mushroom", 0], ["chicken", 0],
+  # <<< E8
 ]
 # Never fought, only backed away from: a creeper's blast does far more than any fight wins.
 # Wither skeletons were here from 2026-11-20 (8 a hit and the wither effect killed 5 of 7 bare bots,
@@ -1055,3 +1060,91 @@ frame_chunks = 8
 # A due throw that waits, or a craft that cannot go on, is noted at most every 600 ticks.
 note_every = 600
 # <<< eyes
+# >>> E2 (issue 20c/20d, docs/problems/end-portal.md): the End kit, made on the surface over the
+# portal room before the frames (the plan's 20c), and the portal's numbers. The targets move to
+# E1's config/end.toml when it lands.
+# The frontier bot (race 45800967549 lane 4) holds 2 stone swords, iron armour without boots, no
+# pickaxe, 7 raw iron, 116 cobblestone and 3 sticks. Three stone pickaxes (393 uses: the plan's
+# `armed` stage wants 2 or more, about 260 uses, for the End's end stone and pillars), an iron
+# sword (2 ingots) and iron boots (4 ingots) from the 7 raw iron, worn by `equip`.
+[[goal]]
+id = "end-kit"
+priority = 17
+until = "end-kit"
+doc = "the End kit: three stone pickaxes, an iron sword and iron boots, where the bot stands"
+provides = [["item:stone_pickaxe", 3], ["item:iron_sword", 1], ["item:iron_boots", 1]]
+
+[end_kit]
+# The top of the bot's own stairs down to the room: race 45800967549 lane 4's ledger at tick
+# 43,720, "stronghold stairs down leg 1 ... from (1608, 63, -32)"; its stairs and tunnel from there
+# to the room's floor at (1624, 17, -36) are cells it dug (ticks 43,720 to 55,560).
+way_up = [1608, 63, -32]
+# The way's points under the top, from the room up: the same ledger's leg starts (stronghold stairs
+# down legs 7 to 2 at ticks 46,180 to 44,120, and the tunnel's start at (1609, 23, -38), tick 49,480)
+# and the tunnel's end at the room's wall, (1620, 17, -36) at tick 53,460.
+way = [[1620, 17, -36], [1609, 23, -38], [1602, 27, -38], [1596, 33, -38], [1590, 39, -38], [1596, 45, -38], [1602, 51, -38], [1608, 57, -38]]
+# Walks to one way point before it is skipped (a walk ends at its timeout, a partial route, or a
+# fight with the spawner's silverfish cutting it; the frontier bot fought 10 in its first 800 ticks).
+up_walks = 3
+# Logs before the row: a table 4 planks, 4 more sticks 2, fuel for 7 raw iron (1,400 ticks, 5
+# planks) and 30 meat (6,000 ticks, 20 planks) at a plank's 300: 31 planks, 8 logs; the way home's
+# cook counts shields' planks too (1,800 ticks), and race 45877404722 had 7,600 ticks of fuel
+# after the row from 10 logs and walked for more: 14.
+logs = 14
+# Trees walked to within 48 flat (the forest base's stem_radius), 24 walks at most; 8 walks to look.
+log_reach = 48.0
+# Logs on record more than 16 over or under the feet are not trees to walk to (race 45875661476:
+# memory held logs at y -33 to -44 under the plain by the stairs' top).
+log_rise = 16
+log_walks = 24
+# Legs retargeted at most 24 times. With no log on record, the overland's legs (seen ground,
+# rivers bridged) go to these points (x, z) in turn, reached within 12: first west along the
+# bot's own way in (race 45800967549 lane 4 walked from (1491, 70, -50) to (1613, 64, -32) over
+# plains), then 100 north, south and east of the stairs' top, then further west; race
+# 45873894148 saw no log within 48 of the top (plains and a river).
+look_walks = 24
+wood_points = [[1530, -45], [1610, -130], [1610, 60], [1700, -35], [1420, -70]]
+point_reach = 12.0
+stone_pickaxes = 3
+# Eaten to 20 before the End: no food grows there (the plan, risk 8).
+fed = 20
+eat_tasks = 12
+# Each phase ends within 6,000 ticks (the plan's armed budget is 6,000 to 12,000 for all) or 16
+# failed tasks (race 45873894148: eight NoPath walks for trees ended the wood in 860 ticks).
+phase_ticks = 6000
+# The cook: 30 pieces at 200 ticks in one furnace are 6,000, its fuel and placing besides; 9,600.
+cook_ticks = 9600
+phase_fails = 16
+down_walks = 8
+# The server takes a UseOn within the block interaction range, 4.5 from the eye (the plan, 20d.2).
+frame_reach = 4.5
+eye_tries = 4
+eye_every = 20
+spawner_tries = 6
+# The way in: 4 walks to its start, 9 clicks for its 3 blocks (3 tries each), 3 steps in; then
+# the next frame's way.
+entry_walks = 4
+entry_clicks = 9
+entries = 3
+# <<< E2
+# >>> E8 (issue 20, the bow line, docs/problems/end-bow.md): the bow kit, a phase after the eat.
+# The bow line runs it; the pillar line's merge would set it false until it switches.
+bow = true
+# 32 arrows: 8 open crystals at up to 4 shots each (bow::MISSES); 16 is the least that counts as
+# armed with a bow (world::stage::BOW_ARROWS). One flint, one stick and one feather make 4.
+arrows = 32
+# 16 sticks spare (no wood in the End: race 45994686575 lane 5 sat 15,240 ticks with no pickaxe
+# and no sticks) and a 4th stone pickaxe (the armed snapshot holds 3 and 90 cobblestone).
+bow_sticks = 16
+bow_pickaxes = 4
+# The night (the armed snapshot is at dusk, so its hut comes first) and the morning: over by
+# about noon, so the walk back to the stairs is by day (race 46060386538 lane 2: over at the next
+# dusk 245 off the stairs, hutted there to the cap).
+bow_ticks = 18000
+bow_fails = 24
+# Chickens and spiders hunted within 48 (the forest base's stem_radius, as log_reach).
+bow_radius = 48.0
+# Look points 60 out round the stairs' top (1608, -32), north, east, south, west, then 100 out:
+# the wood points went to 190 off and the way back was lost (race 46060386538).
+bow_points = [[1608, -92], [1668, -32], [1608, 28], [1548, -32], [1608, -132], [1708, -32], [1608, 68], [1508, -32]]
+# <<< E8

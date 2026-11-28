@@ -347,7 +347,10 @@ impl Plan {
         let d = (fix[0] - here[0]).hypot(fix[1] - here[1]);
         // Frames seen: the stronghold task's.
         let frames = crate::stronghold::frames_near(w, self.stronghold_frame_chunks());
-        if !frames.is_empty() && self.overland.hut.is_none() {
+        // >>> E2 (issue 20c): the End kit's legs for wood run with the frames on record.
+        let wood_legs = self.end_portal.wood_legs;
+        // <<< E2
+        if !frames.is_empty() && self.overland.hut.is_none() && !wood_legs {
             if !self.overland.over_noted {
                 self.overland.over_noted = true;
                 self.note(

@@ -75,6 +75,10 @@ pub struct Defend {
     /// was seen ahead or under the cell ahead, or the drop there was too deep (wall 29).
     #[serde(default)]
     pub held_back: u32,
+    // >>> E2 (wall 12): steps by `away_step` from a creeper near.
+    #[serde(default)]
+    pub away_steps: u32,
+    // <<< E2
     /// A retreat from a shooter: the walk to a cell none of them sees, and the tick cover was last
     /// looked for (blaze-fight wall 3).
     #[serde(default)]
@@ -254,6 +258,38 @@ const DROP_HELD: i32 = 4;
 /// forward steps of a fight's close-in and a retreat with no route were the only moves that did
 /// not ask: 15 of 19 lava and fire deaths in races 44052153072 and 44052157794 came within 300
 /// ticks of a defend.
+// >>> E2 (wall 12)
+/// Within this of a never-fought kind (a creeper's fuse starts at 3), the retreat steps by
+/// `away_step`, not by a route from where the mob was.
+pub const NEVER_CLOSE: f64 = 6.0;
+
+/// The yaw of the step, of sixteen round the body, that most opens the distance from `foe`: a
+/// point 1.2 ahead whose feet and head cells are open, on a floor (`safe_ahead`: no lava, no
+/// drop past `DROP_HELD`), and farther from the foe than the body by 0.3 or more. `None` when
+/// none is.
+pub fn away_step(w: &World, body: &physics::Body, foe: [f64; 3]) -> Option<f64> {
+    let now = distance(body.pos, foe);
+    let mut cells = crate::path::Cells::new(w);
+    (0..16)
+        .map(|i| f64::from(i) * 22.5)
+        .filter_map(|yaw| {
+            let rad = yaw.to_radians();
+            let p = [
+                body.pos[0] - rad.sin() * 1.2,
+                body.pos[1],
+                body.pos[2] + rad.cos() * 1.2,
+            ];
+            let c = crate::path::feet_cell(p);
+            let open = cells.at(c) != crate::path::Class::Solid
+                && cells.at((c.0, c.1 + 1, c.2)) != crate::path::Class::Solid;
+            let gain = distance(p, foe) - now;
+            (open && gain >= 0.3 && safe_ahead(w, body, yaw)).then_some((gain, yaw))
+        })
+        .max_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, yaw)| yaw)
+}
+// <<< E2
+
 fn safe_ahead(w: &World, body: &physics::Body, yaw: f64) -> bool {
     let rad = yaw.to_radians();
     let ahead = [
@@ -408,7 +444,13 @@ pub fn hostile(kind: EntityKind) -> bool {
 /// Kinds never taken as a foe, provoked or not (issue 17: never a swing at an enderman; one that
 /// is provoked is answered by the pocket, `Plan::ender_threat`: 40 health and 7 a hit, in the
 /// open the bot loses).
-pub const NEVER_FOE: &[EntityKind] = &[EntityKind::Enderman];
+pub const NEVER_FOE: &[EntityKind] = &[
+    EntityKind::Enderman,
+    // >>> E5 (issue 20g): the dragon is the fight's own (`dragon`), struck from behind its body
+    // only; the defend's chase took clojurecraft's bot off its stand into the head.
+    EntityKind::EnderDragon,
+    // <<< E5
+];
 
 fn middle(p: [f64; 3]) -> [f64; 3] {
     [p[0], p[1] + 0.9, p[2]]
@@ -710,6 +752,9 @@ impl Defend {
             flee: None,
             fled_at: None,
             held_back: 0,
+            // >>> E2
+            away_steps: 0,
+            // <<< E2
             cover: None,
             covered_at: None,
             cover_tried: Vec::new(),
@@ -1078,6 +1123,36 @@ impl Defend {
                 } else {
                     self.retreat_strike(w, &body, target, tick)
                 };
+                // >>> E2 (issue 20, docs/problems/end-portal.md wall 12): a creeper near is never
+                // struck and never walked back past: each tick the step of the sixteen that most
+                // opens the distance from where it is now, onto a safe floor (race 45886255606
+                // lane 0: the route away from its first cell led back past it in the portal room,
+                // 9.3 to 3.4 in 20 ticks, dead at 20 health).
+                if never
+                    && d <= NEVER_CLOSE
+                    && let Some(yaw) = away_step(w, &body, pos)
+                {
+                    self.away_steps += 1;
+                    self.flee = None;
+                    if self.away_steps == 1 {
+                        self.notes.push(format!(
+                            "{:?} {} at {d:.1}: away steps, never struck (yaw {yaw:.0})",
+                            self.kind, self.foe
+                        ));
+                    }
+                    return (
+                        Controls {
+                            forward: true,
+                            jump: body.horizontal_collision || body.in_water,
+                            sneak: false,
+                            yaw,
+                            pitch: None,
+                        },
+                        None,
+                        DefendStatus::Running,
+                    );
+                }
+                // <<< E2
                 // From a shooter: out of every shooter's sight, not out of this one's reach.
                 if shooter
                     && let Some(r) = self.cover_step(w, &body, d <= rules.defend_radius, tick)

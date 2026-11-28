@@ -1,8 +1,8 @@
 # The frontier (brain/ruststeve/decisions/one-bot-first.md): the furthest stage a real bot has
 # reached, as a snapshot every later attempt resumes from (race.yml `snapshot=frontier`). Moved by
 # a commit each time a bot first passes a stage.
-stage = "portal_room"
-tag = "race-45800967549"
-asset = "snapshot-portal_room-45800967549-race-45800967549-lane-4.tar.zst"
-commit = "1e39129851fec99613f692f0b4839dd0292c2578"
-how = "rs-l04-b00 of race 45800967549 (issue 19, 2026-11-26), resumed from the real overworld frontier (race 45783611857 lane 0, standing in its own overworld portal at (125, -52, -108) with no pickaxe): out of the portal, a hand-dug shaft to the surface, wood and pickaxes, food, eye throws and the fix, about 1,500 blocks east overland with night huts, then stairs and a tunnel down to the stronghold's portal room, standing on its floor at (1624.4, 17.0, -35.7), about 4 blocks from the frame ring's centre (1628, 19, -34), at server tick 55,560. Holds 13 eyes of ender, iron armour, a shield, food. Lane 3 of the same race passed the stronghold stage first. Real (no development mark, no kind)."
+stage = "win"
+tag = "race-46108868213"
+asset = "snapshot-win-46108868213-race-46108868213-lane-6.tar.zst"
+commit = "9e1cfa0162c563beba2d46dd5d0c5f5241ece991"
+how = "rs-l06-b00 of race 46108868213 (issue 20, 2026-11-27), resumed from the real crystals frontier (race 46101740935 lane 1, every crystal gone by the bow line): the perched dragon struck on the head with the iron sword (37 strikes in the run; 14.6, 8.6, 2.6 health on its last perch), 'dragon dead (entity event 3)' at server tick 16,780, the exit portal entered, the credits (win_game) at 16,980 answered by the client's respawn (client_command 0), stage win. Lane 2 of the same race won too (dragon dead 20,520, credits 20,740). Real (no development mark, no kind)."

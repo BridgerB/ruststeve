@@ -964,6 +964,7 @@ name = "observe"
 version = "0.1.0"
 dependencies = [
  "data",
+ "memory",
  "protocol",
  "serde",
  "world",
@@ -2299,6 +2300,7 @@ dependencies = [
  "proptest",
  "protocol",
  "serde",
+ "toml",
 ]
 
 [[package]]

@@ -71,6 +71,10 @@ pub const CREEPY_INDEX: u8 = 17;
 /// Its stared-at flag (`DATA_STARED_AT`, index 18): set at once by a held stare, before any
 /// anger (probe 45472254333). Seen true, it is a near miss of the look filter, counted.
 pub const STARED_INDEX: u8 = 18;
+// >>> E7 (issue 20)
+/// An enderman's full health (`EnderMan.createAttributes`: max health 40).
+pub const ENDERMAN_HEALTH: f32 = 40.0;
+// <<< E7
 /// What counts as filler for the provisions note: the blocks a bridge, a seal or a pocket uses.
 pub const FILLER: &[ItemKind] = &[
     ItemKind::Netherrack,
@@ -221,6 +225,19 @@ pub struct EnderState {
     pub looks_kept: u64,
     #[serde(default)]
     pub look_noted_at: Option<u64>,
+    // >>> E7 (issue 20)
+    /// Of `looks_kept`, those inside the guard only, not the jar's cone (`look::GUARD`).
+    #[serde(default)]
+    pub looks_guarded: u64,
+    /// Clutch pours sent as asked though their look came near an enderman (`look::keep_off_act`).
+    #[serde(default)]
+    pub pours_unbent: u64,
+    /// Endermen seen angry (creepy) before any stared-at flag, and the flags told as anger's.
+    #[serde(default)]
+    pub angry_first: Vec<i32>,
+    #[serde(default)]
+    pub anger_flags: u64,
+    // <<< E7
     /// Endermen seen with the stared-at flag set: near misses, each noted once.
     #[serde(default)]
     pub near_misses: Vec<i32>,
@@ -733,10 +750,41 @@ impl Plan {
         };
         self.count_near_misses(w);
         // >>> pearls (P3): the provoke row's one target is exempt while that row runs.
-        let (kept, id) = crate::look::keep_off_controls(w, c, self.pearls.provoking);
+        // >>> E7 (issue 20): a clutch's pour is sent as asked, noted each time it comes near.
+        let pour = crate::look::pouring(w, &self.acts);
+        let (kept, why, unbent) = crate::look::keep_off_act(w, c, self.pearls.provoking, pour);
+        // <<< E7
         // <<< pearls
-        if let Some(id) = id {
+        // >>> E7 (issue 20)
+        if let Some((id, why)) = why.filter(|_| unbent) {
+            self.ender.pours_unbent += 1;
+            let d = w
+                .body
+                .zip(w.entities.get(&i32::try_from(id).unwrap_or(i32::MAX)))
+                .map_or(-1.0, |(b, e)| distance(b.pos, e.pos));
+            self.note(
+                w.ticks,
+                format!("clutch pour sent unbent near enderman {id}"),
+                format!(
+                    "pitch {:.0} would {} it {d:.1} off; the water must land under the feet and the fall is the bigger danger; {} in the run",
+                    c.pitch.unwrap_or(w.player.pitch),
+                    match why {
+                        crate::look::Kept::Stare => "stare at",
+                        crate::look::Kept::Guard => "come within the guard of",
+                    },
+                    self.ender.pours_unbent
+                ),
+            );
+            return kept;
+        }
+        // <<< E7
+        if let Some((id, why)) = why {
             self.ender.looks_kept += 1;
+            // >>> E7 (issue 20, docs/problems/end-gaze.md): a look kept only by the guard.
+            if why == crate::look::Kept::Guard {
+                self.ender.looks_guarded += 1;
+            }
+            // <<< E7
             let tick = w.ticks;
             if self
                 .ender
@@ -752,10 +800,15 @@ impl Plan {
                     tick,
                     format!("look kept off enderman {id}"),
                     format!(
-                        "pitch {:.0} would stare at it {d:.1} off; sent {:.0}; {} looks kept in the run",
+                        "pitch {:.0} would {} it {d:.1} off; sent {:.0}; {} looks kept in the run, {} by the guard",
                         c.pitch.unwrap_or(w.player.pitch),
+                        match why {
+                            crate::look::Kept::Stare => "stare at",
+                            crate::look::Kept::Guard => "come within the guard of",
+                        },
                         kept.pitch.unwrap_or(w.player.pitch),
-                        self.ender.looks_kept
+                        self.ender.looks_kept,
+                        self.ender.looks_guarded
                     ),
                 );
             }
@@ -778,9 +831,49 @@ impl Plan {
             })
             .map(|(id, _)| *id)
             .collect();
+        // >>> E7 (issue 20, docs/problems/end-gaze.md): the jar's look-for-player goal takes a
+        // player it is already angry at as if stared at (`isAngerInducing` is
+        // `isBeingStaredBy || isAngryAt`, probe 45472254333), so the flag also rises on an
+        // enderman angry from a blow or from before (race 46071506005 lane 5: enderman 93 angry
+        // since tick 40, at 17 of 40 health, flagged at 400 in the fight). Such a flag is told
+        // apart, not counted as a near miss: it was angry before (creepy seen without the flag)
+        // or hurt (under its full health).
+        for (id, e) in w
+            .entities
+            .iter()
+            .filter(|(_, e)| e.kind == EntityKind::Enderman)
+        {
+            let creepy = matches!(e.metadata.get(&CREEPY_INDEX), Some(MetaValue::Bool(true)));
+            let flag = matches!(e.metadata.get(&STARED_INDEX), Some(MetaValue::Bool(true)));
+            if creepy && !flag && !self.ender.angry_first.contains(id) {
+                self.ender.angry_first.push(*id);
+            }
+        }
+        let (anger, stared): (Vec<i32>, Vec<i32>) = stared.into_iter().partition(|id| {
+            self.ender.angry_first.contains(id)
+                || w.entities
+                    .get(id)
+                    .and_then(world::Entity::health)
+                    .is_some_and(|h| h < ENDERMAN_HEALTH)
+        });
+        for id in anger {
+            self.ender.near_misses.push(id);
+            self.ender.anger_flags += 1;
+            self.note(
+                w.ticks,
+                format!("stared-at flag of angry enderman {id}"),
+                format!(
+                    "set by its anger, not a look (angry before, or hurt); {} in the run; pitch {:.0}",
+                    self.ender.anger_flags, w.player.pitch
+                ),
+            );
+        }
+        // <<< E7
         for id in stared {
             self.ender.near_misses.push(id);
-            let n = self.ender.near_misses.len();
+            let n = u64::try_from(self.ender.near_misses.len())
+                .unwrap_or(u64::MAX)
+                .saturating_sub(self.ender.anger_flags);
             self.note(
                 w.ticks,
                 format!("near miss: enderman {id} stared at"),
@@ -803,6 +896,27 @@ impl Plan {
             return None;
         }
         // <<< pearls
+        // >>> E3 (issue 20e): in the End a roofed 2-high cell no enderman can enter (the bunker,
+        // its tunnels) is the pocket already: the work goes on (race 45869900923: both bots held
+        // pockets in their stock tunnels from tick 3,480 to the cap at 20 health).
+        if self.end_covered(w, tick) {
+            return None;
+        }
+        // <<< E3
+        // >>> E4 (issue 20f): up a pillar or a spike the crystals' work goes on (the strike, or the
+        // way down): no enderman reaches a one-wide column's top, and a pocket sealed there held
+        // the bot still for the charging dragon (race 45890149072 lane 0: struck off at y 80).
+        if self.spikes_up_high(w) {
+            if let Some(id) = angry(w) {
+                self.spikes_note(
+                    tick,
+                    "spikes: up high, no enderman pocket".to_owned(),
+                    format!("enderman {id} provoked; the crystals' work goes on"),
+                );
+            }
+            return None;
+        }
+        // <<< E4
         // >>> Q8 (issue 19): on the way home a provoked enderman's hold is capped at
         // `home::ENDER_HOLD_MAX`, then that enderman is left (Q9's race 45764756002 lane 2: the
         // top-up ended on its clock in the tick one was provoked, and the bot held a 0-block pocket

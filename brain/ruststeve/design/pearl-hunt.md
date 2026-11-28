@@ -5,8 +5,8 @@ type: reference
 tags: [plan, pearls, endermen, burrow, combat, rules]
 aliases: [burrow, pearls hunt, provoke, pearls_task, pearls_step, keep_off_except, B M O]
 status: draft
-lastUpdated: 2026-11-25
-verifiedAgainst: ruststeve@25a0729
+lastUpdated: 2026-11-27
+verifiedAgainst: ruststeve@a5a7aa4
 sourceRefs:
   - "ruststeve:crates/plan/src/burrow.rs#pub fn site_avoiding("
   - "ruststeve:crates/plan/src/burrow.rs#pub fn missing(w: &World, b: &Burrow) -> Vec<[i32; 3]> {"
@@ -31,7 +31,7 @@ In the way home (issue 19d, [[way-home]]) the hunt runs on as the top-up: `pearl
 ## Key files
 - `crates/plan/src/burrow.rs` (pure): `Burrow { b, m, o, dir }`, `site`/`site_avoiding` (chosen by cell, nearest the feet within 24), `refuse` (why a site is not one), `missing` (the shell's blocks not there, read from the world each time).
 - `crates/plan/src/pearls.rs`: `PearlRules` (`config/goals.toml [pearls]`), `PearlState` (`Plan::pearls`), the rows (`Plan::pearls_step`, one fenced call in `step_inner` after the always-rows) and the tasks (`Plan::pearls_task`: a walk to B, a dig to reopen the mouth, a walk on for a site; the base row calls agent P5's `base_task`).
-- `crates/plan/src/look.rs`: `keep_off_except` and `stares_except`, the provoke row's one exemption; `crates/plan/src/defend.rs`: `box_distance_of`, the enderman's 2.9-high box.
+- `crates/plan/src/look.rs`: `keep_off_except` and `stares_except`, the provoke row's one exemption (every other enderman kept outside `look::GUARD`, issue 20; only a clutch's water pour while falling is sent unbent, `look::pouring` and `keep_off_act`); `crates/plan/src/defend.rs`: `box_distance_of`, the enderman's 2.9-high box.
 - `crates/plan/tests/pearls.rs`: the site, the shell, the roof's cut, the strike, the hold, the provoke, the breach, the collect, on hand-built Nether worlds.
 
 ## How it works
