@@ -165,3 +165,28 @@ These come from the full relay on the seeds baseline: issue-69-seeds at 4a1bda89
 
   This is backlog for #71 (swim) and the water walk.
 - **The relay:** shore left the relay after leg 1 (`relay-shore.toml`: stage `spawn`, `stalled = true`).
+
+### G3. The iron for gear: most bots never see enough exposed iron
+- **Stage:** `stone_pickaxe` → `gear`. Gear is an iron helmet, chestplate, leggings and sword (`world::Stage::Gear`, `crates/world/src/stage.rs:538`), about 22 iron plus the pickaxe's.
+- **The relay's 36,000-tick legs called it a stall too soon.** In leg 2 (race 46127598383), 6 seeds went 0 of 14 to gear and were marked stalled at `stone_pickaxe`. far-fortress alone geared (1/14).
+- **The check:** one race per stalled seed from its own `stone_pickaxe` snapshot of leg 1 (race 46124595679), 1 lane, 14 bots, cap 72,000 (a game hour). Run ticks are session ticks from the snapshot.
+
+  | seed | check run | gear k/n | median run ticks to gear (p25 to p75) | how the rest ended |
+  |---|---|---|---|---|
+  | typecraft | 46130982111 | 2/14 | 34,500 (34,500 to 36,660) | tunnels with no exposed iron in sight |
+  | far-stronghold | 46130984192 | 1/14 | 29,740 | the geared bot was killed by a creeper it never struck |
+  | cold | 46130988348 | 3/14 | 44,280 (39,820 to 57,260) | a cave spider, an escape from water |
+  | pale-garden | 46130992689 | 3/14 | 42,080 (37,800 to 62,080) | escape from water, a failed stairs step, a tunnel |
+  | badlands | 46130986262 | 0/14 | - | no-progress walk-to-log x7 (no log to walk to), boxed stairs (falling blocks, no floor) x4 |
+  | jungle | 46130990489 | 0/14 | - | creeper deaths x4, tunnels with no exposed iron x5 |
+
+  far-fortress, from the relay: gear 1/14 in leg 2, then `nether` in leg 3 (race 46130812202).
+- **Shows as (typecraft's best bot in leg 2, rs-l00-b00, race 46127598383):** it held 3 raw iron by tick 5,720 and 7 ingots by 19,460. It then ran 81 `stairs: tunnel (no exposed Some(IronOre) in sight, at its depth)` tasks to the cap:
+  ```text
+      5720 start #63 stairs: stairs down (no exposed Some(IronOre) in sight with a route)
+     35980 start #359 stairs: tunnel (no exposed Some(IronOre) in sight, at its depth)
+     36000 end #359 stairs after 20 ticks: the run ended (Cap)
+  ```
+- **Reading:** with strict no X-ray, a bot mines only the iron it has seen exposed. Its tunnels at one depth find little, so fewer than a quarter of bots gear in a game hour on any seed, and none on badlands or jungle. Gear's median is 29,740 to 44,280 run ticks where it happens. The relay is right that the bot is slow here, but the leg was shorter than the stage.
+- **Needs:** iron found faster without X-ray: caves and ravines sought by sight (exposed stone faces, air pockets), and branch-mining at the depth where iron is densest, with a progress invariant on ore seen per block dug. On badlands, logs carried from the start for the later tools. This is backlog for #84 (structures and caves) or a mining issue.
+- **The relay's leg cap:** the next relay runs with `cap` 72,000 (minutes 90), longer than gear's p75. A leg shorter than the slowest stage calls a slow stage a stall.
