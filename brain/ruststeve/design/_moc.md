@@ -28,7 +28,6 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[workspace-crates]] - the crates and the one-way dependency rule.
 - [[replay-and-why]] - record a run, verify it replays exactly, export it, ask `why` at any moment.
 - [[entities-and-inventory]] - how the world folds entities and window 0; what is counted rather than invented.
-- [[keep-rule]] - what a full pack drops first: config/keep.toml's needs by stage, ranked least needed first; the want line.
 - [[memory-sightings]] - watched blocks remembered as sightings with time, only when seen with an exposed face.
 - [[physics]] - the body moves: a bit-exact port of clojurecraft's physics step, the movement packets, zero server corrections live.
 - [[race-and-results]] - the race on runners, starts as data, the stage ladder, case and batch files, coverage, k/n.
@@ -46,6 +45,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[escapes]] - the always-rows: out of water, lava and fire ahead of every goal.
 - [[food-and-hunting]] - eating when hungry, and hunting an animal when there is nothing to eat.
 - [[smelting]] - the furnace window, the model's furnace, the smelt task.
+- [[keep-rule]] - what a full pack drops first: config/keep.toml's needs by stage, ranked least needed first; the want line.
 - [[portal-cast]] - the cast as a build plan, its executor, the site beside lava, refills, the portal row and kit start.
 - [[buckets-and-fluids]] - the look's pitch, buckets along the look, the model's fluids, obsidian, portal lighting.
 - [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.

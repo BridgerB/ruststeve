@@ -327,6 +327,53 @@ pub fn craft_short(
 }
 
 impl Plan {
+    /// The contexts that hold now: the old drop gates of `Plan::equip`, unchanged.
+    pub(crate) fn keep_contexts(&self, w: &World) -> Vec<Context> {
+        // Q4: the Nether's leftovers go in the overworld while the stronghold is the aim (race
+        // 45695074789 lane 0's full pack took no cobblestone from nine stair legs, and lane 1's
+        // crafts failed on a full pack).
+        let stronghold_aim = self.aim == crate::Aim::Race
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::stronghold::OVERWORLD)
+            && (craft::count(w, ItemKind::EnderEye) > 0 || self.stronghold.room.is_some());
+        // Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
+        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
+        let nether_home = self.ender.phase == crate::endermen::EnderPhase::Home
+            && w.dimension
+                .as_ref()
+                .is_some_and(|d| d.name == crate::home::NETHER);
+        let fortress_tunnel = nether_home && self.ender.home.fortress.begun;
+        // Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
+        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
+        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
+        let home_leg =
+            nether_home && self.ender.home.top_up_over && !self.ender.home.fortress.begun;
+        [
+            // The [survival] list came with the goal table: a planner without one dropped none.
+            (Context::Always, self.table.is_some()),
+            (Context::StrongholdAim, stronghold_aim),
+            (Context::FortressTunnel, fortress_tunnel),
+            (Context::HomeLeg, home_leg),
+        ]
+        .into_iter()
+        .filter_map(|(c, on)| on.then_some(c))
+        .collect()
+    }
+
+    /// The rank the drop rules order by: the keep table's for the stage reached and the
+    /// contexts that hold, or one rank for all (the old order) when the table is unreadable.
+    pub(crate) fn keep_rank(&self, w: &World) -> impl Fn(ItemKind, i32) -> Rank + use<> {
+        let table = self.keep.table.clone().ok();
+        let reached = w.stage_reached;
+        let ctx = self.keep_contexts(w);
+        move |kind, held| {
+            table
+                .as_ref()
+                .map_or(Rank::Surplus, |k| k.rank(kind, held, reached, &ctx))
+        }
+    }
+
     /// The old junk lists as `Plan::equip` composed them before the keep table, for the
     /// contexts `ctx` (survival, then the leg's list; Q8 is the fortress list with netherrack and
     /// basalt at home's kept counts). Only the fallback for a keep table that could not be read.
@@ -607,6 +654,42 @@ mod tests {
                 "{ctx:?}"
             );
         }
+    }
+
+    /// The forest base's drop (`base::drop_slot_by`) keeps its gate and orders by rank: with
+    /// string listed before cobblestone, cobblestone (needed later, by the end) goes first;
+    /// one rank for all is the old list order.
+    #[test]
+    fn the_base_drops_cobblestone_before_string() {
+        let k = table();
+        let ctx = [Context::Always];
+        let mut w = World::new();
+        w.inventory.slots = full_of_buckets();
+        w.inventory.slots.insert(9, (Str, 8));
+        w.inventory.slots.insert(10, (Cobblestone, 64));
+        let base = crate::base::Base {
+            drop: vec!["string".to_owned(), "cobblestone".to_owned()],
+            ..crate::base::Base::default()
+        };
+        let rank = |kind: ItemKind, held: i32| k.rank(kind, held, Some(Stage::Nether), &ctx);
+        assert_eq!(
+            crate::base::drop_slot_by(&w, &base, &rank).map(|(s, k, _)| (s, k)),
+            Some((10, Cobblestone))
+        );
+        assert_eq!(
+            crate::base::drop_slot(&w, &base),
+            Some((9, Str)),
+            "the old order"
+        );
+        // A kind not in the base's list never goes, whatever its rank.
+        let only = crate::base::Base {
+            drop: vec!["string".to_owned()],
+            ..crate::base::Base::default()
+        };
+        assert_eq!(
+            crate::base::drop_slot_by(&w, &only, &rank).map(|(s, k, _)| (s, k)),
+            Some((9, Str))
+        );
     }
 
     #[derive(serde::Deserialize)]

@@ -24,8 +24,12 @@ pub struct KeepCounts {
     pub cases: Vec<String>,
 }
 
-/// The kind a drop line names: "drop Cobblestone from slot 21" is `Cobblestone`.
+/// The kind a drop line names: "drop Cobblestone from slot 21" is `Cobblestone`, and so are
+/// the forest base's "base: drop Cobblestone from slot 21" and "base: a main slot freed: drop
+/// Cobblestone from slot 21".
 pub fn drop_kind(what: &str) -> Option<&str> {
+    let what = what.strip_prefix("base: ").unwrap_or(what);
+    let what = what.strip_prefix("a main slot freed: ").unwrap_or(what);
     let mut words = what.strip_prefix("drop ")?.split_whitespace();
     let kind = words.next()?;
     (words.next() == Some("from")).then_some(kind)
@@ -97,6 +101,15 @@ mod tests {
         );
         assert_eq!(drop_kind("drop String from the cursor"), Some("String"));
         assert_eq!(drop_kind("drop the plan"), None);
+        assert_eq!(drop_kind("base: drop Dirt from slot 22"), Some("Dirt"));
+        assert_eq!(
+            drop_kind("base: a main slot freed: drop Netherrack from slot 9"),
+            Some("Netherrack")
+        );
+        assert_eq!(
+            want_kinds("want OakPlanks|SprucePlanks 4 for goal kit"),
+            Some(vec!["OakPlanks", "SprucePlanks"])
+        );
         assert_eq!(
             want_kinds("want Cobblestone|Blackstone 3 for craft stone_pickaxe"),
             Some(vec!["Cobblestone", "Blackstone"])

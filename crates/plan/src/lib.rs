@@ -709,12 +709,14 @@ pub struct Plan {
     /// The goal table (issue 10), for a goal aim.
     #[serde(skip)]
     pub table: Option<Arc<make::Table>>,
-    /// The keep table (issue 77, `plan::keep`): config/keep.toml, compiled in, parsed here.
+    // >>> keep (issue 77)
+    /// The keep table (`plan::keep`): config/keep.toml, compiled in, parsed here.
     #[serde(skip)]
     pub keep: keep::Loaded,
     /// The "keep table unreadable" note was made (once a run).
     #[serde(default)]
     pub keep_noted: bool,
+    // <<< keep
     /// A goal aim is met.
     #[serde(default)]
     pub met: bool,
@@ -1103,8 +1105,10 @@ impl Plan {
             // >>> E8
             bow: bow::BowState::default(),
             // <<< E8
+            // >>> keep (issue 77)
             keep: keep::Loaded::compiled(),
             keep_noted: false,
+            // <<< keep
             acts: Vec::new(),
         }
     }
@@ -2844,36 +2848,7 @@ impl Plan {
         // >>> overland and stronghold
         // >>> keep (issue 77, brain/ruststeve/design/keep-rule.md): what may go is config/keep.toml's
         // rows for the contexts that hold, the old gates unchanged (`keep::Context`).
-        // Q4: the Nether's leftovers go in the overworld while the
-        // stronghold is the aim (race 45695074789 lane 0's full pack took no cobblestone from nine
-        // stair legs, and lane 1's crafts failed on a full pack).
-        let stronghold_aim = self.aim == Aim::Race
-            && w.dimension
-                .as_ref()
-                .is_some_and(|d| d.name == stronghold::OVERWORLD)
-            && (craft::count(w, data::ItemKind::EnderEye) > 0 || self.stronghold.room.is_some());
-        // Q11 (issue 19): the fortress stretch's tunnel fills the pack (race 45766983995: every
-        // wooden pickaxe craft failed on a full pack) (`crate::fortress_way`).
-        let nether_home = self.ender.phase == crate::endermen::EnderPhase::Home
-            && w.dimension
-                .as_ref()
-                .is_some_and(|d| d.name == crate::home::NETHER);
-        let fortress_tunnel = nether_home && self.ender.home.fortress.begun;
-        // Q8 (issue 19): the same leftovers on the whole trip home in the Nether, the top-up over
-        // (the coordinator, 2026-11-26: Q11's race 45766983995 filled every pack before its
-        // tunnel), basalt kept to 64 for the guard and the bridges (the deltas' restock digs it).
-        let home_leg =
-            nether_home && self.ender.home.top_up_over && !self.ender.home.fortress.begun;
-        let ctx: Vec<keep::Context> = [
-            // The [survival] list came with the goal table: a planner without one dropped none.
-            (keep::Context::Always, self.table.is_some()),
-            (keep::Context::StrongholdAim, stronghold_aim),
-            (keep::Context::FortressTunnel, fortress_tunnel),
-            (keep::Context::HomeLeg, home_leg),
-        ]
-        .into_iter()
-        .filter_map(|(c, on)| on.then_some(c))
-        .collect();
+        let ctx = self.keep_contexts(w);
         let reached = w.stage_reached;
         let table = match self.keep.table.clone() {
             Ok(k) => Some(k),
