@@ -53,6 +53,7 @@ How ruststeve is shaped. Read [[sans-io-core]] first; everything else hangs off 
 - [[fuel-and-smelt-needs]] - fuel as a need, smelt rows, spares, the batch.
 - [[forest-base]] - the hunt's kit made in a warped forest: stems by hand, swords in kills, a shield (issue 18d).
 - [[veins-and-flint]] - mining ore to a depth, the vein, flint from gravel.
+- [[iron-search]] - iron at its depth with none in sight: rise out of deepslate, caves seen beyond view, strips in fresh rock turned on their progress.
 - [[combat-and-pacing]] - answering hostile mobs: paced swings, the danger line, backing away.
 - [[overland-and-stronghold]] - the overworld walk to the eyes' fix and the dig into the portal room (issue 19e/f).
 - [[end-portal]] - from the portal room to the End: the kit made on the surface, the frames filled, the step in (issue 20c/d).
