@@ -104,7 +104,22 @@ pub struct ChestCounts {
     pub fetch_skipped: u64,
     pub fetch_not_needed: u64,
     pub fetch_waits: u64,
+    /// The home chest crafted early (wall 5, `Plan::early_chest`): "home chest crafted early,
+    /// N planks spare" and "home chest early craft skipped" notes; its tasks (the
+    /// `carry-chest` row's steps, and the table dug in the tick the chest was held) and the
+    /// server ticks they ran: the early craft's cost.
+    #[serde(default)]
+    pub early_crafted: u64,
+    #[serde(default)]
+    pub early_skipped: u64,
+    #[serde(default)]
+    pub early_tasks: u64,
+    #[serde(default)]
+    pub early_ticks: u64,
 }
+
+/// The reason `Plan::early_chest` gives each step of the `carry-chest` row (stash.rs).
+pub const EARLY_WHY: &str = "the wood spares before the portal: the home chest crafted early";
 
 impl ChestCounts {
     /// Counts one note; false when it is none of these.
@@ -119,6 +134,10 @@ impl ChestCounts {
             &mut self.fetch_failed
         } else if what.starts_with("home chest at ") {
             &mut self.home_placed
+        } else if what.starts_with("home chest crafted early") {
+            &mut self.early_crafted
+        } else if what.starts_with("home chest early craft skipped") {
+            &mut self.early_skipped
         } else if let Some(rest) = what.strip_prefix("fetch after the respawn ") {
             if rest.starts_with("at ") {
                 &mut self.fetch_begun
@@ -172,12 +191,63 @@ impl ChestCounts {
         self.fetch_skipped += o.fetch_skipped;
         self.fetch_not_needed += o.fetch_not_needed;
         self.fetch_waits += o.fetch_waits;
+        self.early_crafted += o.early_crafted;
+        self.early_skipped += o.early_skipped;
+        self.early_tasks += o.early_tasks;
+        self.early_ticks += o.early_ticks;
     }
 
-    /// The counts as one cell: `stash 1/0 fetch 0/0 gate s1 n0 d0 h0 k0 u0 home 1 respawn b0 s0 x0 w0`.
+    /// The early craft's tasks and their ticks, from the task records: each started with the
+    /// early craft's reason, and the table dug in a tick the chest was held ("dig the table ..."
+    /// begun with "home chest crafted early" that tick). A task still open at the end has no
+    /// ticks.
+    fn early_cost(&mut self, tasks: &[plan::TaskRecord]) {
+        let crafted: std::collections::BTreeSet<u64> = tasks
+            .iter()
+            .filter_map(|t| match t {
+                plan::TaskRecord::Note { at, what, .. }
+                    if what.starts_with("home chest crafted early") =>
+                {
+                    Some(*at)
+                }
+                plan::TaskRecord::Note { .. }
+                | plan::TaskRecord::Started { .. }
+                | plan::TaskRecord::Ended { .. } => None,
+            })
+            .collect();
+        let ids: std::collections::BTreeSet<u64> = tasks
+            .iter()
+            .filter_map(|t| match t {
+                plan::TaskRecord::Started {
+                    id, at, what, why, ..
+                } => {
+                    let early = why.as_deref().is_some_and(|w| w.starts_with(EARLY_WHY));
+                    let dig = crafted.contains(at)
+                        && what
+                            .as_deref()
+                            .is_some_and(|w| w.starts_with("dig the table"));
+                    (early || dig).then_some(*id)
+                }
+                plan::TaskRecord::Ended { .. } | plan::TaskRecord::Note { .. } => None,
+            })
+            .collect();
+        self.early_tasks += ids.len() as u64;
+        self.early_ticks += tasks
+            .iter()
+            .filter_map(|t| match t {
+                plan::TaskRecord::Ended { id, ticks, .. } if ids.contains(id) => Some(*ticks),
+                plan::TaskRecord::Ended { .. }
+                | plan::TaskRecord::Started { .. }
+                | plan::TaskRecord::Note { .. } => None,
+            })
+            .sum::<u64>();
+    }
+
+    /// The counts as one cell: `stash 1/0 fetch 0/0 gate s1 n0 d0 h0 k0 u0 home 1 respawn b0 s0
+    /// x0 w0 early c1 k0 t3/420` (early: crafted, skipped, its tasks / their ticks).
     fn text(&self) -> String {
         format!(
-            "stash {}/{} fetch {}/{} gate s{} n{} d{} h{} k{} u{} home {} respawn b{} s{} x{} w{}",
+            "stash {}/{} fetch {}/{} gate s{} n{} d{} h{} k{} u{} home {} respawn b{} s{} x{} w{} early c{} k{} t{}/{}",
             self.stash_done,
             self.stash_failed,
             self.fetch_done,
@@ -192,7 +262,11 @@ impl ChestCounts {
             self.fetch_begun,
             self.fetch_skipped,
             self.fetch_not_needed,
-            self.fetch_waits
+            self.fetch_waits,
+            self.early_crafted,
+            self.early_skipped,
+            self.early_tasks,
+            self.early_ticks
         )
     }
 }
@@ -416,6 +490,7 @@ pub fn keep_counts(l: &Ledger) -> KeepCounts {
             }
         }
     }
+    c.chest.early_cost(&l.tasks);
     c
 }
 
@@ -501,7 +576,8 @@ fn row_line(seed: &str, bot: &str, c: &KeepCounts) -> String {
 /// The table `results keep` prints: a row a run, a total a seed under its runs, then the
 /// total. Chest cells: stash done/failed, fetch done/failed, the stash gate (s stashed, n nothing
 /// to put away, d danger, h no home chest, k no keep table, u home chest not in memory), home
-/// chests placed, the fetch after a respawn (b begun, s skipped, x not needed, w waits).
+/// chests placed, the fetch after a respawn (b begun, s skipped, x not needed, w waits), the
+/// early craft (c crafted, k skipped, t its tasks / their ticks).
 pub fn render(runs: &[RunKeep]) -> String {
     let mut out = String::new();
     out.push_str("## keep: drops, wants and dropped-then-wanted (issue 77; the bar is 0)\n\n");
@@ -716,6 +792,7 @@ mod tests {
                 fetch_skipped: 1,
                 fetch_not_needed: 1,
                 fetch_waits: 1,
+                ..ChestCounts::default()
             }
         );
     }
@@ -846,5 +923,87 @@ mod tests {
             c.cases,
             vec!["40 want Cobblestone|Blackstone 3 for craft stone_pickaxe".to_owned()]
         );
+    }
+
+    fn started(id: u64, at: u64, task: &str, what: &str, why: &str) -> plan::TaskRecord {
+        plan::TaskRecord::Started {
+            id,
+            at,
+            task: task.to_owned(),
+            what: Some(what.to_owned()),
+            why: Some(why.to_owned()),
+        }
+    }
+
+    fn ended(id: u64, at: u64, task: &str, ticks: u64) -> plan::TaskRecord {
+        plan::TaskRecord::Ended {
+            id,
+            at,
+            task: task.to_owned(),
+            ticks,
+            outcome: None,
+            why: None,
+        }
+    }
+
+    /// Wall 5's early craft: its notes counted, and its cost the ticks of its own tasks (the
+    /// carry-chest steps and the table dug as the chest was held), never another task's.
+    #[test]
+    fn the_early_craft_and_its_cost_are_counted() {
+        let early = format!("{EARLY_WHY}, carried; task 1 of at most 8");
+        let l = ledger(vec![
+            note_why(
+                5,
+                "home chest early craft skipped",
+                "craft:chest would be a trip",
+            ),
+            started(
+                1,
+                10,
+                "walk-to-log",
+                "walk to log (1, 2, 3)",
+                "the nearest log",
+            ),
+            ended(1, 40, "walk-to-log", 30),
+            note_why(100, "home chest: place-table", &early),
+            started(2, 100, "place", "home chest: place-table", &early),
+            ended(2, 104, "place", 4),
+            started(3, 105, "craft", "home chest: craft:chest", &early),
+            ended(3, 125, "craft", 20),
+            note(126, "home chest crafted early, 16 planks spare"),
+            note(126, "dig the table (1, 64, 0)"),
+            started(
+                4,
+                126,
+                "dig",
+                "dig the table (1, 64, 0)",
+                "take the table along",
+            ),
+            ended(4, 150, "dig", 24),
+            // A later table dig is the planner's own, not the early craft's.
+            started(
+                5,
+                900,
+                "dig",
+                "dig the table (1, 64, 0)",
+                "take the table along",
+            ),
+            ended(5, 920, "dig", 20),
+        ]);
+        let c = keep_counts(&l).chest;
+        assert_eq!(
+            (
+                c.early_crafted,
+                c.early_skipped,
+                c.early_tasks,
+                c.early_ticks
+            ),
+            (1, 1, 3, 48)
+        );
+        assert!(c.text().ends_with("early c1 k1 t3/48"), "{}", c.text());
+        let mut total = ChestCounts::default();
+        total.sum(&c);
+        total.sum(&c);
+        assert_eq!((total.early_tasks, total.early_ticks), (6, 96));
     }
 }
