@@ -22,8 +22,8 @@ pub mod uuid;
 pub use bytes::{Reader, Writer};
 pub use frame::{FrameDecoder, encode_frame, split_id};
 pub use packets::{
-    BossOp, C2s, ClockUpdate, OVERWORLD_CLOCK, S2c, SoundRef, clientbound, decode, decodes,
-    packet_name,
+    Attribute, BossOp, C2s, ClockUpdate, OVERWORLD_CLOCK, PlayerCommandAction, S2c, SoundRef,
+    clientbound, decode, decodes, packet_name,
 };
 pub use session::{Out, Session};
 pub use state::State;

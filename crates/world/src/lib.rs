@@ -564,14 +564,19 @@ pub struct Player {
     pub air: Option<i32>,
     #[serde(default)]
     pub on_fire: bool,
+    /// Whether the server holds the player sprinting (index 0, bit 0x08,
+    /// `Entity.FLAG_SPRINTING`), as it last said: `None` before it said. The server sets it
+    /// only from our `player_command`, so this is its word on what we reported (issue 56).
+    #[serde(default)]
+    pub sprinting: Option<bool>,
     /// Items finished using (an eat: entity event 9 for the bot), counted.
     #[serde(default)]
     pub uses_finished: u64,
     /// Effects on the bot by name: amplifier and the server tick it ends (issue 16e).
     #[serde(default)]
     pub effects: BTreeMap<String, (i32, u64)>,
-    /// Its attributes as the server holds them (`armor`, `max_health`): base plus the
-    /// add-value modifiers.
+    /// Its attributes as the server holds them (`armor`, `max_health`): the game's value from
+    /// the base and every modifier (`protocol::Attribute::value`).
     #[serde(default)]
     pub attributes: BTreeMap<String, f64>,
     /// The server thinks it is in a fight (`player_combat_enter` until `_end`).
@@ -765,6 +770,10 @@ pub struct DayClock {
 
 /// Ticks between status-only movement packets when nothing moved: once a second.
 const STATUS_ONLY_EVERY: u64 = 20;
+
+/// The sprint bit of an entity's shared flags, data index 0 (`Entity.FLAG_SPRINTING` = 3, so
+/// `1 << 3`; the game's table: 0 on fire, 1 crouching, 3 sprinting, 4 swimming).
+pub const FLAG_SPRINTING: u8 = 1 << 3;
 
 impl World {
     pub fn new() -> Self {
@@ -1632,7 +1641,10 @@ impl World {
                 for (index, value) in entries {
                     match (index, value) {
                         (1, MetaValue::Int(air)) => self.player.air = Some(*air),
-                        (0, MetaValue::Byte(flags)) => self.player.on_fire = flags & 1 == 1,
+                        (0, MetaValue::Byte(flags)) => {
+                            self.player.on_fire = flags & 1 == 1;
+                            self.player.sprinting = Some(flags & FLAG_SPRINTING != 0);
+                        }
                         _ => {}
                     }
                 }
@@ -2026,10 +2038,13 @@ impl World {
                 }
             }
             S2c::UpdateAttributes { id, attributes } => {
-                let values = attributes.iter().map(|(a, base, add)| {
+                // The value the game computes from every modifier, multipliers too: sprinting's
+                // is a multiply_total on movement_speed (physics keeps its own constants; this is
+                // the server's word).
+                let values = attributes.iter().map(|a| {
                     (
-                        registry_name(data::generated::registries::ATTRIBUTE.as_slice(), *a),
-                        base + add,
+                        registry_name(data::generated::registries::ATTRIBUTE.as_slice(), a.id),
+                        a.value(),
                     )
                 });
                 if Some(*id) == self.player.entity_id {
@@ -2470,9 +2485,24 @@ mod body_tests {
             .unwrap();
         w.fold(&S2c::UpdateAttributes {
             id: 1,
-            attributes: vec![(armor, 0.0, 15.0)],
+            attributes: vec![protocol::Attribute::added(armor, 0.0, 15.0)],
         });
         assert_eq!(w.player.attributes.get("armor"), Some(&15.0));
+        // The sprint modifier, a multiply_total of 0.3, is in the value.
+        let speed = data::generated::registries::ATTRIBUTE
+            .iter()
+            .position(|n| *n == "movement_speed")
+            .and_then(|i| i32::try_from(i).ok())
+            .unwrap();
+        w.fold(&S2c::UpdateAttributes {
+            id: 1,
+            attributes: vec![protocol::Attribute {
+                multiply_total: 1.3,
+                ..protocol::Attribute::added(speed, 0.1, 0.0)
+            }],
+        });
+        let v = w.player.attributes.get("movement_speed").copied().unwrap();
+        assert!((v - 0.13).abs() < 1e-12, "{v}");
         w.fold(&S2c::SystemChat {
             text: "rs-l01-b00 was slain by Blaze".to_owned(),
             overlay: false,

@@ -54,7 +54,8 @@ impl State {
             | C2s::UseItem { .. }
             | C2s::ContainerClick { .. }
             | C2s::ContainerClose { .. }
-            | C2s::Swing { .. } => self,
+            | C2s::Swing { .. }
+            | C2s::PlayerCommand { .. } => self,
         }
     }
 

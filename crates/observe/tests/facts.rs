@@ -1292,3 +1292,44 @@ fn an_eye_placed_and_the_end_entered_are_in_the_ledger() {
     );
 }
 // <<< E1
+
+/// Issue 56: the server's sprint flag for the bot (data index 0, bit 0x08) is server truth in
+/// the world and a fact when it changes; its first word that the bot walks is none.
+#[test]
+fn the_servers_sprint_flag_is_a_fact_when_it_changes() {
+    let mut w = World::new();
+    w.player.entity_id = Some(5);
+    let flags = |w: &mut World, b: u8| {
+        w.step(&Event::Packet(S2c::SetEntityData {
+            id: 5,
+            entries: vec![(0, MetaValue::Byte(b))],
+        }));
+    };
+    let a = snapshot(&w);
+    flags(&mut w, 0);
+    assert_eq!(w.player.sprinting, Some(false));
+    let (b, facts) = facts_between(&a, &w);
+    assert!(
+        !facts.iter().any(|f| matches!(f, Fact::SprintServer { .. })),
+        "{facts:?}"
+    );
+    // On fire and sprinting: both bits read.
+    flags(&mut w, 0x08 | 0x01);
+    assert_eq!(w.player.sprinting, Some(true));
+    assert!(w.player.on_fire);
+    let (c, facts) = facts_between(&b, &w);
+    assert!(
+        facts.contains(&Fact::SprintServer { on: true }),
+        "{facts:?}"
+    );
+    flags(&mut w, 0);
+    let (_, facts) = facts_between(&c, &w);
+    assert!(
+        facts.contains(&Fact::SprintServer { on: false }),
+        "{facts:?}"
+    );
+    assert_eq!(
+        Fact::SprintServer { on: false }.line(),
+        "server: sprint off"
+    );
+}

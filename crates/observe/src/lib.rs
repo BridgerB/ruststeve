@@ -604,6 +604,10 @@ pub struct Snapshot {
     #[serde(default)]
     pub gazes: BTreeMap<i32, (f64, bool)>,
     // <<< E1
+    /// Issue 56: the server's sprint flag for the bot (`world::Player::sprinting`), `None`
+    /// before it said.
+    #[serde(default)]
+    pub sprint_server: Option<bool>,
 }
 
 /// A fact for the ledger.
@@ -893,6 +897,11 @@ pub enum Fact {
         dragon_dead: Option<u64>,
     },
     // <<< E1
+    /// Issue 56: the server's sprint flag for the bot changed (its data index 0, bit 0x08): its
+    /// word on the `player_command` we sent, so a race counts sprints the server took.
+    SprintServer {
+        on: bool,
+    },
 }
 
 /// A fact and the server tick it was seen.
@@ -1119,6 +1128,7 @@ pub fn snapshot(w: &World) -> Snapshot {
             .collect(),
         gazes: gazes(w),
         // <<< E1
+        sprint_server: w.player.sprinting,
     }
 }
 
@@ -1307,6 +1317,14 @@ pub fn diff(prev: &Snapshot, next: &mut Snapshot, w: &World) -> Vec<Stamped> {
         && let Some(name) = &next.biome
     {
         out.push(Fact::Biome { name: name.clone() });
+    }
+    // The server's first word that the bot is not sprinting is no change: only a sprint it
+    // took, and its end, are told.
+    if let Some(on) = next.sprint_server
+        && next.sprint_server != prev.sprint_server
+        && (on || prev.sprint_server.is_some())
+    {
+        out.push(Fact::SprintServer { on });
     }
     for (id, n) in &mut next.endermen {
         let d = dist(n.pos, bot);
@@ -2438,6 +2456,9 @@ impl Fact {
                 None => "credits (the dragon not seen dead)".to_owned(),
             },
             // <<< E1
+            Fact::SprintServer { on } => {
+                format!("server: sprint {}", if *on { "on" } else { "off" })
+            }
         }
     }
 }

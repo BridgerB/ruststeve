@@ -126,7 +126,18 @@ fn the_body_language_and_world_packets_read_back() {
         S2c::RemoveMobEffect { id: 1, effect: 3 },
         S2c::UpdateAttributes {
             id: 1,
-            attributes: vec![(0, 20.0, 0.0), (1, 0.0, 15.0)],
+            attributes: vec![
+                protocol::Attribute::added(0, 20.0, 0.0),
+                protocol::Attribute::added(1, 0.0, 15.0),
+                // Sprinting's modifier (multiply_total 0.3) beside a base-multiplier.
+                protocol::Attribute {
+                    id: 2,
+                    base: 0.1,
+                    add: 0.0,
+                    multiply_base: 0.5,
+                    multiply_total: 1.3,
+                },
+            ],
         },
         S2c::PlayerCombatEnter,
         S2c::PlayerCombatEnd { duration: 40 },
