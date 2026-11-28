@@ -896,6 +896,61 @@ pub fn in_water(w: &World, c: [i32; 3]) -> bool {
     w.block_at(world::BlockPos::new(c[0], c[1], c[2])) == Some(BlockKind::Water)
 }
 
+/// Controls that press straight out of a cloud centred at `from`, `PRESS_AHEAD` on: away from its
+/// middle, or with the feet on the middle (no way away from it, wall 54: race 46099479836 lane 7,
+/// the cloud 0.1 off), the first of eight ways whose cell `PRESS_AHEAD` out is open at the feet and
+/// the head, away from `shun` (the dragon) first. A jump with the feet or the head in water: a
+/// body in water goes nowhere on the plane without it (lane 7 stood at x 44.30 for 100 ticks).
+pub fn press_out(w: &World, feet: [f64; 3], from: [f64; 3], shun: Option<[f64; 3]>) -> Controls {
+    let away = [feet[0] - from[0], feet[2] - from[2]];
+    let d = away[0].hypot(away[1]);
+    let open = |dir: [f64; 2]| {
+        let c = cell_of([
+            feet[0] + dir[0] * PRESS_AHEAD,
+            feet[1],
+            feet[2] + dir[1] * PRESS_AHEAD,
+        ]);
+        [c[1], c[1] + 1]
+            .iter()
+            .all(|y| w.solid(c[0], *y, c[2]).is_none())
+    };
+    let dir = if d >= PRESS_MIDDLE {
+        [away[0] / d, away[1] / d]
+    } else {
+        let mut ways: Vec<[f64; 2]> = (0..8)
+            .map(|i| {
+                let a = f64::from(i) * std::f64::consts::FRAC_PI_4;
+                [a.cos(), a.sin()]
+            })
+            .collect();
+        if let Some(p) = shun {
+            let r = [feet[0] - p[0], feet[2] - p[2]];
+            ways.sort_by(|a, b| {
+                (b[0] * r[0] + b[1] * r[1]).total_cmp(&(a[0] * r[0] + a[1] * r[1]))
+            });
+        }
+        ways.iter().copied().find(|d| open(*d)).unwrap_or(ways[0])
+    };
+    let fc = cell_of(feet);
+    let wet = in_water(w, fc) || in_water(w, [fc[0], fc[1] + 1, fc[2]]);
+    Controls {
+        jump: wet,
+        ..toward(
+            feet,
+            [
+                feet[0] + dir[0] * PRESS_AHEAD,
+                feet[1],
+                feet[2] + dir[1] * PRESS_AHEAD,
+            ],
+        )
+    }
+}
+
+/// Blocks ahead a press out of a cloud aims at, and the blocks off its middle under which the
+/// middle gives no way (`press_out`).
+pub const PRESS_AHEAD: f64 = 3.0;
+pub const PRESS_MIDDLE: f64 = 0.5;
+
 /// Controls that walk straight from `feet` toward `to` on the plane.
 pub fn toward(feet: [f64; 3], to: [f64; 3]) -> Controls {
     Controls {
@@ -2075,6 +2130,9 @@ pub struct DragonState {
     pub climb_out: bool,
     #[serde(default)]
     pub rise_from: Option<[i32; 3]>,
+    /// The last note of recovery's press out of a cloud (wall 54).
+    #[serde(default)]
+    pub recover_pressed_at: Option<u64>,
     /// The cell the rise's jumps left and how many left it with no block gone in (wall 51).
     #[serde(default)]
     pub rise_jumps: Option<([i32; 3], u32)>,
@@ -3072,16 +3130,8 @@ impl Plan {
                             format!("{BREATH_OUTS_MAX} walks out; pressed straight away from it"),
                         );
                     }
-                    let away = [feet[0] - on.pos[0], feet[2] - on.pos[2]];
-                    let d = away[0].hypot(away[1]).max(1e-6);
-                    return Some(toward(
-                        feet,
-                        [
-                            feet[0] + away[0] / d * 3.0,
-                            feet[1],
-                            feet[2] + away[1] / d * 3.0,
-                        ],
-                    ));
+                    let shun = view(w).map(|(_, v)| v.pos);
+                    return Some(press_out(w, feet, on.pos, shun));
                 }
                 let Some(c) = out_of_breath_except(w, feet, &self.dragon.breath_refused) else {
                     if self.dragon.breath_walk.take().is_some() || self.dragon.breath_outs == 0 {
@@ -4419,7 +4469,8 @@ impl Plan {
     ///
     /// Noted "end: no pocket for enderman N (…)" at most every `FIRST_NOTE_TICKS` for each case.
     pub fn end_enderman_step(&mut self, w: &World, tick: u64) -> Option<Controls> {
-        // Two or more angry, or any the dragon hurt: water at the feet (wall 46).
+        // Any angry within 16 (`ENDER_WATER_MOST` 1, wall 48), or any the dragon hurt: water at the
+        // feet (walls 46, 48).
         if let Some(c) = self.ender_water_step(w, tick) {
             return Some(c);
         }
@@ -4941,7 +4992,36 @@ impl Plan {
             Some(1.0),
             (DODGE_MIN, DODGE_MAX),
         );
-        Some(to.map_or(stand, |c| toward(feet, mid(c))))
+        if let Some(c) = to {
+            return Some(toward(feet, mid(c)));
+        }
+        // No dodge cell with a cloud's reach on the feet: never a stand in it (wall 54: race
+        // 46099479836 lane 7 stood in one at 8 health, two hits of 6, dead). Pressed straight out.
+        let clouds = clouds_only(w);
+        if let Some(b) = clouds
+            .iter()
+            .filter(|b| flat(b.pos, feet) <= b.reach())
+            .min_by(|a, b| flat(a.pos, feet).total_cmp(&flat(b.pos, feet)))
+        {
+            if self
+                .dragon
+                .recover_pressed_at
+                .is_none_or(|t| tick >= t + LOOP_NOTE_TICKS)
+            {
+                self.dragon.recover_pressed_at = Some(tick);
+                self.note(
+                    tick,
+                    format!("recover: pressed out of the breath at {:?}", cell_of(feet)),
+                    format!(
+                        "a cloud {:.1} off (radius {:.1}); no dodge cell, never a stand in it",
+                        flat(b.pos, feet),
+                        b.radius
+                    ),
+                );
+            }
+            return Some(press_out(w, feet, b.pos, view(w).map(|(_, v)| v.pos)));
+        }
+        Some(stand)
     }
 
     /// One tick of a strike at enderman `id`: the weapon in hand, a swing when it is ready.

@@ -2694,3 +2694,45 @@ fn a_takeoff_with_the_bot_ahead_of_the_head_is_dodged_from_its_first_tick() {
     with_dragon(&mut scan, [0.5, 66.0, 0.5], 6, 0.0);
     assert_eq!(dragon::knock_risk(&scan, feet), None);
 }
+
+#[test]
+fn recovery_never_stands_in_a_cloud_it_is_pressed_out_away_from_the_dragon() {
+    // Wall 54: race 46099479836 lane 7, at 8 health in a cloud 0.1 off with no dodge cell,
+    // recovery stood (and in water, where a body goes nowhere without a jump); 8 to 2, dead.
+    let set = |w: &mut World, cells: &[(i32, i32, i32)], k: BlockKind| {
+        for c in cells {
+            w.step(&Event::Packet(S2c::BlockUpdate {
+                pos: *c,
+                state: state(k),
+            }));
+        }
+    };
+    // In a pit two deep (no dodge cell), the cloud on the feet: pressed, never a stand.
+    let feet = [12.5, 62.0, 0.5];
+    let mut w = end_at(feet);
+    set(&mut w, &[(12, 62, 0), (12, 63, 0)], BlockKind::Air);
+    cloud(&mut w, 50, feet, 3.0);
+    w.player.health = Some(8.0);
+    let mut p = Plan::new(Aim::Race);
+    p.bunker = Some([60, FLOOR - 4, 60]);
+    let c = p.recover_step(&w, 0).expect("recovering");
+    assert!(c.forward, "pressed out, never a stand: {c:?}");
+    assert!(
+        p.events_since(0)
+            .iter()
+            .any(|e| e.what == "recover: pressed out of the breath at [12, 62, 0]"),
+        "{:?}",
+        p.events_since(0)
+    );
+    // The middle on the feet: the way away from the dragon (at -x), so +x (yaw -90); in water,
+    // a jump.
+    let open = [12.5, 64.0, 0.5];
+    let mut o = end_at(open);
+    set(&mut o, &[(12, 64, 0)], BlockKind::Water);
+    let c = dragon::press_out(&o, open, open, Some([-20.5, 70.0, 0.5]));
+    assert!((c.yaw + 90.0).abs() < 1.0, "{c:?}");
+    assert!(c.jump, "swims in water: {c:?}");
+    // Off the middle: straight away from it (+z, yaw 0).
+    let c = dragon::press_out(&o, open, [12.5, 64.0, -1.5], None);
+    assert!(c.yaw.abs() < 1.0, "{c:?}");
+}
