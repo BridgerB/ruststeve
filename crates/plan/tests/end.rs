@@ -80,6 +80,8 @@ fn set(w: &mut World, c: (i32, i32, i32), k: BlockKind) {
 /// The arrival platform over the void: 5x5 obsidian at y 48 (E1's measure of this seed).
 fn platform(pos: [f64; 3]) -> World {
     let mut w = world(0, 4..=7, pos);
+    // Just arrived: the stage is the End's.
+    w.stage_reached = Some(world::stage::Stage::End);
     for x in 98..=102 {
         for z in -2..=2 {
             set(&mut w, (x, 48, z), BlockKind::Obsidian);
@@ -265,8 +267,10 @@ fn end_stone_under_the_sky_is_the_island_and_the_bot_walks_to_the_bunker_site() 
     let w = world(4, 0..=7, [60.5, 64.0, 0.5]);
     let mut p = racer();
     p.step(&w);
+    // Past the crystals (this world's stage): resumed, the island taken as reached.
     assert!(
-        noted(&p, "end: on the island at (60, 64, 0)"),
+        noted(&p, "end: on the island at (60, 64, 0)")
+            || noted(&p, "end: resumed at (60, 64, 0), past the island"),
         "{:?}",
         notes(&p)
     );
@@ -501,7 +505,8 @@ fn up_a_pillar_with_no_crystal_left_the_crystals_task_brings_the_bot_down() {
         p.step(&w);
     }
     assert!(
-        noted(&p, "end: up a pillar at (20, 74, 0)"),
+        noted(&p, "end: up a pillar at (20, 74, 0)")
+            || noted(&p, "end: up a spike or pillar at (20, 74, 0)"),
         "{:?}",
         notes(&p)
     );
@@ -1828,4 +1833,35 @@ fn the_drowning_guard_waits_for_low_air_and_never_holds_against_a_cloud() {
     let mut p = racer();
     p.end.bridged = true;
     assert!(p.drown_guard(&w, 0).is_none(), "{:?}", notes(&p));
+}
+
+#[test]
+fn a_resume_on_a_spike_top_past_the_island_never_bridges() {
+    // Race 46108868213 lane 3: resumed on the stand atop spike [42, 0] at (42.5, 82, 3.5), taken
+    // for a fresh arrival, a sky bridge west at y 81, knocked off at 1,360, dead at 1,420.
+    let mut w = world(0, 0..=7, [42.5, 82.0, 3.5]);
+    for y in 0..=81 {
+        set(&mut w, (42, y, 3), BlockKind::Obsidian);
+    }
+    w.stage_reached = Some(world::stage::Stage::Crystals);
+    let mut p = racer();
+    let _ = p.end_task(&w, 0);
+    assert!(p.end.bridged && p.end.arrived);
+    assert!(
+        noted(&p, "end: resumed at (42, 82, 3), past the island"),
+        "{:?}",
+        notes(&p)
+    );
+    for not in ["end: bridge west from", "end: pillar up", "end: arrived at"] {
+        assert!(!noted(&p, not), "{not}: {:?}", notes(&p));
+    }
+    // Up a spike: E4's task asked first (its step-off or descent, noted as its own).
+    assert!(plan::spikes::on_spike(&w, (42, 82, 3)));
+    assert!(
+        p.events
+            .iter()
+            .any(|e| e.what.starts_with("spikes:") || e.what.starts_with("end: up a spike")),
+        "{:?}",
+        notes(&p)
+    );
 }
