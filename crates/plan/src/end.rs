@@ -1004,17 +1004,19 @@ impl Plan {
         }
         // 2. The bunker (after the crystals).
         let Some(b) = self.bunker.map(|[x, y, z]| (x, y, z)) else {
-            // >>> E5 (wall 56): the fight never waits on a bunker. With the dragon down on its
-            // perch, or no site found, the fight begins with none (race 46101740935 lane 1:
-            // every crystal gone at 3,900, "no bunker site" 55 from the fountain to 16,840, the
-            // dragon at 190 and never fought).
-            if crate::dragon::view(w).is_some_and(|(_, v)| crate::dragon::grounded(&v))
-                || self.end.site_walks >= SITE_WALKS
+            let site = self.bunker_site(w, feet, tick);
+            // >>> E5 (wall 56): the fight never waits on a bunker. With no site task, the dragon
+            // down on its perch or the site's walks spent, the fight begins with none (race
+            // 46101740935 lane 1: every crystal gone at 3,900, "no bunker site" 55 from the
+            // fountain to 16,840, the dragon at 190 and never fought).
+            if site.is_none()
+                && (crate::dragon::view(w).is_some_and(|(_, v)| crate::dragon::grounded(&v))
+                    || self.end.site_walks >= SITE_WALKS)
             {
                 return self.end_dragon(w, tick);
             }
             // <<< E5
-            return self.bunker_site(w, feet, tick);
+            return site;
         };
         let door = *self.end.door.get_or_insert((1, 0));
         let (_, roof, door_cells) = bunker_cells(b, door);
